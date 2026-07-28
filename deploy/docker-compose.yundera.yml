@@ -1,0 +1,167 @@
+name: newsdesk
+
+# Yundera AppStore packaging. Follows the house pattern (see e.g.
+# Apps/AnnasTorrents in Yundera/AppStore): an AppShield sidecar terminates
+# OIDC/Authelia SSO and proxies to a backend that carries no Caddy labels and
+# is only reachable on the internal `pcs` network.
+#
+# NOTE: behind AppShield the user is already authenticated, so Newsdesk's own
+# password login is a second gate. Trusting the sidecar's authenticated
+# identity (and skipping the local login) is a follow-up — see
+# IMPLEMENTATION.md section 9, "optional OIDC via casaos-oidc-bridge".
+
+services:
+  # ── AppShield sidecar (public) ──────────────────────────────────────
+  newsdesk:
+    image: ghcr.io/yundera/appshield:2.0.6
+    container_name: newsdesk
+    # AppShield builds its OIDC redirect URIs from os.hostname(), and the
+    # auth-registrar attests the app name via the container's PTR record —
+    # container_name and hostname must both equal the app name.
+    hostname: newsdesk
+    restart: unless-stopped
+    user: "root"
+    expose:
+      - "80"
+    labels:
+      caddy_0: newsdesk-${APP_DOMAIN}
+      caddy_0.import: gateway_tls
+      caddy_0.reverse_proxy: "{{upstreams 80}}"
+      caddy_1: newsdesk-${APP_PUBLIC_IP_DASH}.nip.io
+      caddy_1.import: gateway_tls
+      caddy_1.reverse_proxy: "{{upstreams 80}}"
+      caddy_2: newsdesk-${APP_PUBLIC_IP_DASH}.sslip.io
+      caddy_2.reverse_proxy: "{{upstreams 80}}"
+    environment:
+      BACKEND_HOST: "newsdesk-backend"
+      BACKEND_PORT: "8080"
+      LISTEN_PORT: "80"
+      OIDC_REGISTRAR_URL: "http://auth-registrar:9092"
+      REDIRECT_HOST_SUFFIXES: "${APP_DOMAIN},${APP_PUBLIC_IP_DASH}.nip.io,${APP_PUBLIC_IP_DASH}.sslip.io"
+      CREDENTIAL_VALIDATE_URL: "http://casaos-oidc-bridge:8090/validate"
+    depends_on:
+      - newsdesk-backend
+    networks:
+      - pcs
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    cpu_shares: 80
+
+  # ── Newsdesk (protected) ────────────────────────────────────────────
+  # On the pcs network so it can reach the Beacon aggregator by service name
+  # for both the inference port and mcp-driver delivery targets.
+  newsdesk-backend:
+    image: ghcr.io/worph/newsdesk:0.1.0
+    container_name: newsdesk-backend
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      NEWSDESK_DATA_DIR: /data
+      NEWSDESK_PORT: "8080"
+      # First boot only; change it from the app afterwards.
+      NEWSDESK_ADMIN_PASSWORD: "${NEWSDESK_ADMIN_PASSWORD:-}"
+      TZ: $TZ
+    volumes:
+      # newsdesk.db plus, on first boot only, a seed config.yaml.
+      - /DATA/AppData/newsdesk/data/:/data
+    networks:
+      - pcs
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          memory: 128M
+
+networks:
+  pcs:
+    name: pcs
+    external: true
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: newsdesk
+  webui_port: 80
+  index: /
+  # Docker would otherwise create the bind mount as root:root and the
+  # non-root runtime user could not write the database. Hardcoded 1000:1000
+  # because CasaOS install-time substitution strips ${VAR:-default} fallbacks.
+  pre-install-cmd: |
+    mkdir -p /DATA/AppData/newsdesk/data &&
+    chown -R 1000:1000 /DATA/AppData/newsdesk/data
+  author: Yundera Team
+  category: Productivity
+  tags: ["automation", "personal"]
+  developer: worph
+  store_app_id: newsdesk
+  icon: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Newsdesk/icon.png
+  thumbnail: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Newsdesk/thumbnail.png
+  title:
+    en_us: Newsdesk
+  tagline:
+    en_us: An editorial desk for automated news — nothing publishes without you.
+    fr_fr: Une rédaction pour vos actualités automatisées, rien ne part sans vous.
+  description:
+    en_us: |
+      **Sources push in, an LLM proposes what is worth saying and where, you edit
+      and approve, and only then does anything get published.**
+
+      Newsdesk is the spine of a news pipeline: a source registry, semantic
+      deduplication, routing against a written editorial charter, per-destination
+      drafting, and a full audit trail. Every integration stays outside the app —
+      stringers file free text over HTTP, inference runs through a pluggable port,
+      and delivery goes out through MCP targets — so Newsdesk holds **no
+      third-party credentials at all**.
+
+      **What it does:**
+      - Reads free-text reports from any source that can POST
+      - Finds the stories in them and kills duplicates *semantically* — the same
+        release arriving from three sources becomes one story with three sources
+      - Routes each story by a charter you write in prose, not configuration
+      - Drafts once per destination, in that destination's voice
+      - Puts a human approval between every draft and every channel
+
+      **Nothing auto-posts.** Publishing is a plain send of the exact bytes you
+      approved — no model runs after approval.
+    fr_fr: |
+      **Vos sources alimentent le desk, un LLM propose ce qui mérite d'être dit et
+      où, vous corrigez et validez, et rien n'est publié avant cela.**
+
+      Newsdesk est la colonne vertébrale d'un pipeline d'actualités : registre de
+      sources, déduplication sémantique, routage selon une charte éditoriale
+      rédigée en français courant, rédaction par destination et journal d'audit
+      complet. Toutes les intégrations restent à l'extérieur de l'application, si
+      bien que Newsdesk ne détient **aucun identifiant tiers**.
+
+      **Rien n'est publié automatiquement.** La publication envoie exactement le
+      texte que vous avez validé, sans aucun modèle après validation.
+  tips:
+    before_install:
+      en_us: |
+        **First boot**
+        - Set `NEWSDESK_ADMIN_PASSWORD` before installing, or read the generated
+          password from the container logs on first start.
+        - Open **Configuration** and write your charter, at least one persona, and
+          at least one target. A publish target must pin its destination (channel
+          id, chat id) as a literal — Newsdesk refuses to save otherwise, because
+          an unpinned destination silently posts to the bridge default.
+
+        **Wiring it up**
+        - Point your stringers (n8n workflows, scripts, anything that can POST) at
+          `/api/v1/submissions` with the ingest token shown on the Configuration
+          screen.
+        - Delivery targets call MCP tools through your Beacon aggregator on the
+          internal `pcs` network — Newsdesk never stores Discord or Telegram
+          credentials.
+
+        **Data** lives in `/DATA/AppData/newsdesk/data` as a single SQLite file.
+        Backup is copying one file.
+
+x-compose-app:
+  webui-host: newsdesk-${domain}

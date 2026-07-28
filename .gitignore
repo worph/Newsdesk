@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+data/
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.local
+coverage/
+.DS_Store
+server/public/
+server/drizzle/meta/_journal.json.bak

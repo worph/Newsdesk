@@ -1,0 +1,127 @@
+# Newsdesk configuration.
+#
+# Copy this to your data volume as `config.yaml` BEFORE first boot and it will
+# be imported once. After that the database is the source of truth and this
+# file is ignored — edit the live configuration from the Configuration screen,
+# so a stale file can never compete with a target you edited in the app.
+
+# ── The charter ─────────────────────────────────────────────────────────────
+# Routing policy as prose: the standing brief a section editor would give. The
+# director reads this together with the target list and proposes where each
+# story runs. Write it the way you would tell a colleague, not as configuration.
+charter: |
+  GitHub commits and dev-facing changes go to #dev: developers, technical
+  register, what changed and why it matters to someone building on the platform.
+
+  AppStore app releases go to #news for a general public: what the app is, who
+  it is for, what is new.
+
+  Curated external links go to SN news, audience French self-hosters.
+
+  Anything touching internals that is not public-ready goes to Nextcloud Talk,
+  internal only.
+
+# ── Where MCP tools live ────────────────────────────────────────────────────
+mcp_endpoints:
+  - id: beacon
+    name: yunderalabs beacon
+    url: http://beacon-backend:9300/mcp
+
+# ── Voices ──────────────────────────────────────────────────────────────────
+# A persona is voice, audience and rules, stored once and shared by targets.
+personas:
+  - id: alicia
+    name: Alicia
+    voice: concise, technical, anti-hype; never invents a claim
+    audience: self-hosters and homelabbers running a personal cloud
+    rules: |
+      No marketing superlatives. Always say who should care and why.
+      Structure: what it is, what it is for, what is new, why it matters, how to get it.
+
+  - id: internal-tech
+    name: Internal tech
+    voice: dry, factual, no framing for an outside reader
+    audience: the team, who already have all the context
+    rules: Assume the reader knows the codebase. Lead with the change itself.
+
+# ── Who files ───────────────────────────────────────────────────────────────
+# Sources describe what arrives, not how to fetch it — fetching lives in your
+# stringers (n8n workflows and the like), which POST free text to
+# /api/v1/submissions with the ingest token.
+#
+#   report    a written report, any depth ("what changed this week, with evidence")
+#   timeline  dated entries; a watermark stops old ones being re-examined
+#   snapshot  current state; diffed against the previous snapshot
+#   idea      the internal idea box
+sources:
+  - id: idea-box
+    name: Idea box
+    kind: idea
+
+  - id: github-appstore
+    name: GitHub stringer — AppStore releases
+    kind: report
+    hint: user-facing releases only
+
+  - id: korben
+    name: korben.info
+    kind: timeline
+    hint: self-hosting, privacy, homelab, open source, self-hosted AI only
+
+# ── Where it goes ───────────────────────────────────────────────────────────
+# Each key under `args` mirrors an argument of the MCP tool and is one of:
+#
+#   literal   a pinned scalar               channelId: "1514993197082742814"
+#   derived   a template over the story     footer: "{{story.url}}"
+#   slot      written by the writer,        title: { slot: text, label: Headline }
+#             edited and approved by you
+#
+# A publish target MUST pin its destination as a literal. Destination arguments
+# are optional in the live MCP schemas, so an unpinned one does not error — it
+# silently posts to whatever default the bridge is configured with. Newsdesk
+# refuses to save such a target.
+#
+# Exactly one slot is `primary: true` — the document that gets the full editor
+# and the assistant.
+targets:
+  - id: discord-test
+    name: Discord #news-test
+    description: test channel, general public audience, announcements of app releases
+    role: publish
+    driver: mcp
+    persona: alicia
+    endpoint: beacon
+    tool: discord-mcp__send_embed
+    args:
+      channelId: "1514993197082742814"
+      timestamp: true
+      # send_embed has no `url` parameter — the canonical link goes in the
+      # footer, or as a markdown link inside the body.
+      footer: "{{story.url}}"
+      title:
+        slot: text
+        label: Headline
+        max: 256
+      description:
+        slot: markdown
+        label: Body
+        max: 4096
+        primary: true
+
+  # Uncomment once the argument keys are confirmed against a live call — that
+  # Beacon exposes tool descriptions without schemas.
+  # - id: nextcloud-tech
+  #   name: Nextcloud Talk — internal
+  #   description: internal technical notes, not for an outside audience
+  #   role: publish
+  #   driver: mcp
+  #   persona: internal-tech
+  #   endpoint: beacon
+  #   tool: nextcloud-talk-mcp__talk_send_message
+  #   destination_key: token
+  #   args:
+  #     token: "zyqsdmhx"
+  #     message:
+  #       slot: markdown
+  #       label: Note
+  #       primary: true

@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+dist
+**/dist
+data
+*.db
+*.db-shm
+*.db-wal
+.git
+.env
+coverage
+# Must be **/ — a stale build-info copied into the image makes `tsc --build`
+# think it is up to date, so it emits nothing and dist/ never appears.
+*.tsbuildinfo
+**/*.tsbuildinfo

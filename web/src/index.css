@@ -1,0 +1,31 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-desk-50: oklch(0.985 0.002 250);
+  --color-desk-100: oklch(0.96 0.003 250);
+  --color-desk-200: oklch(0.91 0.005 250);
+  --color-desk-300: oklch(0.83 0.007 250);
+  --color-desk-400: oklch(0.66 0.01 250);
+  --color-desk-500: oklch(0.53 0.012 250);
+  --color-desk-600: oklch(0.42 0.012 250);
+  --color-desk-700: oklch(0.33 0.012 250);
+  --color-desk-800: oklch(0.24 0.011 250);
+  --color-desk-900: oklch(0.17 0.01 250);
+  --color-desk-950: oklch(0.12 0.008 250);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-desk-50 text-desk-900 antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    @apply bg-desk-950 text-desk-100;
+  }
+}
