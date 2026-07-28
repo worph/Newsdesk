@@ -51,6 +51,35 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
+export interface SubmissionRow {
+  id: string
+  sourceId: string
+  sourceName: string | null
+  kind: string
+  status: string
+  outcome: string | null
+  filedAt: string | null
+  receivedAt: string
+  textLength: number
+  consideredChars: number
+}
+
+export interface SubmissionDetail extends Omit<SubmissionRow, 'textLength' | 'consideredChars'> {
+  text: string
+  considered: string | null
+  refs: Record<string, unknown> | null
+}
+
+export interface EventRow {
+  id: number
+  at: string
+  level: 'debug' | 'info' | 'warn' | 'error'
+  actor: string
+  code: string
+  message: string
+  detail: unknown
+}
+
 export const api = {
   me: () => request<{ authenticated: boolean }>('/api/v1/auth/me'),
   login: (password: string) =>
@@ -70,4 +99,25 @@ export const api = {
     }),
   rotateIngestToken: () =>
     request<{ ingestToken: string }>('/api/v1/config/ingest-token/rotate', { method: 'POST' }),
+
+  listSubmissions: (params: { source?: string; limit?: number } = {}) => {
+    const search = new URLSearchParams()
+    if (params.source) search.set('source', params.source)
+    if (params.limit) search.set('limit', String(params.limit))
+    const qs = search.toString()
+    return request<{ submissions: SubmissionRow[] }>(`/api/v1/submissions${qs ? `?${qs}` : ''}`)
+  },
+  getSubmission: (id: string) => request<{ submission: SubmissionDetail }>(`/api/v1/submissions/${id}`),
+  postIdea: (body: { text: string; url?: string }) =>
+    request<{ result: { id: string; note: string } }>('/api/v1/ideas', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  listEvents: (params: { level?: string; limit?: number } = {}) => {
+    const search = new URLSearchParams()
+    if (params.level) search.set('level', params.level)
+    if (params.limit) search.set('limit', String(params.limit))
+    const qs = search.toString()
+    return request<{ events: EventRow[] }>(`/api/v1/events${qs ? `?${qs}` : ''}`)
+  },
 }

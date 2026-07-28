@@ -3,6 +3,8 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { api } from './api'
 import { Layout } from './components/Layout'
 import { Config } from './pages/Config'
+import { Ideas } from './pages/Ideas'
+import { Inbox } from './pages/Inbox'
 import { Login } from './pages/Login'
 
 export function App() {
@@ -26,7 +28,9 @@ export function App() {
     <Layout>
       <Routes>
         <Route path="/config" element={<Config />} />
-        <Route path="*" element={<Navigate to="/config" replace />} />
+        <Route path="/inbox" element={<Inbox />} />
+        <Route path="/ideas" element={<Ideas />} />
+        <Route path="*" element={<Navigate to="/inbox" replace />} />
       </Routes>
     </Layout>
   )

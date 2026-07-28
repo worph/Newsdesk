@@ -12,6 +12,7 @@ import {
 import type { Db } from '../db/index.js'
 import { checkHealth } from '../health.js'
 import { getSetting, getOrCreateSecret, SETTING } from '../settings.js'
+import { registerIngestRoutes } from './ingest.js'
 
 const loginBody = z.object({ password: z.string().min(1) })
 const configBody = z.object({ yaml: z.string() })
@@ -22,6 +23,8 @@ function issuesReply(issues: ConfigIssue[]) {
 }
 
 export function registerRoutes(app: FastifyInstance, db: Db, version: string): void {
+  registerIngestRoutes(app, db)
+
   // ── health ────────────────────────────────────────────────────────────────
   // Unauthenticated on purpose: a container orchestrator has no session, and
   // the app must be diagnosable when everything else is broken.
