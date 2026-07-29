@@ -1,0 +1,113 @@
+# Newsdesk development stack.
+#
+#   docker compose -f deploy/dev/docker-compose.dev.yml up --build
+#
+# Expects a Beacon MCP aggregator already running on the host at
+# http://localhost:3000/mcp/ — see docs/dev-stack.md. Nothing here starts one:
+# the whole design point is that inference and delivery live outside the app.
+#
+# Services:
+#   api      Fastify with tsx watch, on :8080
+#   web      Vite dev server, on :5173, proxying /api to api
+#   korben   a stringer polling korben.info and filing timeline submissions
+#   n8n      optional (--profile n8n), to validate the production stringer path
+
+name: newsdesk-dev
+
+x-dev-source: &dev-source
+  build:
+    context: ../..
+    dockerfile: deploy/dev/Dockerfile.dev
+  volumes:
+    - ../..:/app
+    # Anonymous volume: keeps the container's own node_modules (with the
+    # correctly-built native binding) from being hidden by the bind mount above.
+    - /app/node_modules
+  extra_hosts:
+    # How a container reaches the Beacon running on your machine.
+    - "host.docker.internal:host-gateway"
+
+services:
+  api:
+    <<: *dev-source
+    container_name: newsdesk-dev-api
+    command: npm run dev --workspace server
+    ports:
+      # Host port is configurable: 8080 is a popular thing to already be running.
+      - "${API_PORT:-8080}:8080"
+    environment:
+      NEWSDESK_DATA_DIR: /data
+      NEWSDESK_PORT: "8080"
+      NEWSDESK_LOG_LEVEL: "${NEWSDESK_LOG_LEVEL:-info}"
+      # Dev-only fixed credentials, consumed on first boot. Real deployments
+      # generate both; here they are fixed so the stringer below can be
+      # configured from this same file.
+      NEWSDESK_ADMIN_PASSWORD: "${NEWSDESK_ADMIN_PASSWORD:-newsdesk}"
+      NEWSDESK_INGEST_TOKEN: "${NEWSDESK_INGEST_TOKEN:-dev-ingest-token}"
+      # A bind mount backed by a Windows filesystem delivers file contents but
+      # not inotify events, so watch mode silently never fires. Polling costs a
+      # little CPU; set to "false" if your mount delivers events natively.
+      CHOKIDAR_USEPOLLING: "${CHOKIDAR_USEPOLLING:-true}"
+    volumes:
+      - ../..:/app
+      - /app/node_modules
+      - dev-data:/data
+      # Seed configuration, imported on first boot only. Delete the volume to
+      # re-seed: docker compose -f … down -v
+      - ./config.yaml:/data/config.yaml:ro
+
+  web:
+    <<: *dev-source
+    container_name: newsdesk-dev-web
+    command: npm run dev --workspace web
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    environment:
+      VITE_API_TARGET: http://api:8080
+      CHOKIDAR_USEPOLLING: "${CHOKIDAR_USEPOLLING:-true}"
+    depends_on:
+      - api
+
+  # The default stringer: real korben data, no UI to click through, and the
+  # polling logic lives in git rather than in a workflow database.
+  korben:
+    <<: *dev-source
+    container_name: newsdesk-dev-korben
+    command: node deploy/dev/stringers/korben.mjs
+    environment:
+      NEWSDESK_URL: http://api:8080
+      NEWSDESK_INGEST_TOKEN: "${NEWSDESK_INGEST_TOKEN:-dev-ingest-token}"
+      SOURCE_ID: korben
+      FEED_URL: https://korben.info/feed
+      # Poll often in dev; the watermark makes re-filing an overlapping window
+      # free, so a short interval costs nothing.
+      INTERVAL_SECONDS: "${KORBEN_INTERVAL_SECONDS:-900}"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # Optional, for validating the production shape:
+  #   docker compose -f deploy/dev/docker-compose.dev.yml --profile n8n up
+  # Then import deploy/dev/n8n/korben-stringer.json and activate it.
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: newsdesk-dev-n8n
+    profiles: ["n8n"]
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_SECURE_COOKIE: "false"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_RUNNERS_ENABLED: "true"
+      GENERIC_TIMEZONE: "${TZ:-Europe/Paris}"
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./n8n:/workflows:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - api
+
+volumes:
+  dev-data:
+  n8n-data:

@@ -12,6 +12,13 @@ async function main(): Promise<void> {
   runMigrations(db, env.migrationsDir)
 
   const sessionSecret = getOrCreateSecret(db, SETTING.sessionSecret)
+
+  // A fixed token lets a stringer be configured from the same compose file
+  // that starts the desk. First boot only — rotating from the UI afterwards
+  // wins, so a stale env var can never silently resurrect an old token.
+  if (env.ingestToken && !getSetting(db, SETTING.ingestToken)) {
+    setSetting(db, SETTING.ingestToken, env.ingestToken)
+  }
   const ingestToken = getOrCreateSecret(db, SETTING.ingestToken)
 
   const app = await buildApp({

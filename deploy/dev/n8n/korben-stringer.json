@@ -1,0 +1,87 @@
+{
+  "name": "korben stringer → Newsdesk",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "3a1f0f2e-0000-4000-8000-000000000001",
+      "name": "Every 30 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-260, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://korben.info/feed",
+        "options": {}
+      },
+      "id": "3a1f0f2e-0000-4000-8000-000000000002",
+      "name": "Read korben feed",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [-40, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Fold every feed entry into ONE timeline submission.\n//\n// Each entry must begin with an ISO date: that is what lets Newsdesk trim the\n// window against this source's watermark. Everything in the window is filed —\n// a stringer does not judge newsworthiness, the charter does.\n\nconst stripTags = (html = '') =>\n  String(html).replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();\n\nconst entries = items\n  .map((item) => item.json)\n  .map((entry) => ({\n    title: stripTags(entry.title),\n    link: entry.link || entry.guid || '',\n    at: entry.isoDate || (entry.pubDate ? new Date(entry.pubDate).toISOString() : null),\n    summary: stripTags(entry.contentSnippet || entry.content || entry.description || ''),\n  }))\n  .filter((entry) => entry.title && entry.at)\n  .slice(0, 15);\n\nif (entries.length === 0) {\n  return [];\n}\n\nconst text = entries\n  .map((entry) => {\n    const summary = entry.summary ? `\\n  ${entry.summary.slice(0, 600)}` : '';\n    const link = entry.link ? `\\n  ${entry.link}` : '';\n    return `- ${entry.at} ${entry.title}${summary}${link}`;\n  })\n  .join('\\n');\n\nreturn [{ json: { source_id: 'korben', kind: 'timeline', text } }];"
+      },
+      "id": "3a1f0f2e-0000-4000-8000-000000000003",
+      "name": "Format as a timeline",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [180, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8080/api/v1/submissions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer dev-ingest-token"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "3a1f0f2e-0000-4000-8000-000000000004",
+      "name": "File to Newsdesk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [400, 0]
+    }
+  ],
+  "connections": {
+    "Every 30 minutes": {
+      "main": [[{ "node": "Read korben feed", "type": "main", "index": 0 }]]
+    },
+    "Read korben feed": {
+      "main": [[{ "node": "Format as a timeline", "type": "main", "index": 0 }]]
+    },
+    "Format as a timeline": {
+      "main": [[{ "node": "File to Newsdesk", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "newsdesk-dev"
+  },
+  "tags": []
+}

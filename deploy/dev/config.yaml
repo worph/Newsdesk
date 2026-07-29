@@ -1,0 +1,72 @@
+# Development configuration, seeded into the dev stack on first boot.
+# Delete the volume to re-seed:  docker compose -f deploy/dev/docker-compose.dev.yml down -v
+
+charter: |
+  Curated external links about self-hosting, privacy, homelabs, open source and
+  self-hosted AI go to the test channel, written for French-speaking
+  self-hosters: what it is, why it matters to someone running their own server.
+
+  Skip anything that is pure consumer tech news, a deal or a sponsored post.
+
+  AppStore app releases go to the test channel too, written for a general
+  public: what the app is, who it is for, what is new.
+
+mcp_endpoints:
+  # A Beacon aggregator running on YOUR machine, not in this stack.
+  # The trailing slash matters: /mcp answers 307 to /mcp/.
+  - id: beacon
+    name: local beacon
+    url: http://host.docker.internal:3000/mcp/
+
+personas:
+  - id: alicia
+    name: Alicia
+    voice: concise, technical, anti-hype; never invents a claim
+    audience: self-hosters and homelabbers running a personal cloud
+    rules: |
+      No marketing superlatives. Always say who should care and why.
+      Structure: what it is, what it is for, what is new, why it matters, how to get it.
+
+sources:
+  - id: idea-box
+    name: Idea box
+    kind: idea
+
+  - id: korben
+    name: korben.info
+    kind: timeline
+    hint: self-hosting, privacy, homelab, open source, self-hosted AI only
+
+  - id: github-appstore
+    name: GitHub stringer — AppStore releases
+    kind: report
+    hint: user-facing releases only
+
+targets:
+  # The local Beacon aggregates claude-code and chrome-devtools only — there is
+  # no discord-mcp on it — so this target is configured but cannot actually
+  # deliver in dev. It exists so the director has somewhere to route stories and
+  # the writer has a persona and slots to fill. Publishing is Phase 3.
+  - id: discord-test
+    name: Discord #news-test
+    description: |
+      Test channel. General audience of self-hosters. Announcements of app
+      releases and curated external links worth their attention.
+    role: publish
+    driver: mcp
+    persona: alicia
+    endpoint: beacon
+    tool: discord-mcp__send_embed
+    args:
+      channelId: "1514993197082742814"
+      timestamp: true
+      footer: "{{story.url}}"
+      title:
+        slot: text
+        label: Headline
+        max: 256
+      description:
+        slot: markdown
+        label: Body
+        max: 4096
+        primary: true

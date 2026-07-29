@@ -10,6 +10,9 @@ export interface Env {
   host: string
   /** Initial password, consumed on first boot only. */
   adminPassword: string | undefined
+  /** Initial ingest token, consumed on first boot only. Lets a stringer be
+   *  configured from the same compose file that starts the desk. */
+  ingestToken: string | undefined
   logLevel: string
 }
 
@@ -26,6 +29,7 @@ export function loadEnv(): Env {
     port: Number(process.env.NEWSDESK_PORT ?? 8080),
     host: process.env.NEWSDESK_HOST ?? '0.0.0.0',
     adminPassword: process.env.NEWSDESK_ADMIN_PASSWORD,
+    ingestToken: process.env.NEWSDESK_INGEST_TOKEN,
     logLevel: process.env.NEWSDESK_LOG_LEVEL ?? 'info',
   }
 }
