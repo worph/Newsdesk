@@ -47,6 +47,10 @@ docker compose -f deploy/dev/docker-compose.dev.yml up --build
 | `api` | http://localhost:8080 | Fastify under `tsx watch`, hot reload |
 | `korben` | — | files korben.info as a `timeline` submission every 15 minutes |
 
+Filed material flows straight through: ingest trims it, the director opens stories and proposes
+routes, the writer drafts one piece per route, and each draft waits for you at **Review**. Nothing
+reaches a destination without an explicit approval of that exact payload.
+
 Sign in with **`newsdesk`** (override with `NEWSDESK_ADMIN_PASSWORD`). The ingest token is fixed to
 `dev-ingest-token` (override with `NEWSDESK_INGEST_TOKEN`) so the stringer can be configured from
 the same compose file.
@@ -79,11 +83,18 @@ Change the seed and want it applied? `down -v` and start again.
 
 ### After changing a dependency
 
-`package.json` changes need the image rebuilt, because dependencies are baked in:
+`package.json` changes need the image rebuilt **and the `node_modules` volume replaced**:
 
 ```bash
-docker compose -f deploy/dev/docker-compose.dev.yml up --build
+docker compose -f deploy/dev/docker-compose.dev.yml up -d --build --renew-anon-volumes
 ```
+
+> **`--build` on its own is not enough**, and this will cost you twenty minutes if you let it.
+> `node_modules` lives in an anonymous volume, and Compose *carries anonymous volumes over* when it
+> recreates a container. So the image gets the new dependency, the container keeps the old volume
+> mounted on top of it, and the module stays missing — with a `Cannot find module` that looks
+> exactly like a broken install. `--renew-anon-volumes` drops that volume; the named `dev-data`
+> volume, and therefore the database, is untouched.
 
 ## Watching it work
 
@@ -131,19 +142,42 @@ docker compose -f deploy/dev/docker-compose.dev.yml stop korben
 The two paths fulfil the **same contract**, so nothing downstream can tell them apart. That is the
 point of the exercise: prove the production path, then go back to the fast one.
 
+## Inference
+
+The desk's thinking runs through `claude-code__query_claude` on your Beacon. **That instance has to
+be logged in.** If it is not, every director, writer and assistant call comes back with the string
+`Not logged in · Please run /login` — which parses as "no JSON found" and fails the job rather than
+saying anything about auth.
+
+Check it before blaming the desk:
+
+```bash
+curl -sL -X POST http://localhost:3000/mcp/ \
+  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"claude-code__query_claude","arguments":{"prompt":"reply with OK"}}}' \
+  | tail -c 200
+```
+
+Log in as the user the MCP server runs as — for the `claude-code-container` stack that is the
+`claude` user, via the web terminal on <http://localhost:8080> or
+`docker exec -it -u claude claude-code claude`. A root login persists to a different home and leaves
+`query_claude` still unauthenticated.
+
 ## Limits
 
 Honest account of what this stack cannot do yet:
 
-- **No real publish target.** A local Beacon has no `discord-mcp`, and delivery is not implemented
-  until Phase 3 anyway. `deploy/dev/config.yaml` configures a `discord-test` target so the director
-  has somewhere to route stories and the writer has slots to fill, but nothing can actually be sent.
-  A local payload sink is the natural way to close this once the delivery port exists.
-- **`claude-code` is effectively single-session.** Overlapping calls answer `409`. The job queue
-  handles it with backoff, so work waits rather than failing — but prompt iteration in dev is
-  serialised, and that is expected rather than broken.
-- **No PWA.** Install, push and the share target arrive in Phase 5. The Idea box already accepts the
-  share-target query parameters (`/ideas?url=…&text=…`), so that path can be exercised by hand.
+- **No real publish target — but a local sink stands in.** A local Beacon has no `discord-mcp`, so
+  the `discord-test` target cannot actually send. `deploy/dev/config.yaml` therefore also configures
+  a `local-sink` target on the `builtin` driver: approval, payload freeze, the ledger and the event
+  log all behave exactly as they would against Discord, and the payload is recorded in the
+  `PUBLISHED` event for inspection. It is the whole path minus the wire.
+- **No real Android install or push.** Both need HTTPS. Everything up to that works on `localhost`
+  (which counts as a secure context), so the service worker registers and a subscription can be
+  made, but verifying a real notification on a phone needs the deployed `nsl.sh` instance.
+- **The dev UI is reachable only by a hostname Vite accepts.** `allowedHosts: true` is set in
+  `web/vite.config.ts` so a container or LAN name works; without it Vite answers
+  `Blocked request. This host is not allowed`.
 
 ## Troubleshooting
 
@@ -155,5 +189,8 @@ Honest account of what this stack cannot do yet:
 | korben logs `422 … unknown source "korben"` | the seed config did not import — check the `api` logs on first boot, then `down -v` and retry |
 | Inbox empty and korben quiet | it waits for `/healthz` before its first run; check `docker compose … logs korben` |
 | Native module errors on start | `node_modules` leaked in from the host — `down -v` and rebuild |
+| `Cannot find module` after adding a dependency | the anonymous `node_modules` volume survived the rebuild — add `--renew-anon-volumes` |
+| Every job fails with "no JSON object found" | the `claude-code` behind your Beacon is not logged in — see [Inference](#inference) |
+| `Blocked request. This host … is not allowed` | Vite is rejecting the Host header — `allowedHosts` in `web/vite.config.ts` |
 | Edits do nothing, no restart logged | file watching is not firing — confirm `CHOKIDAR_USEPOLLING=true` reached the container |
 | `failed to bind host port … address already in use` | something already owns `8080` or `5173` — set `API_PORT` / `WEB_PORT` |

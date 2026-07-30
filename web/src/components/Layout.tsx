@@ -4,21 +4,21 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 
 /**
- * The four groups from IMPLEMENTATION.md section 7. Only Config and Log exist
- * yet; the desk screens arrive with the director and the review surface, so
- * they are shown disabled rather than hidden — the shape of the app should be
- * legible from the first commit.
+ * The four groups from IMPLEMENTATION.md section 7. Screens that are not built
+ * yet are shown disabled rather than hidden — the shape of the app should be
+ * legible even where it is unfinished.
  */
 const NAV = [
   { group: 'Desk', items: [
-    { to: '/queue', label: 'Queue', ready: false },
+    { to: '/queue', label: 'Queue', ready: true },
     { to: '/ideas', label: 'Idea box', ready: true },
   ] },
-  { group: 'Archive', items: [{ to: '/stories', label: 'Stories', ready: false }] },
+  { group: 'Archive', items: [{ to: '/stories', label: 'Stories', ready: true }] },
   { group: 'Tuning', items: [{ to: '/config', label: 'Configuration', ready: true }] },
   { group: 'Operations', items: [
     { to: '/inbox', label: 'Inbox', ready: true },
     { to: '/log', label: 'Log', ready: false },
+    { to: '/settings', label: 'Settings', ready: true },
   ] },
 ]
 

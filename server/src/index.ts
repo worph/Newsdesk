@@ -4,6 +4,11 @@ import { setPassword } from './auth.js'
 import { importConfigFileOnFirstBoot, isUnconfigured } from './config/store.js'
 import { openDb, runMigrations } from './db/index.js'
 import { loadEnv } from './env.js'
+import { directorHandler } from './pipeline/director.js'
+import { enqueue, JobQueue } from './pipeline/queue.js'
+import { writerHandler } from './pipeline/writer.js'
+import { publishHandler } from './ports/delivery/index.js'
+import { createInferenceDriver } from './ports/inference/index.js'
 import { getOrCreateSecret, getSetting, SETTING, setSetting } from './settings.js'
 
 async function main(): Promise<void> {
@@ -21,11 +26,33 @@ async function main(): Promise<void> {
   }
   const ingestToken = getOrCreateSecret(db, SETTING.ingestToken)
 
+  // The desk owns its clock: queue state lives in rows, so a restart resumes
+  // whatever was in flight rather than stranding it.
+  const queue = new JobQueue(db)
+  const driver = () => createInferenceDriver(db)
+  const enqueueWriter = (publicationId: string) => {
+    enqueue(db, 'write', publicationId)
+  }
+
+  queue.register('direct', directorHandler(driver, { enqueueWriter }))
+  queue.register('write', writerHandler(driver))
+  queue.register('publish', publishHandler())
+
   const app = await buildApp({
     db,
     sessionSecret,
     publicDir: env.publicDir,
     logLevel: env.logLevel,
+    receiveOptions: {
+      enqueueDirector: (submissionId) => {
+        enqueue(db, 'direct', submissionId)
+      },
+      enqueuePublish: (publicationId) => {
+        enqueue(db, 'publish', publicationId)
+      },
+      enqueueWriter,
+      driver,
+    },
   })
 
   // First boot: set the admin password from the environment, or mint a random
@@ -54,6 +81,18 @@ async function main(): Promise<void> {
   }
 
   setSetting(db, 'last_boot', new Date().toISOString())
+
+  queue.start()
+
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(signal, () => {
+      void (async () => {
+        await queue.stop()
+        await app.close()
+        process.exit(0)
+      })()
+    })
+  }
 
   await app.listen({ port: env.port, host: env.host })
   app.log.info(

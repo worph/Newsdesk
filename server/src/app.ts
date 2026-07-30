@@ -5,6 +5,7 @@ import fastifyStatic from '@fastify/static'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { registerRoutes } from './api/routes.js'
 import type { Db } from './db/index.js'
+import type { RouteOptions } from './api/routes.js'
 
 export const VERSION = '0.1.0'
 
@@ -13,6 +14,8 @@ export interface AppOptions {
   sessionSecret: string
   publicDir: string
   logLevel?: string
+  /** Wires ingest and approval to the queue. Absent means nothing is enqueued. */
+  receiveOptions?: RouteOptions
 }
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
@@ -25,7 +28,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   await app.register(cookie, { secret: options.sessionSecret })
 
-  registerRoutes(app, options.db, VERSION)
+  registerRoutes(app, options.db, VERSION, options.receiveOptions ?? {})
 
   // The SPA is built into server/public. Absent in dev, where Vite serves it.
   if (existsSync(options.publicDir)) {

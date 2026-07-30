@@ -8,6 +8,7 @@ import { listEvents } from '../events.js'
 import {
   receiveSubmissions,
   submissionsBodySchema,
+  type ReceiveOptions,
   type SubmissionInput,
 } from '../ports/ingest/receive.js'
 
@@ -38,7 +39,11 @@ function resolveIdeaSource(db: Db, requested?: string): { id: string } | { error
   return { id: ideaSources[0]!.id }
 }
 
-export function registerIngestRoutes(app: FastifyInstance, db: Db): void {
+export function registerIngestRoutes(
+  app: FastifyInstance,
+  db: Db,
+  receiveOptions: ReceiveOptions = {},
+): void {
   // ── filing ────────────────────────────────────────────────────────────────
 
   app.post('/api/v1/submissions', { preHandler: requireIngestToken(db) }, async (request, reply) => {
@@ -48,7 +53,7 @@ export function registerIngestRoutes(app: FastifyInstance, db: Db): void {
     }
 
     const inputs: SubmissionInput[] = Array.isArray(parsed.data) ? parsed.data : [parsed.data]
-    const results = receiveSubmissions(db, inputs)
+    const results = receiveSubmissions(db, inputs, receiveOptions)
 
     // An unknown source is the filer's mistake and worth a non-2xx, but only
     // when nothing at all landed — a mixed batch should not lose its good rows.
@@ -77,14 +82,18 @@ export function registerIngestRoutes(app: FastifyInstance, db: Db): void {
     if ('error' in source) return reply.code(422).send({ error: source.error })
 
     const text = parsed.data.url ? `${parsed.data.text}\n\n${parsed.data.url}` : parsed.data.text
-    const [result] = receiveSubmissions(db, [
-      {
-        source_id: source.id,
-        kind: 'idea',
-        text,
-        ...(parsed.data.url ? { refs: { url: parsed.data.url } } : {}),
-      },
-    ])
+    const [result] = receiveSubmissions(
+      db,
+      [
+        {
+          source_id: source.id,
+          kind: 'idea',
+          text,
+          ...(parsed.data.url ? { refs: { url: parsed.data.url } } : {}),
+        },
+      ],
+      receiveOptions,
+    )
     return reply.code(201).send({ result })
   })
 

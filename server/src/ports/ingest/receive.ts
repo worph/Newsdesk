@@ -30,9 +30,22 @@ export type SubmissionInput = z.infer<typeof submissionInputSchema>
 export interface ReceiveResult {
   id: string | null
   sourceId: string
-  status: 'RECEIVED' | 'PROCESSED' | 'REJECTED'
+  status: 'RECEIVED' | 'PROCESSING' | 'PROCESSED' | 'REJECTED'
   considered: boolean
   note: string
+}
+
+export interface ReceiveOptions {
+  /**
+   * Called for a submission that carries something new, inside the same
+   * transaction that stores it — so a queued job can never reference a
+   * submission that was rolled back.
+   *
+   * Absent means no director is wired (tests, or a desk configured without
+   * inference); the submission then finishes as PROCESSED, exactly as it did
+   * before Phase 2.
+   */
+  enqueueDirector?: (submissionId: string) => void
 }
 
 /**
@@ -40,7 +53,11 @@ export interface ReceiveResult {
  * state of their own: re-filing an overlapping window is expected and safe,
  * which is what lets them stay dumb.
  */
-export function receiveSubmission(db: Db, input: SubmissionInput): ReceiveResult {
+export function receiveSubmission(
+  db: Db,
+  input: SubmissionInput,
+  options: ReceiveOptions = {},
+): ReceiveResult {
   const source = db.select().from(schema.sources).where(eq(schema.sources.id, input.source_id)).get()
 
   if (!source) {
@@ -93,6 +110,11 @@ export function receiveSubmission(db: Db, input: SubmissionInput): ReceiveResult
     lastSnapshot: source.lastSnapshot,
   })
 
+  // Nothing new is a finished submission, not a pending one: only material
+  // the director has not seen is worth an inference call.
+  const hasNewMaterial = result.considered.length > 0
+  const willDirect = hasNewMaterial && options.enqueueDirector !== undefined
+
   db.transaction((tx) => {
     tx.insert(schema.submissions)
       .values({
@@ -103,13 +125,12 @@ export function receiveSubmission(db: Db, input: SubmissionInput): ReceiveResult
         considered: result.considered || null,
         refs: input.refs ? JSON.stringify(input.refs) : null,
         filedAt: input.filed_at ?? null,
-        // Nothing new is a finished submission, not a pending one. Phase 2
-        // moves the "something new" case to PROCESSING and enqueues the
-        // director.
-        status: 'PROCESSED',
-        outcome: result.note,
+        status: willDirect ? 'PROCESSING' : 'PROCESSED',
+        outcome: willDirect ? `${result.note} — queued for the director` : result.note,
       })
       .run()
+
+    if (willDirect) options.enqueueDirector?.(id)
 
     if (result.watermark !== undefined || result.snapshot !== undefined) {
       tx.update(schema.sources)
@@ -132,12 +153,16 @@ export function receiveSubmission(db: Db, input: SubmissionInput): ReceiveResult
   return {
     id,
     sourceId: source.id,
-    status: 'PROCESSED',
+    status: willDirect ? 'PROCESSING' : 'PROCESSED',
     considered: result.considered.length > 0,
     note: result.note,
   }
 }
 
-export function receiveSubmissions(db: Db, inputs: SubmissionInput[]): ReceiveResult[] {
-  return inputs.map((input) => receiveSubmission(db, input))
+export function receiveSubmissions(
+  db: Db,
+  inputs: SubmissionInput[],
+  options: ReceiveOptions = {},
+): ReceiveResult[] {
+  return inputs.map((input) => receiveSubmission(db, input, options))
 }

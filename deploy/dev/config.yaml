@@ -70,3 +70,27 @@ targets:
         label: Body
         max: 4096
         primary: true
+
+  # The local sink. Nothing leaves the machine: the delivery port records the
+  # payload and reports success, so approval, the payload freeze, the ledger and
+  # the event log can all be exercised end to end without a real destination.
+  # A dev Beacon has no discord-mcp, and a target that silently did nothing
+  # would be indistinguishable from one that worked.
+  - id: local-sink
+    name: Local sink
+    description: |
+      Development sink. Route a story here to watch the whole path — draft,
+      review, approve, publish — without sending anything anywhere.
+    role: publish
+    driver: builtin
+    persona: alicia
+    args:
+      title:
+        slot: text
+        label: Headline
+        max: 256
+      description:
+        slot: markdown
+        label: Body
+        max: 4096
+        primary: true

@@ -80,6 +80,112 @@ export interface EventRow {
   detail: unknown
 }
 
+export interface StoryRoute {
+  id: string
+  targetId: string
+  targetName: string | null
+  status: string
+  origin: string
+  routeReason: string | null
+  angle: string | null
+}
+
+export interface StoryRow {
+  id: string
+  title: string
+  summary: string
+  url: string | null
+  status: string
+  dedupVerdict: string
+  dedupReason: string | null
+  relatedStoryId: string | null
+  relatedTitle: string | null
+  label: string | null
+  dropReason: string | null
+  createdAt: string
+  sourceCount: number
+  routes: StoryRoute[]
+}
+
+export interface StoryDetail {
+  story: StoryRow & { comparedIds: string[]; proposedRoutes: unknown[]; body: string | null }
+  submissions: Array<{
+    id: string
+    sourceId: string
+    sourceName: string | null
+    kind: string
+    receivedAt: string
+    considered: string | null
+  }>
+  routes: StoryRoute[]
+  related: { id: string; title: string; summary: string } | null
+}
+
+export interface JobRow {
+  id: string
+  kind: string
+  refId: string
+  status: string
+  attempts: number
+  runAfter: string
+  lastError: string | null
+  createdAt: string
+}
+
+export interface SlotDef {
+  slot: 'text' | 'markdown' | 'image' | 'link'
+  label: string
+  max?: number
+  optional: boolean
+  primary: boolean
+  hint?: string
+}
+
+export interface PayloadPreview {
+  payload: Record<string, unknown>
+  authored: string[]
+  fixed: string[]
+  missing: string[]
+}
+
+export interface PublicationDetail {
+  publication: {
+    id: string
+    storyId: string
+    targetId: string
+    status: string
+    origin: string
+    routeReason: string | null
+    angle: string | null
+    slots: Record<string, string>
+    payload: string | null
+    error: string | null
+    approvedAt: string | null
+    publishedAt: string | null
+  }
+  story: { id: string; title: string; summary: string; url: string | null; dedupVerdict: string }
+  target: { id: string; name: string; description: string; role: string; driver: string; tool: string | null }
+  slotSpec: Record<string, SlotDef>
+  preview: PayloadPreview
+  siblings: Array<{ id: string; targetId: string; status: string }>
+}
+
+export interface DraftVersion {
+  id: string
+  publicationId: string
+  slots: Record<string, string>
+  origin: 'writer' | 'assistant' | 'human'
+  createdAt: string
+}
+
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  versionId: string | null
+  createdAt: string
+}
+
 export const api = {
   me: () => request<{ authenticated: boolean }>('/api/v1/auth/me'),
   login: (password: string) =>
@@ -113,6 +219,61 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  listStories: (params: { status?: string; q?: string; limit?: number } = {}) => {
+    const search = new URLSearchParams()
+    if (params.status) search.set('status', params.status)
+    if (params.q) search.set('q', params.q)
+    if (params.limit) search.set('limit', String(params.limit))
+    const qs = search.toString()
+    return request<{ stories: StoryRow[] }>(`/api/v1/stories${qs ? `?${qs}` : ''}`)
+  },
+  getStory: (id: string) => request<StoryDetail>(`/api/v1/stories/${id}`),
+  addRoute: (id: string, body: { target_id: string; reason?: string }) =>
+    request<{ id: string }>(`/api/v1/stories/${id}/routes`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  rerunStory: (id: string) =>
+    request<{ queued: number }>(`/api/v1/stories/${id}/rerun`, { method: 'POST' }),
+  listJobs: () => request<{ stats: Record<string, number>; jobs: JobRow[] }>('/api/v1/jobs'),
+  getPublication: (id: string) => request<PublicationDetail>(`/api/v1/publications/${id}`),
+  savePublication: (id: string, slots: Record<string, string>) =>
+    request<{ slots: Record<string, string>; versionId: string }>(`/api/v1/publications/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ slots }),
+    }),
+  listVersions: (id: string) =>
+    request<{ versions: DraftVersion[] }>(`/api/v1/publications/${id}/versions`),
+  revertPublication: (id: string, versionId: string) =>
+    request<{ slots: Record<string, string> }>(`/api/v1/publications/${id}/revert`, {
+      method: 'POST',
+      body: JSON.stringify({ version_id: versionId }),
+    }),
+  getPayload: (id: string) =>
+    request<PayloadPreview & { frozen: boolean }>(`/api/v1/publications/${id}/payload`),
+  approvePublication: (id: string) =>
+    request<{ status: string; payload: Record<string, unknown> }>(
+      `/api/v1/publications/${id}/approve`,
+      { method: 'POST' },
+    ),
+  rejectPublication: (id: string, reason?: string) =>
+    request<{ status: string }>(`/api/v1/publications/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify(reason ? { reason } : {}),
+    }),
+  retryPublication: (id: string) =>
+    request<{ queued: boolean }>(`/api/v1/publications/${id}/retry`, { method: 'POST' }),
+  listChat: (id: string) => request<{ messages: ChatMessage[] }>(`/api/v1/publications/${id}/chat`),
+  sendChat: (id: string, message: string) =>
+    request<{ reply: string; slots: Record<string, string>; versionId: string }>(
+      `/api/v1/publications/${id}/chat`,
+      { method: 'POST', body: JSON.stringify({ message }) },
+    ),
+  pushKey: () => request<{ publicKey: string }>('/api/v1/push/key'),
+  subscribePush: (body: { endpoint: string; keys: { p256dh: string; auth: string }; ua?: string }) =>
+    request<{ id: string }>('/api/v1/push/subscribe', { method: 'POST', body: JSON.stringify(body) }),
+  unsubscribePush: (endpoint: string) =>
+    request<{ ok: true }>('/api/v1/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) }),
   listEvents: (params: { level?: string; limit?: number } = {}) => {
     const search = new URLSearchParams()
     if (params.level) search.set('level', params.level)

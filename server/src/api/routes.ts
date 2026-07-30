@@ -11,8 +11,13 @@ import {
 } from '../config/store.js'
 import type { Db } from '../db/index.js'
 import { checkHealth } from '../health.js'
+import { getOrCreateVapidKeys, removeSubscription, saveSubscription } from '../push.js'
 import { getSetting, getOrCreateSecret, SETTING } from '../settings.js'
 import { registerIngestRoutes } from './ingest.js'
+import { registerPublicationRoutes } from './publications.js'
+import { registerStoryRoutes } from './stories.js'
+import type { ReceiveOptions } from '../ports/ingest/receive.js'
+import type { InferenceDriver } from '../ports/inference/types.js'
 
 const loginBody = z.object({ password: z.string().min(1) })
 const configBody = z.object({ yaml: z.string() })
@@ -22,8 +27,48 @@ function issuesReply(issues: ConfigIssue[]) {
   return { error: 'configuration rejected', issues }
 }
 
-export function registerRoutes(app: FastifyInstance, db: Db, version: string): void {
-  registerIngestRoutes(app, db)
+export interface RouteOptions extends ReceiveOptions {
+  enqueuePublish?: (publicationId: string) => void
+  enqueueWriter?: (publicationId: string) => void
+  driver?: () => InferenceDriver
+}
+
+export function registerRoutes(
+  app: FastifyInstance,
+  db: Db,
+  version: string,
+  receiveOptions: RouteOptions = {},
+): void {
+  registerIngestRoutes(app, db, receiveOptions)
+  registerStoryRoutes(app, db, receiveOptions.enqueueDirector, receiveOptions.enqueueWriter)
+  registerPublicationRoutes(app, db, receiveOptions.enqueuePublish, receiveOptions.driver)
+
+  // ── push ──────────────────────────────────────────────────────────────────
+  // The public key is needed by the service worker before it can subscribe.
+  app.get('/api/v1/push/key', { preHandler: requireSession }, async () => ({
+    publicKey: getOrCreateVapidKeys(db).publicKey,
+  }))
+
+  app.post('/api/v1/push/subscribe', { preHandler: requireSession }, async (request, reply) => {
+    const parsed = z
+      .object({
+        endpoint: z.string().url(),
+        keys: z.object({ p256dh: z.string().min(1), auth: z.string().min(1) }),
+        ua: z.string().optional(),
+      })
+      .safeParse(request.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid subscription' })
+
+    const id = saveSubscription(db, parsed.data)
+    return reply.code(201).send({ id })
+  })
+
+  app.post('/api/v1/push/unsubscribe', { preHandler: requireSession }, async (request, reply) => {
+    const parsed = z.object({ endpoint: z.string().url() }).safeParse(request.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'endpoint required' })
+    removeSubscription(db, parsed.data.endpoint)
+    return { ok: true }
+  })
 
   // ── health ────────────────────────────────────────────────────────────────
   // Unauthenticated on purpose: a container orchestrator has no session, and
