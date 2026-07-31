@@ -192,3 +192,136 @@ describe('validateConfig on an already-parsed config', () => {
     expect(validateConfig(config satisfies Config)).toEqual([])
   })
 })
+
+/**
+ * Reporting tools are declared like outlets, so they get the outlet checks —
+ * plus tighter ones, because the desk calls these unattended. Listing a tool is
+ * the authorization to call it, and that is only safe while the model cannot
+ * influence which tool or which arguments.
+ */
+describe('the reporting block', () => {
+  const withReporting = (reporting: unknown) =>
+    issuesFor((c) => {
+      c.reporting = reporting
+    })
+
+  const valid = {
+    search: [{ endpoint: 'beacon', tool: 'searxng__search', args: { query: '{{ call.query }}', count: 6 } }],
+    fetch: [{ endpoint: 'beacon', tool: 'browser-mcp__get_page_text', args: { url: '{{ call.url }}' } }],
+  }
+
+  it('accepts a well-formed block', () => {
+    expect(withReporting(valid)).toEqual([])
+  })
+
+  it('is optional — a desk with no reporting phase is a valid desk', () => {
+    expect(parseConfig(baseConfig()).config.reporting).toBeUndefined()
+  })
+
+  it('applies its defaults so a minimal block still has bounds', () => {
+    const { config } = parseConfig({ ...(baseConfig() as object), reporting: valid })
+    expect(config.reporting).toMatchObject({ enabled: true, kinds: ['tip'], max_rounds: 3, max_fetches: 8 })
+  })
+
+  it('rejects a tool pointed at an endpoint that does not exist', () => {
+    const issues = withReporting({
+      ...valid,
+      search: [{ endpoint: 'ghost', tool: 's', args: { query: '{{ call.query }}' } }],
+    })
+    expect(issues).toContainEqual(expect.stringContaining('unknown endpoint "ghost"'))
+  })
+
+  /**
+   * A search tool that never interpolates the query would run the same constant
+   * search forever and look like it was working — the worst kind of broken.
+   */
+  it('rejects a search tool that never uses the query', () => {
+    const issues = withReporting({ ...valid, search: [{ endpoint: 'beacon', tool: 's', args: { q: 'immich' } }] })
+    expect(issues).toContainEqual(expect.stringContaining('must interpolate "{{ call.query }}"'))
+  })
+
+  it('rejects a fetch tool that never uses the url', () => {
+    const issues = withReporting({ ...valid, fetch: [{ endpoint: 'beacon', tool: 'f', args: { page: 1 } }] })
+    expect(issues).toContainEqual(expect.stringContaining('must interpolate "{{ call.url }}"'))
+  })
+
+  it('refuses an authoring slot in a reporting argument', () => {
+    const issues = withReporting({
+      ...valid,
+      search: [
+        {
+          endpoint: 'beacon',
+          tool: 's',
+          args: { query: '{{ call.query }}', extra: { slot: 'text', label: 'Anything' } },
+        },
+      ],
+    })
+    expect(issues).toContainEqual(expect.stringContaining('cannot be an authoring slot'))
+  })
+
+  it('refuses a story template — a reporting call knows nothing about a story', () => {
+    const issues = withReporting({
+      ...valid,
+      search: [{ endpoint: 'beacon', tool: 's', args: { query: '{{ call.query }}', ref: '{{ story.url }}' } }],
+    })
+    expect(issues).toContainEqual(expect.stringContaining('unknown template root "story"'))
+  })
+
+  it('refuses an enabled phase that declares no tools at all', () => {
+    const issues = withReporting({ enabled: true, search: [], fetch: [] })
+    expect(issues).toContainEqual(expect.stringContaining('could do nothing'))
+  })
+
+  it('says nothing about a phase that is switched off', () => {
+    expect(withReporting({ enabled: false, search: [], fetch: [] })).toEqual([])
+  })
+})
+
+/**
+ * The http driver: the address is the one thing a model must never be able to
+ * influence, so it is a literal and only `args` may interpolate.
+ */
+describe('an http reporting tool', () => {
+  const withReporting = (reporting: unknown) =>
+    issuesFor((c) => {
+      c.reporting = reporting
+    })
+
+  const httpSearch = {
+    driver: 'http',
+    url: 'http://searxng-backend:8080/search',
+    args: { q: '{{ call.query }}', format: 'json' },
+  }
+
+  it('needs no endpoint — it is not going through a Beacon', () => {
+    expect(withReporting({ search: [httpSearch], fetch: [] })).toEqual([])
+  })
+
+  it('rejects one with no url', () => {
+    const issues = withReporting({ search: [{ driver: 'http', args: { q: '{{ call.query }}' } }], fetch: [] })
+    expect(issues).toContainEqual(expect.stringContaining('needs a url'))
+  })
+
+  /**
+   * The realistic version of this mistake is putting the query in the address
+   * rather than in args. It parses as a url, so only the semantic check catches
+   * it — and it must, because an address a model can shape is an address that
+   * can be pointed somewhere else.
+   */
+  it('refuses a templated address, so nothing can redirect the desk', () => {
+    const issues = withReporting({
+      search: [{ ...httpSearch, url: 'http://searxng-backend:8080/search?q={{ call.query }}' }],
+      fetch: [],
+    })
+    expect(issues).toContainEqual(expect.stringContaining('the url must be a literal'))
+  })
+
+  it('still insists the query is actually used', () => {
+    const issues = withReporting({ search: [{ ...httpSearch, args: { q: 'immich' } }], fetch: [] })
+    expect(issues).toContainEqual(expect.stringContaining('must interpolate "{{ call.query }}"'))
+  })
+
+  it('accepts a search-only phase — a reporter that cannot open pages still files leads', () => {
+    expect(withReporting({ enabled: true, search: [httpSearch], fetch: [] })).toEqual([])
+  })
+})

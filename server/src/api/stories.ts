@@ -37,6 +37,7 @@ export interface StoryRow {
   relatedTitle: string | null
   label: string | null
   dropReason: string | null
+  holdReason: string | null
   createdAt: string
   sourceCount: number
   placements: Array<{
@@ -153,6 +154,7 @@ export function registerStoryRoutes(
       relatedTitle: row.relatedStoryId ? (titles.get(row.relatedStoryId) ?? null) : null,
       label: row.label,
       dropReason: row.dropReason,
+      holdReason: row.holdReason,
       createdAt: row.createdAt,
       sourceCount: counts.get(row.id) ?? 0,
       placements: placements.get(row.id) ?? [],
@@ -248,7 +250,7 @@ export function registerStoryRoutes(
     // A story spiked for having no placements is no longer spiked once you add one.
     if (story.status === 'DROPPED' && story.dedupVerdict !== 'DUPLICATE') {
       db.update(schema.stories)
-        .set({ status: 'PLACED', dropReason: null })
+        .set({ status: 'PLACED', dropReason: null, holdReason: null })
         .where(eq(schema.stories.id, id))
         .run()
     }

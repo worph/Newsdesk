@@ -205,7 +205,76 @@ function parseFetchedTitle(text: string): string | undefined {
   return heading?.[1]?.trim()
 }
 
+/**
+ * A page big enough to be a denial of service is not a page worth reporting
+ * from, and the excerpt handed to a prompt is a few thousand characters anyway.
+ */
+const MAX_RESPONSE_CHARS = 2_000_000
+
+/**
+ * Call a plain HTTP tool.
+ *
+ * This exists because a search engine is an HTTP API, not an MCP server —
+ * SearXNG answers `/search?q=…&format=json` and there is no bridge worth
+ * writing for it. Symmetry with the `webhook` delivery driver, which is there
+ * for the same reason on the way out.
+ *
+ * The address is a configured literal (validateConfig refuses a template in
+ * it), so only the query string is ever variable. Failures are classified as
+ * McpError so the fallback chain treats both drivers identically: a timeout or
+ * a 5xx is worth trying the next candidate, a 4xx is a configuration error and
+ * must surface.
+ */
+export async function callHttp(
+  tool: ReportingTool,
+  args: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<{ text: string }> {
+  if (!tool.url) throw new McpError('http reporting tool has no url', false)
+
+  const url = new URL(tool.url)
+  let body: string | undefined
+  const headers: Record<string, string> = { accept: 'application/json, text/plain;q=0.9, */*;q=0.8' }
+
+  if (tool.method === 'POST') {
+    body = JSON.stringify(args)
+    headers['content-type'] = 'application/json'
+  } else {
+    for (const [key, value] of Object.entries(args)) {
+      if (value === undefined || value === null) continue
+      // URLSearchParams encodes, which is why a query with spaces or an
+      // ampersand in it cannot break out of the parameter.
+      url.searchParams.set(key, typeof value === 'string' ? value : String(value))
+    }
+  }
+
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method: tool.method,
+      headers,
+      ...(body !== undefined ? { body } : {}),
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+  } catch (err) {
+    // Unreachable, refused, timed out — all worth trying the next candidate.
+    throw new McpError(err instanceof Error ? err.message : String(err), true)
+  }
+
+  if (!response.ok) {
+    const retryable = response.status >= 500 || response.status === 429
+    throw new McpError(`${tool.url} answered ${response.status}`, retryable, response.status)
+  }
+
+  const text = await response.text()
+  return { text: text.slice(0, MAX_RESPONSE_CHARS) }
+}
+
 function endpointFor(db: Db, tool: ReportingTool) {
+  // validateConfig requires an endpoint on an mcp tool; a missing one here is a
+  // row that was edited around it, and is a configuration error either way.
+  if (!tool.endpoint) throw new McpError('mcp reporting tool has no endpoint', false)
+
   const row = db
     .select()
     .from(schema.mcpEndpoints)
@@ -215,7 +284,23 @@ function endpointFor(db: Db, tool: ReportingTool) {
   return attachAuth(db, row)
 }
 
-export function createMcpReportingTools(db: Db, reporting: Reporting): ReportingTools {
+/**
+ * How a tool is actually reached. Injectable so the fallback chain can be
+ * tested without a Beacon — the delivery port's lack of a seam like this is
+ * exactly why it has no tests.
+ */
+export type ToolCaller = (
+  endpoint: ReturnType<typeof attachAuth>,
+  tool: string,
+  args: Record<string, unknown>,
+  options: { timeoutMs: number },
+) => Promise<{ text: string }>
+
+export function createMcpReportingTools(
+  db: Db,
+  reporting: Reporting,
+  call: ToolCaller = callTool,
+): ReportingTools {
   const timeoutMs = reporting.timeout_seconds * 1000
 
   /**
@@ -230,17 +315,16 @@ export function createMcpReportingTools(db: Db, reporting: Reporting): Reporting
   async function firstAnswer(
     role: 'search' | 'fetch',
     candidates: ReportingTool[],
-    call: Record<string, string>,
+    vars: Record<string, string>,
   ): Promise<string> {
     let lastError: string | undefined
     for (const candidate of candidates) {
       try {
-        const result = await callTool(
-          endpointFor(db, candidate),
-          candidate.tool,
-          renderCallArgs(candidate.args, call),
-          { timeoutMs },
-        )
+        const args = renderCallArgs(candidate.args, vars)
+        const result =
+          candidate.driver === 'http'
+            ? await callHttp(candidate, args, timeoutMs)
+            : await call(endpointFor(db, candidate), candidate.tool ?? '', args, { timeoutMs })
         return result.text
       } catch (err) {
         if (err instanceof McpError && !err.retryable) throw err

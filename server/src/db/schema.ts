@@ -141,7 +141,7 @@ export const stories = sqliteTable(
     summary: text('summary').notNull(),
     body: text('body'),
     url: text('url'),
-    status: text('status').notNull(), // PROPOSED|PLACED|DROPPED|NEEDS_CONTEXT|CLOSED
+    status: text('status').notNull(), // PROPOSED|PLACED|DROPPED|HELD|CLOSED
     dedupVerdict: text('dedup_verdict').notNull(), // NEW | DUPLICATE | UPDATE
     dedupReason: text('dedup_reason'),
     relatedStoryId: text('related_story_id'),
@@ -150,6 +150,8 @@ export const stories = sqliteTable(
     /** Coarse and cosmetic: sorts the queue, never filters. */
     label: text('label'),
     dropReason: text('drop_reason'),
+    /** Why a HELD story is held: what the filing did not carry. */
+    holdReason: text('hold_reason'),
     /** JSON snapshot of the managing editor's calls, kept for the override diff. */
     proposedPlacements: text('proposed_placements'),
     createdAt: text('created_at').notNull().default(now),

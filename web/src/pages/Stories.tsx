@@ -16,7 +16,7 @@ const FILTERS = [
   { key: 'all', label: 'All', status: undefined },
   { key: 'awaiting', label: 'Awaiting', status: 'PLACED' },
   { key: 'spiked', label: 'Spiked', status: 'DROPPED' },
-  { key: 'context', label: 'Needs context', status: 'NEEDS_CONTEXT' },
+  { key: 'held', label: 'Held', status: 'HELD' },
 ] as const
 
 export function Stories() {

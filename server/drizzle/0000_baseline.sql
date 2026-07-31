@@ -169,6 +169,7 @@ CREATE TABLE `stories` (
 	`compared_ids` text,
 	`label` text,
 	`drop_reason` text,
+	`hold_reason` text,
 	`proposed_placements` text,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) NOT NULL
 );

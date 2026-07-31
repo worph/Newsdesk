@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f990c8c8-eb17-4f26-b015-0b9f19ee6045",
+  "id": "36871865-5ffa-4a9e-bc8e-094ece9cc6f2",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "charter": {
@@ -1133,6 +1133,13 @@
         },
         "drop_reason": {
           "name": "drop_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "hold_reason": {
+          "name": "hold_reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

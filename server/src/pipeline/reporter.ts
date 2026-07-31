@@ -119,6 +119,15 @@ function renderCatalogue(catalogue: SearchHit[], opened: Set<string>): string {
     .join('\n')
 }
 
+/** Search hits nobody opened. Leads for the file prompt, never citable. */
+function renderUnread(catalogue: SearchHit[], opened: Set<string>): string {
+  const unread = catalogue.filter((hit) => !opened.has(hit.url))
+  if (unread.length === 0) return '(nothing — every result was either read or there were none)'
+  return unread
+    .map((hit) => `- ${hit.title}\n  ${hit.url}${hit.snippet ? `\n  ${hit.snippet}` : ''}`)
+    .join('\n')
+}
+
 /**
  * A search of last resort, for a first round where the model proposed nothing.
  *
@@ -194,7 +203,8 @@ export async function runReporter(
       notes.push(`out of time after ${round - 1} round(s)`)
       break
     }
-    if (!tools.canSearch && searched) break
+    // With no search tool there is nothing for a second round to steer.
+    if (round > 1 && !tools.canSearch) break
 
     const steer: Steer = await runStructured(db, driver, {
       purpose: 'reporter',
@@ -245,11 +255,15 @@ export async function runReporter(
     if (steer.done || budgetLeft() <= 0) break
   }
 
-  // A last pass over anything found in the final round but never opened, so the
-  // dossier is not written blind to the search that produced it.
-  for (const hit of catalogue) {
-    if (outOfTime() || budgetLeft() <= 0) break
-    if (!opened.has(hit.url)) await retrieve(hit.url, 'search')
+  // If the loop ended having read nothing, open the top of the catalogue anyway
+  // rather than filing blind on a search nobody looked at. Only in that case:
+  // fetching every hit "just in case" would spend the budget on relevance the
+  // model already declined.
+  if (!pages.some((page) => page.ok)) {
+    for (const hit of catalogue) {
+      if (outOfTime() || budgetLeft() <= 0) break
+      await retrieve(hit.url, 'search')
+    }
   }
 
   // 3. Record what was retrieved BEFORE filing, so citations can be checked
@@ -273,6 +287,11 @@ export async function runReporter(
     prompt: fillPrompt(loadPrompt('reporter-file'), {
       TIP: tip,
       CORPUS: renderCorpus(pages),
+      // Hits nobody opened still tell the reporter what exists, which is the
+      // difference between a useful lead and a blank one when there is no
+      // fetch tool configured. The prompt is explicit that they cannot be
+      // cited, and demoteUncited enforces it regardless.
+      CATALOGUE: renderUnread(catalogue, opened),
       TODAY: new Date(now()).toISOString().slice(0, 10),
     }),
     schema: dossierSchema,

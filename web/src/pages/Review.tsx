@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import MarkdownIt from 'markdown-it'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, type SlotDef } from '../api'
-import { CopyDesk } from '../components/CopyDesk'
+import { PublicationCopyDesk } from '../components/CopyDesk'
+import { DocumentEditor } from '../components/DocumentEditor'
 import { Badge, when } from '../components/StoryCard'
 
 /**
@@ -14,9 +14,6 @@ import { Badge, when } from '../components/StoryCard'
  * running in two places is two independent decisions, which the outlet strip
  * at the top has to make unmistakable.
  */
-
-// html: false — a draft is markdown and is never injected as raw HTML.
-const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
 function Field({
   slotKey,
@@ -71,6 +68,12 @@ export function Review() {
     queryKey: ['publication', id],
     queryFn: () => api.getPublication(id!),
     enabled: Boolean(id),
+    // Approval is a 202: it freezes the payload and queues the send, and the
+    // worker flips the row to PUBLISHED a poll or two later. Without this the
+    // screen keeps showing "sending…" until a manual reload. The interval ends
+    // itself the moment the row settles, so nothing polls at rest.
+    refetchInterval: (query) =>
+      query.state.data?.publication.status === 'APPROVED' ? 2_000 : false,
   })
 
   const versions = useQuery({
@@ -121,7 +124,11 @@ export function Review() {
   }
 
   const { publication, story, outlet, slotSpec, siblings } = data
-  const settled = publication.status === 'PUBLISHED' || publication.status === 'REJECTED'
+  // APPROVED closes the desk with the rest: the payload is frozen and the send
+  // is queued, so there is nothing left here to change. FAILED stays open —
+  // fixing a bad send means editing and approving again.
+  const sending = publication.status === 'APPROVED'
+  const settled = sending || publication.status === 'PUBLISHED' || publication.status === 'REJECTED'
   const dirty = JSON.stringify(draft) !== JSON.stringify(publication.slots)
   const secondary = Object.entries(slotSpec).filter(([key]) => key !== primaryKey)
 
@@ -133,7 +140,9 @@ export function Review() {
 
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge>{publication.status.toLowerCase().replace(/_/g, ' ')}</Badge>
+          <Badge>
+            {sending ? 'approved — sending…' : publication.status.toLowerCase().replace(/_/g, ' ')}
+          </Badge>
           {publication.origin === 'human' && <Badge>placement added by you</Badge>}
           {publication.publishedAt && (
             <span className="text-xs text-desk-500">sent {when(publication.publishedAt)}</span>
@@ -200,52 +209,16 @@ export function Review() {
       )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-      {primaryKey && (
-        <section className="space-y-1.5">
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-xs font-medium tracking-wide text-desk-500 uppercase">
-              {slotSpec[primaryKey]?.label}
-            </h2>
-            <div className="flex items-center gap-3">
-              {slotSpec[primaryKey]?.max !== undefined && (
-                <span
-                  className={`font-mono text-[11px] ${
-                    (draft[primaryKey] ?? '').length > (slotSpec[primaryKey]?.max ?? 0)
-                      ? 'text-red-600'
-                      : 'text-desk-500'
-                  }`}
-                >
-                  {(draft[primaryKey] ?? '').length}/{slotSpec[primaryKey]?.max}
-                </span>
-              )}
-              <button
-                onClick={() => setPreview((p) => !p)}
-                className="text-xs text-desk-500 hover:text-desk-700"
-              >
-                {preview ? 'edit' : 'preview'}
-              </button>
-            </div>
-          </div>
+        {primaryKey && (
+          <DocumentEditor
+            label={slotSpec[primaryKey]?.label}
+            value={draft[primaryKey] ?? ''}
+            onChange={(next) => setDraft({ ...draft, [primaryKey]: next })}
+            {...(slotSpec[primaryKey]?.max !== undefined ? { max: slotSpec[primaryKey]!.max } : {})}
+          />
+        )}
 
-          {preview ? (
-            <div
-              className="prose-desk min-h-56 rounded-md border border-desk-200 px-3 py-2.5 text-sm dark:border-desk-800"
-              // Rendered by markdown-it with html:false, so any raw HTML in the
-              // draft is escaped rather than injected.
-              dangerouslySetInnerHTML={{ __html: md.render(draft[primaryKey] ?? '') }}
-            />
-          ) : (
-            <textarea
-              value={draft[primaryKey] ?? ''}
-              onChange={(event) => setDraft({ ...draft, [primaryKey]: event.target.value })}
-              rows={14}
-              className="w-full rounded-md border border-desk-200 bg-transparent px-3 py-2.5 font-mono text-sm outline-none focus:border-desk-400 dark:border-desk-800"
-            />
-          )}
-        </section>
-      )}
-
-        <CopyDesk
+        <PublicationCopyDesk
           publicationId={publication.id}
           disabled={settled}
           onSlots={(next) => setDraft(next)}
@@ -267,7 +240,7 @@ export function Review() {
           title={dirty ? 'Save your edits first — approval freezes what is sent' : undefined}
           className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
         >
-          {approve.isPending ? 'Approving…' : `Approve for ${outlet.name}`}
+          {approve.isPending || sending ? 'Sending…' : `Approve for ${outlet.name}`}
         </button>
 
         <button

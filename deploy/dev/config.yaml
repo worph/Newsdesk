@@ -94,3 +94,24 @@ outlets:
         label: Body
         max: 4096
         primary: true
+
+# ── Reporting ───────────────────────────────────────────────────────────────
+# Switched OFF in dev: the phase needs a search endpoint the dev stack can
+# actually reach, and our SearXNG lives on holyhorse behind the SSO gate, on a
+# `pcs` network this machine is not part of.
+#
+# To try it, run a SearXNG locally with the json format enabled (settings.yml:
+# `search: {formats: [html, json]}`) and uncomment the block below — the shape
+# is verified, only the host changes. Without it tips go straight to the
+# managing editor, unreported.
+#
+# reporting:
+#   enabled: true
+#   kinds: [tip]
+#   search:
+#     - driver: http
+#       url: http://host.docker.internal:8080/search
+#       args:
+#         q: "{{ call.query }}"
+#         format: json
+#   fetch: []

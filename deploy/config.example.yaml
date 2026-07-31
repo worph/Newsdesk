@@ -125,3 +125,61 @@ outlets:
   #       slot: markdown
   #       label: Note
   #       primary: true
+
+# ── Reporting ───────────────────────────────────────────────────────────────
+# The phase between a tip being filed and the managing editor reading it: the
+# desk searches, opens pages, and files a dossier of sourced claims and open
+# questions. Omit this whole block to switch the phase off — tips then go
+# straight to the managing editor.
+#
+# Listing a tool here IS the authorization to call it, unattended and without a
+# prompt. That is safe because the model never names a tool: it supplies a
+# query string, or a number from the catalogue the desk built. Which tool,
+# which address and which argument shape are literals, here. For an `http`
+# tool the url must be a literal — only `args` may interpolate, so nothing a
+# model produces can decide which host the desk talks to.
+#
+# Each role is an ordered fallback chain: a retryable failure (timeout, 5xx,
+# dead socket) moves to the next candidate, so put the fast one first and the
+# one that always works last. A 4xx or a bad tool name does NOT fall through —
+# that is a configuration error and must surface as one.
+reporting:
+  enabled: true
+  # Which filing kinds get reported. Stringers already have credentials and
+  # access, so by default only tips do.
+  kinds: [tip]
+  # Bounds enforced by the desk, not requested of the model. One worker runs
+  # the queue, so a runaway reporter would block everything behind it.
+  max_rounds: 3
+  max_fetches: 8
+  timeout_seconds: 60
+  wall_clock_seconds: 480
+
+  search:
+    # SearXNG on the same PCS, over the shared `pcs` network — same convention
+    # as the Beacon url above, and it bypasses the SSO gate that fronts the
+    # public hostname. Verified against searxng 2026.7.31 on 2026-07-31:
+    # `/search?q=…&format=json` returns {"query", "results":[{title,url,content}]}.
+    #
+    # `format: json` needs enabling on the instance — default SearXNG serves
+    # html only and answers 403. In its settings.yml:
+    #     search:
+    #       formats: [html, json]
+    - driver: http
+      url: http://searxng-backend:8080/search
+      args:
+        q: "{{ call.query }}"
+        format: json
+
+  # No fetch tool is configured here, because none of our Beacons carries one:
+  # a fetcher has to return page text in a SINGLE call, and chrome-devtools is
+  # navigate-then-read across two stateful calls. Without it the reporter still
+  # searches and still files — it just cannot open what it finds, so claims stay
+  # in `unknowns`. Add one and the phase is whole:
+  #
+  # fetch:
+  #   - driver: http
+  #     url: http://reader:3000/extract     # a single-call url -> text service
+  #     args:
+  #       url: "{{ call.url }}"
+  fetch: []

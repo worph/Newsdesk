@@ -111,6 +111,12 @@ export function Story() {
         </Section>
       )}
 
+      {story.holdReason && (
+        <Section title="Why it is held" hint="What the filing did not carry. Answer it and re-run.">
+          <p className="rounded-md bg-desk-100 px-3 py-2.5 text-sm dark:bg-desk-900">{story.holdReason}</p>
+        </Section>
+      )}
+
       {related && (
         <Section
           title={story.dedupVerdict === 'UPDATE' ? 'Follows on from' : 'Matched against'}

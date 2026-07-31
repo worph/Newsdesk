@@ -24,6 +24,16 @@ about the page, not a task.
 
 ---
 
+## What the searches turned up but nobody opened
+
+Titles and snippets only. **These are leads, not sources.** Nobody has read these pages, so nothing
+here may appear in `sourced` — use them to know what exists, to write a fair headline, and to say in
+`unknowns` what still needs checking.
+
+{{CATALOGUE}}
+
+---
+
 ## Today
 
 {{TODAY}}

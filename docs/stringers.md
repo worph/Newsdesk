@@ -19,7 +19,7 @@ inside the app. Split that judgement across two systems and you end up tuning re
 prompts, in two places, never knowing which one dropped the story.
 
 The other half of the rule: **never invent.** Report only what the code, the diff, or the page
-actually says. A thin report is fine — it becomes a story marked `NEEDS_CONTEXT`, held and visible.
+actually says. A thin report is fine — it becomes a story marked `HELD`, visible with its reason.
 A confident-sounding invented one poisons a draft.
 
 ## The contract

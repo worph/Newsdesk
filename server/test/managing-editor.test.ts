@@ -307,7 +307,7 @@ describe('applying the result', () => {
     expect(db.select().from(schema.publications).all()).toHaveLength(1)
   })
 
-  it('holds a needs-context story instead of dropping it', () => {
+  it('holds a story it cannot judge instead of dropping it', () => {
     const { db } = openTestDb()
     seedDesk(db)
     const filingId = fileFiling(db, 'Something happened but it is unclear what.')
@@ -321,14 +321,19 @@ describe('applying the result', () => {
             title: 'Unclear',
             summary: 'Cannot be judged as filed.',
             verdict: 'NEW',
-            needs_context: 'which project is this about?',
+            hold_reason: 'which project is this about?',
             placements: [],
           },
         ],
       }),
     )
 
-    expect(db.select().from(schema.stories).get()?.status).toBe('NEEDS_CONTEXT')
+    // A hold is a question put to the editor, so the question has to survive:
+    // held with no reason on screen is indistinguishable from stuck.
+    const story = db.select().from(schema.stories).get()
+    expect(story?.status).toBe('HELD')
+    expect(story?.holdReason).toBe('which project is this about?')
+    expect(story?.dropReason).toBeNull()
   })
 
   it('keeps the proposed placements verbatim, so the override diff survives', () => {

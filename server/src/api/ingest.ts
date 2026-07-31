@@ -1,10 +1,13 @@
-import { and, desc, eq, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, type SQL } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { hasSession, requireIngestToken, requireSession } from '../auth.js'
+import { readReporting } from '../config/store.js'
 import type { Db } from '../db/index.js'
 import { schema } from '../db/index.js'
 import { listEvents } from '../events.js'
+import { runTipDesk } from '../pipeline/tip-desk.js'
+import type { InferenceDriver } from '../ports/inference/types.js'
 import {
   receiveFilings,
   filingsBodySchema,
@@ -17,6 +20,18 @@ const tipBodySchema = z.object({
   url: z.string().optional(),
   stringer_id: z.string().optional(),
 })
+
+const assistBodySchema = z.object({
+  text: z.string().default(''),
+  message: z.string().min(1),
+  history: z
+    .array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().min(1) }))
+    .default([]),
+})
+
+export interface IngestRouteOptions extends ReceiveOptions {
+  driver?: () => InferenceDriver
+}
 
 const listQuerySchema = z.object({
   status: z.string().optional(),
@@ -42,7 +57,7 @@ function resolveTipStringer(db: Db, requested?: string): { id: string } | { erro
 export function registerIngestRoutes(
   app: FastifyInstance,
   db: Db,
-  receiveOptions: ReceiveOptions = {},
+  receiveOptions: IngestRouteOptions = {},
 ): void {
   // ── filing ────────────────────────────────────────────────────────────────
 
@@ -66,7 +81,7 @@ export function registerIngestRoutes(
 
   /**
    * The tip line. Accepts a session (the in-app form and the Android share
-   * outlet) or the ingest token (a bookmarklet, a script).
+   * target) or the ingest token (a bookmarklet, a script).
    */
   app.post('/api/v1/tips', async (request, reply) => {
     if (!hasSession(request)) {
@@ -95,6 +110,26 @@ export function registerIngestRoutes(
       receiveOptions,
     )
     return reply.code(201).send({ result })
+  })
+
+  /**
+   * The tip line's assistant. Stateless on purpose: a note that is never filed
+   * should leave nothing behind, so the conversation lives in the browser and
+   * is posted back each turn. Session only — this one spends inference, and the
+   * ingest token is for filing, not for thinking.
+   */
+  app.post('/api/v1/tips/assist', { preHandler: requireSession }, async (request, reply) => {
+    const parsed = assistBodySchema.safeParse(request.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'message required' })
+    if (!receiveOptions.driver) {
+      return reply.code(503).send({ error: 'no inference driver is configured' })
+    }
+
+    try {
+      return await runTipDesk(db, receiveOptions.driver(), parsed.data)
+    } catch (err) {
+      return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) })
+    }
   })
 
   // ── reading ───────────────────────────────────────────────────────────────
@@ -144,13 +179,55 @@ export function registerIngestRoutes(
     if (!row) return reply.code(404).send({ error: 'not found' })
 
     const stringer = db.select().from(schema.stringers).where(eq(schema.stringers.id, row.stringerId)).get()
+
+    // Insertion order: the tip's own links first, then what each round of
+    // searching turned up, which is the order they were actually read in.
+    const sources = db
+      .select()
+      .from(schema.dossierSources)
+      .where(eq(schema.dossierSources.filingId, id))
+      .orderBy(asc(schema.dossierSources.fetchedAt))
+      .all()
+
     return {
       filing: {
         ...row,
         refs: row.refs ? JSON.parse(row.refs) : null,
+        dossier: row.dossier ? (JSON.parse(row.dossier) as unknown) : null,
         stringerName: stringer?.name ?? row.stringerId,
       },
+      sources,
     }
+  })
+
+  /**
+   * Re-run reporting on a filing. The dossier and its sources are replaced, so
+   * a tip filed while the search endpoint was down can be picked up once it is
+   * back rather than staying degraded forever.
+   */
+  app.post('/api/v1/filings/:id/report', { preHandler: requireSession }, async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const row = db.select().from(schema.filings).where(eq(schema.filings.id, id)).get()
+    if (!row) return reply.code(404).send({ error: 'not found' })
+
+    // Asked of the configuration, not of the wiring: the reporter is always
+    // wired, so checking only that would make this succeed on a desk with no
+    // reporting phase and quietly hand the filing straight back.
+    const reporting = readReporting(db)
+    if (!receiveOptions.enqueueReporter || !reporting?.enabled) {
+      return reply.code(503).send({ error: 'the reporting phase is not configured' })
+    }
+
+    db.transaction((tx) => {
+      tx.delete(schema.dossierSources).where(eq(schema.dossierSources.filingId, id)).run()
+      tx.update(schema.filings)
+        .set({ dossier: null, reportedAt: null, status: 'PROCESSING', outcome: 're-reporting' })
+        .where(eq(schema.filings.id, id))
+        .run()
+    })
+    receiveOptions.enqueueReporter(id)
+
+    return reply.code(202).send({ queued: true })
   })
 
   app.get('/api/v1/events', { preHandler: requireSession }, async (request) => {

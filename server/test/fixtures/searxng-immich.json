@@ -1,0 +1,28 @@
+{
+  "query": "immich release",
+  "results": [
+    {
+      "template": "default.html",
+      "title": "Releases · immich-app/immich - GitHub",
+      "url": "https://github.com/immich-app/immich/releases",
+      "content": "vor 1 Tag ... With this update, we bring a new, easier-to-use editor to mobile devices that has the same features as the web version. You can now edit photos ...",
+      "publishedDate": null
+    },
+    {
+      "template": "default.html",
+      "title": "Roadmap - Immich",
+      "url": "https://immich.app/roadmap",
+      "content": "Launched a new version of our website: https://immich.app/. 10/1/2025. [v2.0.0]. 10/1/2025. Stable release. [v2.0.0]. Immich goes stable with v2.0.0. 10/1/2025.",
+      "publishedDate": null
+    },
+    {
+      "template": "default.html",
+      "title": "Release v3.1.0 | Immich Blog",
+      "url": "https://immich.app/blog/v3.1.0-release",
+      "content": "vor 2 Tagen ... Welcome to Immich v3.1.0 ! This release includes several quality of life improvements and another round of bug fixes. Keep reading below for the ...",
+      "publishedDate": null
+    }
+  ],
+  "answers": [],
+  "suggestions": []
+}

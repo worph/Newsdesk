@@ -89,13 +89,14 @@ field. If a story does not clear the bar for any audience, propose no placements
 your reasoning attached. Do not propose a placement you do not believe in to be safe; do not withhold
 one you do believe in because you are unsure of the wording.
 
-Set `needs_context` only when the filing cannot be judged at all without something it did not
-carry. It holds the story for a human rather than dropping it.
+Set `hold_reason` only when the filing cannot be judged at all without something it did not
+carry. Say what is missing: the story is held for a human rather than dropped, and this is what
+they will read.
 
 **A reported tip with nothing under "Sourced" is a lead, not a filing.** Some filings arrive as a
 story file the desk went and assembled: a headline, sourced claims with the page each was read on,
 and open questions. When that file has no sourced claim at all, the desk looked and found nothing —
-so hold it with `needs_context` rather than placing it. Never build a story out of the "unverified
+so hold it with `hold_reason` rather than placing it. Never build a story out of the "unverified
 recall" section: it is undated, unchecked memory, and it is separated out precisely so it cannot be
 mistaken for reporting.
 

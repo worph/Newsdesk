@@ -72,9 +72,21 @@ export const outletSchema = z.object({
  * know whether a given server wants `q`, `query` or `search_term`, and guessing
  * would make the phase work only for the servers we happened to test.
  */
+export const REPORTING_DRIVERS = ['mcp', 'http'] as const
+
 export const reportingToolSchema = z.object({
-  endpoint: idSchema,
-  tool: z.string().min(1),
+  /** `http` exists because a search engine is an HTTP API, not an MCP server. */
+  driver: z.enum(REPORTING_DRIVERS).default('mcp'),
+  /** mcp: which endpoint and which tool. */
+  endpoint: idSchema.optional(),
+  tool: z.string().min(1).optional(),
+  /**
+   * http: the address, which is ALWAYS a literal — see validateConfig. Only
+   * `args` may interpolate, so nothing the model produces can decide which
+   * host the desk talks to.
+   */
+  url: z.string().url().optional(),
+  method: z.enum(['GET', 'POST']).default('GET'),
   args: argsSpecSchema,
 })
 
@@ -187,8 +199,26 @@ function checkReportingTool(
 ): void {
   const path = `reporting.${role}[${index}]`
 
-  if (!endpointIds.has(tool.endpoint)) {
-    issues.push({ path: `${path}.endpoint`, message: `unknown endpoint "${tool.endpoint}"` })
+  if (tool.driver === 'http') {
+    if (!tool.url) {
+      issues.push({ path: `${path}.url`, message: 'an http reporting tool needs a url' })
+    } else if (templateExpressions(tool.url).length > 0) {
+      // The host is the one thing that must not move. Interpolating here would
+      // let a query string decide what the desk connects to.
+      issues.push({
+        path: `${path}.url`,
+        message: 'the url must be a literal — put the variable part in args, never in the address',
+      })
+    }
+  } else {
+    if (!tool.tool) {
+      issues.push({ path: `${path}.tool`, message: 'an mcp reporting tool needs a tool' })
+    }
+    if (!tool.endpoint) {
+      issues.push({ path: `${path}.endpoint`, message: 'an mcp reporting tool needs an endpoint' })
+    } else if (!endpointIds.has(tool.endpoint)) {
+      issues.push({ path: `${path}.endpoint`, message: `unknown endpoint "${tool.endpoint}"` })
+    }
   }
 
   for (const { key } of slotsOf(tool.args)) {

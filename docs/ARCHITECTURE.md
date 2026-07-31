@@ -30,6 +30,7 @@ The whole design falls out of the roles.
 | Role | Who plays it | Responsibility |
 |---|---|---|
 | **Stringers** | external n8n workflows | have the credentials, go and look, **file reports** — inclusively, with evidence |
+| **The Reporter** | a bounded loop inside the app | for a tip filed by someone with no credentials, **goes and looks**: searches, opens pages, files a dossier |
 | **The Managing Editor** | one LLM call inside the app | reads reports, **finds the stories**, kills duplicates, decides where each one runs |
 | **Writers** | one LLM call per destination | fill that destination's authoring slots, in its voice |
 | **The Editor** | you | rewrite anything, approve or spike each piece individually |
@@ -102,7 +103,7 @@ skips them.
 **Enrichment is a stringer concern.** If a story will need the commit body, the linked pull request,
 or an app's metadata, the stringer — which has the credentials — fetches it and writes it into the
 report. Newsdesk never fetches. A report too thin to write from truthfully produces a story marked
-`NEEDS_CONTEXT`: held, visible, re-runnable, never fabricated around.
+`HELD`: visible with its reason, re-runnable, never fabricated around.
 
 *Later, not v1:* a **callback interface** letting the managing editor ask a stringer for more
 depth on a specific point, and a **pull driver** where a stringer names an MCP tool and a response
@@ -215,7 +216,7 @@ told it, and where does each one run.
 open_story(title, summary) -> story_ref
     duplicate_of(story, existing_story_id, reason)      # terminal; links the earlier story
     update_of(story, existing_story_id, reason)         # continues; links it as context
-    needs_context(story, what_is_missing)               # held for the editor
+    hold_for(story, what_is_missing)                    # held for the editor
     propose_placement(story, outlet_id, reason, angle?)     # zero or more
 no_story(reason)                                         # nothing in this filing
 ```
@@ -304,7 +305,7 @@ Per-stringer `hint` survives as a narrowing note for noisy stringers, subordinat
 **Filing** — `RECEIVED` → `PROCESSING` → `PROCESSED` | `FAILED`. A processed filing that
 yielded nothing is a success and says so.
 
-**Story** — `PROPOSED` → `PLACED` | `DROPPED` | `NEEDS_CONTEXT` → `CLOSED`. Links to every filing
+**Story** — `PROPOSED` → `PLACED` | `DROPPED` | `HELD` → `CLOSED`. Links to every filing
 that contributed to it, and to the earlier story it duplicates or updates.
 
 **Publication** (one row per story × outlet — this *is* the ledger) — `PROPOSED` → `DRAFTING` →
@@ -363,13 +364,18 @@ Breaking one of these breaks the product, not just a feature.
 2. **No inference runs between approval and send.** Publishing is a merge of stored configuration
    and approved slot values. If a model could alter the payload after approval, the approval would
    mean nothing.
-3. **The model never authors a destination.** Channel ids, endpoints, and placement keys are
-   literals in configuration. Models fill slots and propose placements from a generated enum; they
-   never write an address.
-4. **Ingested text is data, never instructions.** Reports, feed bodies, and submitted tips are
-   attacker-influenced. They enter prompts quoted, delimited, and labelled untrusted; a model's
-   output becomes a database row, never an action; a human stands between every model output and
-   every external effect. Drafts are sanitized on render, never injected as HTML.
+3. **The model never authors a destination — or a call.** Channel ids, endpoints, and placement keys
+   are literals in configuration. Models fill slots and propose placements from a generated enum;
+   they never write an address. The same holds for the reporter's tools: which tool, which endpoint
+   and which argument shape are literals, and the model supplies only a query string or a number
+   from a catalogue the desk built.
+4. **Ingested text is data, never instructions.** Reports, feed bodies, submitted tips **and pages
+   the reporter retrieved** are attacker-influenced. They enter prompts quoted, delimited, and
+   labelled untrusted; a model's output becomes a database row, never an action; a human stands
+   between every model output and every external effect. Drafts are sanitized on render, never
+   injected as HTML.
+   *This is why the desk holds the reporting tools rather than handing them to the model: a model
+   browsing freely takes instructions from pages nobody logged.*
 5. **Deduplication is the managing editor's judgement, bounded and reviewable** — a bounded
    comparison window, a recorded reason, the related story linked, and the editor as last check.
 6. **A drop is recorded and visible.** Silence and "nothing happened" must never look alike.
@@ -380,6 +386,10 @@ Breaking one of these breaks the product, not just a feature.
    and its push keys.
 9. **Single instance.** Scheduler and queue state live in the database so restarts resume cleanly,
    and the app is never run as two replicas.
+10. **A citation exists because the desk retrieved the page.** Sourced claims in a dossier are
+   validated against `dossier_sources` before it is stored; anything else is recorded as unverified
+   recall and logged. Without this the reporting phase would launder model recall into something
+   downstream reads as reported.
 
 ## 10. What lives outside, and where
 

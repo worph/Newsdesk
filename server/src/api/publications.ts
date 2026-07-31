@@ -43,6 +43,34 @@ function slotsOf(publication: typeof schema.publications.$inferSelect): Record<s
   return publication.slots ? (JSON.parse(publication.slots) as Record<string, string>) : {}
 }
 
+/**
+ * A publication is open for work only until approval hands it to the wire.
+ *
+ * APPROVED is not a resting state — the payload is already frozen and a send is
+ * already queued — so it has to close the desk just as firmly as PUBLISHED
+ * does. Guarding only on PUBLISHED leaves a window the width of one queue poll
+ * in which an edit shows copy that will never be sent and a second approve
+ * re-freezes bytes that are already in flight.
+ *
+ * FAILED reopens on purpose: the way to fix a bad send is to edit and approve
+ * again, while `retry` re-sends the frozen bytes untouched.
+ */
+function closedReason(status: string): string | undefined {
+  switch (status) {
+    case 'AWAITING_APPROVAL':
+    case 'FAILED':
+      return undefined
+    case 'APPROVED':
+      return 'this is approved and queued to send'
+    case 'PUBLISHED':
+      return 'this has already been published'
+    case 'REJECTED':
+      return 'this was spiked'
+    default:
+      return `this is ${status.toLowerCase()}`
+  }
+}
+
 function mergeContext(loaded: Loaded, slots: Record<string, string>) {
   return {
     story: {
@@ -79,9 +107,8 @@ export function registerPublicationRoutes(
 
     const loaded = load(db, id)
     if (!loaded) return reply.code(404).send({ error: 'no such publication' })
-    if (loaded.publication.status === 'PUBLISHED') {
-      return reply.code(409).send({ error: 'this has already been published' })
-    }
+    const closed = closedReason(loaded.publication.status)
+    if (closed) return reply.code(409).send({ error: closed })
 
     try {
       const result = await runCopyDesk(db, driver(), id, parsed.data.message)
@@ -166,9 +193,8 @@ export function registerPublicationRoutes(
 
     const loaded = load(db, id)
     if (!loaded) return reply.code(404).send({ error: 'no such publication' })
-    if (loaded.publication.status === 'PUBLISHED') {
-      return reply.code(409).send({ error: 'this has already been published' })
-    }
+    const closed = closedReason(loaded.publication.status)
+    if (closed) return reply.code(409).send({ error: closed })
 
     // Only declared slots may be written: a key outside the spec would be an
     // argument configuration never offered.
@@ -198,6 +224,14 @@ export function registerPublicationRoutes(
     const { id } = request.params as { id: string }
     const parsed = revertBody.safeParse(request.body)
     if (!parsed.success) return reply.code(400).send({ error: 'version_id required' })
+
+    // Reverting writes slots, so it closes with the rest of the desk. The
+    // review screen already disables the control; this is the same rule at the
+    // boundary, where it is actually enforced.
+    const loaded = load(db, id)
+    if (!loaded) return reply.code(404).send({ error: 'no such publication' })
+    const closed = closedReason(loaded.publication.status)
+    if (closed) return reply.code(409).send({ error: closed })
 
     const version = db
       .select()
@@ -232,6 +266,11 @@ export function registerPublicationRoutes(
     const loaded = load(db, id)
     if (!loaded) return reply.code(404).send({ error: 'no such publication' })
 
+    // Approving twice is the one that bites: it re-freezes the payload and
+    // queues a second send against a publication already on its way out.
+    if (loaded.publication.status === 'APPROVED') {
+      return reply.code(409).send({ error: 'this is already approved and queued to send' })
+    }
     if (loaded.publication.status === 'PUBLISHED') {
       return reply.code(409).send({ error: 'this has already been published' })
     }
@@ -284,9 +323,10 @@ export function registerPublicationRoutes(
     const parsed = rejectBody.safeParse(request.body ?? {})
     const loaded = load(db, id)
     if (!loaded) return reply.code(404).send({ error: 'no such publication' })
-    if (loaded.publication.status === 'PUBLISHED') {
-      return reply.code(409).send({ error: 'this has already been published' })
-    }
+    // Spiking an approved publication would be an abort the desk cannot honour
+    // — the send may already be in flight — so it closes here too.
+    const closed = closedReason(loaded.publication.status)
+    if (closed) return reply.code(409).send({ error: closed })
 
     const reason = parsed.success ? parsed.data.reason : undefined
 

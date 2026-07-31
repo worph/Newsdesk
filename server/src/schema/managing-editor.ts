@@ -8,7 +8,7 @@ import type { ToolSchema } from '../ports/inference/types.js'
  * The tool calls in ARCHITECTURE.md section 5.1 are expressed here as one JSON
  * object, because the day-one driver cannot be handed a tool schema. The shape
  * is a faithful transcription — `open_story` with its nested `duplicate_of` /
- * `update_of` / `needs_context` / `propose_placement`, or `no_story` — so the
+ * `update_of` / `hold_for` / `propose_placement`, or `no_story` — so the
  * tool-calling driver can emit the same result without anything downstream
  * changing.
  *
@@ -45,7 +45,7 @@ const storyShape = z.object({
   /** Required by checkVerdictLinks when the verdict links an earlier story. */
   related_story_id: z.string().optional(),
   dedup_reason: z.string().optional(),
-  needs_context: z.string().optional(),
+  hold_reason: z.string().optional(),
   label: z.string().optional(),
   placements: z.array(placementShape).default([]),
 })
@@ -134,7 +134,7 @@ export function managingEditorTools(outlets: OutletChoice[]): ToolSchema[] {
             description: 'Required for DUPLICATE and UPDATE: the id of the earlier story, from the list provided.',
           },
           dedup_reason: { type: 'string', description: 'Why this verdict. Recorded and reviewed.' },
-          needs_context: {
+          hold_reason: {
             type: 'string',
             description: 'Set only if the story cannot be judged without something the filing did not carry.',
           },
@@ -195,7 +195,7 @@ export function managingEditorShapeHint(outletIds: string[]): string {
     '      "verdict": "NEW" | "DUPLICATE" | "UPDATE",',
     '      "related_story_id": string?,  // REQUIRED for DUPLICATE and UPDATE',
     '      "dedup_reason": string?,      // why that verdict',
-    '      "needs_context": string?,     // only if it cannot be judged as filed',
+    '      "hold_reason": string?,       // only if it cannot be judged as filed',
     '      "label": string?,             // coarse, sorts the queue, never filters',
     `      "placements": [{ "outlet_id": ${ids}, "reason": string, "angle": string? }]`,
     '    }',

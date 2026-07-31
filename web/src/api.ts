@@ -79,10 +79,42 @@ export interface FilingRow {
   consideredChars: number
 }
 
+/** The story file the reporter produced. See docs/pitch-and-reporting.md section 7. */
+export interface Dossier {
+  headline: string
+  brief: string
+  angle: string | null
+  /** Every claim here cites a page the desk actually retrieved. */
+  sourced: Array<{ claim: string; url: string; as_of: string | null }>
+  chronology: Array<{ when: string; what: string; url: string | null }>
+  unknowns: string[]
+  /** Model background knowledge. Undated, unverified, deliberately kept apart. */
+  recall: Array<{ claim: string }>
+  body: string | null
+}
+
+export interface DossierSource {
+  id: string
+  url: string
+  title: string | null
+  via: 'tip' | 'search'
+  query: string | null
+  ok: boolean
+  chars: number | null
+  fetchedAt: string
+}
+
 export interface FilingDetail extends Omit<FilingRow, 'textLength' | 'consideredChars'> {
   text: string
   considered: string | null
+  dossier: Dossier | null
+  reportedAt: string | null
   refs: Record<string, unknown> | null
+}
+
+export interface TipTurn {
+  role: 'user' | 'assistant'
+  content: string
 }
 
 export interface EventRow {
@@ -117,6 +149,7 @@ export interface StoryRow {
   relatedTitle: string | null
   label: string | null
   dropReason: string | null
+  holdReason: string | null
   createdAt: string
   sourceCount: number
   placements: StoryPlacement[]
@@ -241,9 +274,17 @@ export const api = {
     const qs = search.toString()
     return request<{ filings: FilingRow[] }>(`/api/v1/filings${qs ? `?${qs}` : ''}`)
   },
-  getFiling: (id: string) => request<{ filing: FilingDetail }>(`/api/v1/filings/${id}`),
+  getFiling: (id: string) =>
+    request<{ filing: FilingDetail; sources: DossierSource[] }>(`/api/v1/filings/${id}`),
+  reportFiling: (id: string) =>
+    request<{ queued: true }>(`/api/v1/filings/${id}/report`, { method: 'POST' }),
   postTip: (body: { text: string; url?: string }) =>
     request<{ result: { id: string; note: string } }>('/api/v1/tips', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  assistTip: (body: { text: string; history: TipTurn[]; message: string }) =>
+    request<{ reply: string; text: string }>('/api/v1/tips/assist', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

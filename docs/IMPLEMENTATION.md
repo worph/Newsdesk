@@ -111,12 +111,30 @@ CREATE TABLE filings (
   id          TEXT PRIMARY KEY,
   stringer_id TEXT NOT NULL REFERENCES stringers(id),
   kind        TEXT NOT NULL,
-  text        TEXT NOT NULL,
-  considered  TEXT,                      -- the slice actually sent (post watermark/diff)
+  text        TEXT NOT NULL,             -- what a human wrote
+  considered  TEXT,                      -- the deterministic slice (post watermark/diff)
+  dossier     TEXT,                      -- JSON: what the reporter went and found
+  reported_at TEXT,
   refs        TEXT,                      -- JSON, opportunistic
   filed_at    TEXT, received_at TEXT NOT NULL,
   status      TEXT NOT NULL,             -- RECEIVED|PROCESSING|PROCESSED|FAILED
   outcome     TEXT                       -- 'no story' | '2 stories' | error summary
+);
+-- Three columns, three provenances: conflating them would make "what you filed"
+-- and "what the desk produced" indistinguishable.
+
+-- Every page the desk actually retrieved. A citation is verifiable because a
+-- row exists here; a url the model invented has nowhere to appear.
+CREATE TABLE dossier_sources (
+  id          TEXT PRIMARY KEY,
+  filing_id   TEXT NOT NULL REFERENCES filings(id),
+  url         TEXT NOT NULL,
+  title       TEXT,
+  via         TEXT NOT NULL,             -- 'tip' | 'search'
+  query       TEXT,                      -- the search that surfaced it
+  ok          INTEGER NOT NULL,          -- a dead link is still a record
+  chars       INTEGER,
+  fetched_at  TEXT NOT NULL
 );
 
 CREATE TABLE stories (
@@ -125,7 +143,7 @@ CREATE TABLE stories (
   summary       TEXT NOT NULL,           -- the writers' factual basis
   body          TEXT,                    -- assembled material
   url           TEXT,
-  status        TEXT NOT NULL,           -- PROPOSED|PLACED|DROPPED|NEEDS_CONTEXT|CLOSED
+  status        TEXT NOT NULL,           -- PROPOSED|PLACED|DROPPED|HELD|CLOSED
   dedup_verdict TEXT NOT NULL,           -- NEW | DUPLICATE | UPDATE
   dedup_reason  TEXT,
   related_story_id TEXT REFERENCES stories(id),
@@ -407,12 +425,22 @@ interface InferenceDriver {
 
 ### 5.4 Prompts
 
-Three templates in `server/src/prompts/`, each delimiting ingested content and labelling it
+Six templates in `server/src/prompts/`, each delimiting ingested content and labelling it
 untrusted:
 
 - **managing editor** — charter, outlet catalogue (id, description, voice summary), source hint, the
-  considered slice of the filing, and every story from the comparison window. Emits
-  `open_story` / `duplicate_of` / `update_of` / `needs_context` / `propose_placement` / `no_story`.
+  considered slice of the filing (or its dossier, when it was reported), and every story from the
+  comparison window. Emits
+  `open_story` / `duplicate_of` / `update_of` / `hold_for` / `propose_placement` / `no_story`.
+- **reporter-steer** — once per round of the reporting loop: the tip, the retrieved corpus, the
+  numbered result catalogue, the round and the remaining budget. Returns queries to run and
+  catalogue **numbers** to open. It cannot name a url, which is what stops a fetched page steering
+  the next fetch.
+- **reporter-file** — once, at the end: the tip and the corpus. Returns the dossier, with `sourced`
+  (each claim citing a page the desk retrieved) kept strictly apart from `recall` (unverified model
+  memory). Prose the tipster wrote comes back in `body` verbatim.
+- **tip-desk** — the note, the conversation, the editor's turn. Returns a reply and the whole
+  updated note. Stateless, no tools, and forbidden from adding facts: it has looked nothing up.
 - **writer** — story summary and material, voice, the placement's `angle`, slot definitions. Emits
   `submit_draft` with the generated schema.
 - **copy desk** — voice, current slots, conversation, editor's turn. Returns a reply and the full
@@ -425,13 +453,16 @@ All `/api/v1`. Session cookie for the UI; bearer token for ingest.
 ```
 POST   /filings                ingest (token). Free text. Object or array.
 POST   /tips                       internal tip line + PWA share target
+POST   /tips/assist                shape a note before filing; stateless, session only
                                    (`/ideas` still accepted — the pre-rename spelling)
 
 GET    /stories?status=&q=         queue, spiked, archive (one endpoint, filtered)
 GET    /stories/:id                story, contributing filings, publications, related story
 POST   /stories/:id/rerun          re-run the managing editor
 POST   /stories/:id/placements         add a placement the managing editor did not propose
-GET    /filings?status=        the raw wire, including "no story" outcomes
+GET    /filings?status=            the raw wire, including "no story" outcomes
+GET    /filings/:id                the filing, its dossier, and every page the desk retrieved
+POST   /filings/:id/report         re-run reporting, replacing the dossier and its sources
 
 PATCH  /publications/:id           save slots (creates a version)
 POST   /publications/:id/chat      { message } -> { reply, slots }
@@ -466,7 +497,7 @@ mobile-first; the rest are configuration and forensics and may be desktop-leanin
 |---|---|---|---|
 | 1 | **Queue** (the gate) | everything awaiting a decision: stories with their per-outlet placement chips, oldest first. Home screen; badge = publications in `AWAITING_APPROVAL` | open a story |
 | 2 | **Review** | one publication: the primary slot as a document, other slots as fields, the managing editor's reason and angle, copy desk chat, version history, "what will be sent", related stories. Tabs across outlets when a story has several placements | **approve** / spike |
-| 3 | **Tip line** | one field plus optional link; also the landing page for the Android share sheet and the `?url=` deep link | submit |
+| 3 | **Tip line** | one field — links go in the text, where the reporter finds them. The copy desk is a disclosure beside it, so "File it" stays one tap away. Also the landing page for the Android share sheet and the `?url=` deep link | submit |
 
 The gate as a *concept* is enforced on screen 2 (approve is the only path to the press); screen 1 is
 just the list of things standing at it.
@@ -603,8 +634,17 @@ re-announced; run in parallel with the existing pipeline against a test channel;
 for a week; cut over; retire the n8n cron, the Telegram bridge tap-forward, and the Docmost run
 pages.
 
+**M8 — reporting.** The desk goes and looks before the managing editor sees a tip: the `reporting`
+config block, the MCP tool layer with its fallback chain, the bounded loop, the dossier and
+`dossier_sources`, citation validation, and the lead rule in the managing editor's prompt.
+See [`pitch-and-reporting.md`](./pitch-and-reporting.md).
+
+**M9 — the tip surface.** One field instead of two, the shared `DocumentEditor`, `CopyDesk` split
+into a presentational shell plus per-surface containers, the stateless tip assistant, and the
+dossier on the Wire.
+
 M0–M3 is the real work and produces something usable. M4–M6 are additive. M7 is a day plus a week of
-watching.
+watching. M8–M9 are additive and independent of M6–M7.
 
 ## 11. Testing
 

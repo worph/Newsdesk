@@ -171,25 +171,66 @@ describe('approval — the gate', () => {
     expect((await post(`/api/v1/publications/${publicationId}/approve`)).statusCode).toBe(409)
   })
 
+  it('refuses a second approve while the first send is still queued', async () => {
+    // The window between APPROVED and PUBLISHED is one queue poll wide. A
+    // second approve inside it would re-freeze the payload and queue a second
+    // send against a publication already on its way to the wire.
+    await post(`/api/v1/publications/${publicationId}/approve`)
+    expect(row().status).toBe('APPROVED')
+
+    const again = await post(`/api/v1/publications/${publicationId}/approve`)
+    expect(again.statusCode).toBe(409)
+    expect(published).toEqual([publicationId])
+  })
+
+  it('reopens for editing and re-approval after a failed send', async () => {
+    // FAILED is the one state that goes back to the desk: `retry` re-sends the
+    // frozen bytes, but fixing the copy means editing and approving again.
+    await post(`/api/v1/publications/${publicationId}/approve`)
+    db.update(schema.publications)
+      .set({ status: 'FAILED', error: 'discord said no' })
+      .where(eq(schema.publications.id, publicationId))
+      .run()
+
+    const edit = await patch(`/api/v1/publications/${publicationId}`, { slots: { title: 'Second try' } })
+    expect(edit.statusCode).toBe(200)
+    expect((await post(`/api/v1/publications/${publicationId}/approve`)).statusCode).toBe(202)
+    expect(JSON.parse(row().payload!).title).toBe('Second try')
+  })
+
   it('refuses a disabled outlet', async () => {
     db.update(schema.outlets).set({ enabled: false }).where(eq(schema.outlets.id, 'discord-test')).run()
     expect((await post(`/api/v1/publications/${publicationId}/approve`)).statusCode).toBe(422)
   })
 
-  it('an edit after approval does not change the frozen payload', async () => {
-    // Invariant 2: nothing may alter the payload between approval and the wire.
+  it('refuses every edit once approved, rather than letting the slots drift', async () => {
+    // Invariant 2: nothing may alter the payload between approval and the
+    // wire. The slots must not drift either — an accepted edit would leave the
+    // screen showing copy that will never be sent.
+    // One saved version before approval, so revert has somewhere to go back to.
+    await patch(`/api/v1/publications/${publicationId}`, { slots: { title: 'The approved headline' } })
+    const version = db.select().from(schema.draftVersions).all()[0]!
+
     await post(`/api/v1/publications/${publicationId}/approve`)
     const frozen = row().payload!
 
-    await patch(`/api/v1/publications/${publicationId}`, { slots: { title: 'Changed my mind' } })
+    const edit = await patch(`/api/v1/publications/${publicationId}`, {
+      slots: { title: 'Changed my mind' },
+    })
+    expect(edit.statusCode).toBe(409)
+
+    // Reverting writes slots too, so it closes with the rest of the desk.
+    const rollback = await post(`/api/v1/publications/${publicationId}/revert`, {
+      version_id: version.id,
+    })
+    expect(rollback.statusCode).toBe(409)
 
     expect(row().payload).toBe(frozen)
-    expect(JSON.parse(row().payload!).title).toBe('Immich 1.142.0')
+    expect(JSON.parse(row().slots!).title).toBe('The approved headline')
   })
 
   it('serves the frozen bytes rather than a fresh merge once approved', async () => {
     await post(`/api/v1/publications/${publicationId}/approve`)
-    await patch(`/api/v1/publications/${publicationId}`, { slots: { title: 'Changed' } })
 
     const body = (await get(`/api/v1/publications/${publicationId}/payload`)).json()
     expect(body.frozen).toBe(true)

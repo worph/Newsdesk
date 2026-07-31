@@ -13,7 +13,7 @@ export function Queue() {
 
   const { data, isPending } = useQuery({
     queryKey: ['stories', 'queue'],
-    queryFn: () => api.listStories({ status: 'PLACED,NEEDS_CONTEXT', limit: 100 }),
+    queryFn: () => api.listStories({ status: 'PLACED,HELD', limit: 100 }),
     refetchInterval: 30_000,
   })
 

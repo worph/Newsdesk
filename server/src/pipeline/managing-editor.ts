@@ -138,7 +138,7 @@ export function buildManagingEditorContext(
   ].join('\n')
 
   const prompt = fillPrompt(loadPrompt('managing-editor'), {
-    CHARTER: charterRow?.text.trim() ?? '(no charter written yet — do not placement anything)',
+    CHARTER: charterRow?.text.trim() ?? '(no charter written yet — do not place anything)',
     OUTLETS: outlets.text,
     STRINGER: stringerLines,
     WINDOW_DAYS: String(windowDays),
@@ -188,22 +188,22 @@ export function applyManagingEditorResult(
     for (const story of result.stories) {
       const id = randomUUID()
       const isDuplicate = story.verdict === 'DUPLICATE'
-      const needsContext = Boolean(story.needs_context)
+      const held = Boolean(story.hold_reason)
       const hasPlacements = story.placements.length > 0
 
       // A duplicate is terminal. Otherwise a story with no placements is spiked —
       // that IS the newsworthiness gate, not a separate mechanism.
       const status = isDuplicate
         ? 'DROPPED'
-        : needsContext
-          ? 'NEEDS_CONTEXT'
+        : held
+          ? 'HELD'
           : hasPlacements
             ? 'PLACED'
             : 'DROPPED'
 
       const dropReason = isDuplicate
         ? (story.dedup_reason ?? 'duplicate of an earlier story')
-        : !hasPlacements && !needsContext
+        : !hasPlacements && !held
           ? 'no destination clears the bar for this story'
           : null
 
@@ -221,6 +221,7 @@ export function applyManagingEditorResult(
           comparedIds: JSON.stringify(story.related_story_id ? [story.related_story_id] : []),
           label: story.label ?? null,
           dropReason,
+          holdReason: story.hold_reason ?? null,
           // Kept verbatim so the override diff — what was proposed versus what
           // the editor decided — survives any later edit to the publications.
           proposedPlacements: JSON.stringify(story.placements),
@@ -245,8 +246,8 @@ export function applyManagingEditorResult(
         dropped++
       }
 
-      // A duplicate proposes nothing: it is already told. A NEEDS_CONTEXT
-      // story keeps its placements so the editor can release it once answered.
+      // A duplicate proposes nothing: it is already told. A HELD story keeps
+      // its placements so the editor can release it once answered.
       if (!isDuplicate) {
         for (const placement of story.placements) {
           const publicationId = randomUUID()
@@ -263,8 +264,8 @@ export function applyManagingEditorResult(
               payload: null,
             })
             .run()
-          // A story held for context is not ready to be written yet.
-          if (!needsContext) options.enqueueWriter?.(publicationId)
+          // A held story is not ready to be written yet.
+          if (!held) options.enqueueWriter?.(publicationId)
           placed++
         }
       }
@@ -285,7 +286,7 @@ export function applyManagingEditorResult(
         message: `"${story.title}" duplicates ${story.related_story_id ?? 'an earlier story'}`,
         detail: { reason: story.dedup_reason, relatedStoryId: story.related_story_id },
       })
-    } else if (story.placements.length === 0 && !story.needs_context) {
+    } else if (story.placements.length === 0 && !story.hold_reason) {
       logEvent(db, {
         level: 'info',
         code: 'STORY_SPIKED',
@@ -298,7 +299,7 @@ export function applyManagingEditorResult(
         level: 'info',
         code: 'STORY_OPENED',
         storyId: id,
-        message: `"${story.title}" → ${story.placements.map((r) => r.outlet_id).join(', ') || 'held for context'}`,
+        message: `"${story.title}" → ${story.placements.map((r) => r.outlet_id).join(', ') || 'held'}`,
         detail: { verdict: story.verdict, placements: story.placements },
       })
     }

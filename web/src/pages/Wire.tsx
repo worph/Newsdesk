@@ -34,9 +34,107 @@ function Detail({ id }: { id: string }) {
 
   if (isPending) return <p className="px-4 py-3 text-sm text-desk-500">Loading…</p>
   const filing = data!.filing
+  const sources = data!.sources ?? []
+  const dossier = filing.dossier
 
   return (
     <div className="space-y-4 border-t border-desk-200 px-4 py-4 dark:border-desk-800">
+      {/*
+        What the desk went and found, kept visibly apart from what arrived. The
+        sourced/recall split is the whole point of the dossier and it has to
+        survive into the screen, not just the prompt.
+      */}
+      {dossier && (
+        <section className="space-y-2">
+          <h3 className="text-xs font-medium tracking-wide text-desk-500 uppercase">
+            Dossier{filing.reportedAt && <span className="ml-2 normal-case opacity-70">reported {when(filing.reportedAt)}</span>}
+          </h3>
+          <div className="space-y-2 rounded-md border border-desk-200 px-3 py-2.5 dark:border-desk-800">
+            <p className="font-medium">{dossier.headline}</p>
+            <p className="text-sm text-desk-600 dark:text-desk-400">{dossier.brief}</p>
+
+            {dossier.sourced.length > 0 ? (
+              <ul className="space-y-1 text-sm">
+                {dossier.sourced.map((claim, i) => (
+                  <li key={i}>
+                    {claim.claim}{' '}
+                    <a
+                      href={claim.url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-xs text-desk-500 underline hover:text-desk-700"
+                    >
+                      source
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-amber-700 dark:text-amber-500">
+                Nothing could be sourced — this is a lead, not a filing.
+              </p>
+            )}
+
+            {dossier.recall.length > 0 && (
+              <div className="space-y-1 rounded bg-desk-100 px-2.5 py-2 dark:bg-desk-900">
+                <p className="text-xs font-medium text-desk-500 uppercase">Unverified recall</p>
+                <p className="text-xs text-desk-500">Not reported and not checked. Never treated as fact.</p>
+                <ul className="list-disc space-y-0.5 pl-4 text-sm">
+                  {dossier.recall.map((entry, i) => (
+                    <li key={i}>{entry.claim}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {dossier.unknowns.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-desk-500 uppercase">Open questions</p>
+                <ul className="list-disc space-y-0.5 pl-4 text-sm">
+                  {dossier.unknowns.map((entry, i) => (
+                    <li key={i}>{entry}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {sources.length > 0 && (
+        <section className="space-y-1.5">
+          <h3 className="text-xs font-medium tracking-wide text-desk-500 uppercase">
+            Sources — {sources.filter((s) => s.ok).length} of {sources.length} retrieved
+          </h3>
+          <p className="text-xs text-desk-500">
+            Every page the desk actually opened. A citation exists because one of these does.
+          </p>
+          <ul className="space-y-1">
+            {sources.map((source) => (
+              <li
+                key={source.id}
+                className="flex items-baseline gap-2 rounded-md border border-desk-200 px-3 py-1.5 text-sm dark:border-desk-800"
+              >
+                <span className={`shrink-0 text-xs ${source.ok ? 'text-desk-500' : 'text-red-600'}`}>
+                  {source.ok ? source.via : 'failed'}
+                </span>
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="min-w-0 flex-1 truncate hover:underline"
+                >
+                  {source.title ?? source.url}
+                </a>
+                {source.query && (
+                  <span className="shrink-0 truncate text-xs text-desk-500">“{source.query}”</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className="space-y-1.5">
         <h3 className="text-xs font-medium tracking-wide text-desk-500 uppercase">Considered</h3>
         <p className="text-xs text-desk-500">

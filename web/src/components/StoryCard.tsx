@@ -19,7 +19,7 @@ const STATUS_STYLE: Record<string, string> = {
   PLACED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
   PROPOSED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
   DROPPED: 'bg-desk-200 text-desk-600 dark:bg-desk-800 dark:text-desk-400',
-  NEEDS_CONTEXT: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
+  HELD: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
   CLOSED: 'bg-desk-200 text-desk-600 dark:bg-desk-800 dark:text-desk-400',
 }
 
@@ -62,6 +62,13 @@ export function StoryCard({ story, onOpen }: { story: StoryRow; onOpen?: () => v
           {spiked && story.dropReason && (
             <span className="mt-2 block rounded-md bg-desk-100 px-3 py-2 text-xs text-desk-600 dark:bg-desk-900 dark:text-desk-400">
               <strong className="font-medium">Spiked:</strong> {story.dropReason}
+            </span>
+          )}
+
+          {/* A hold is a question, not a verdict — it is only actionable if you can read it. */}
+          {story.holdReason && (
+            <span className="mt-2 block rounded-md bg-desk-100 px-3 py-2 text-xs text-desk-600 dark:bg-desk-900 dark:text-desk-400">
+              <strong className="font-medium">Held:</strong> {story.holdReason}
             </span>
           )}
 
