@@ -1,7 +1,15 @@
-import { validateConfig, type ConfigIssue } from '@newsdesk/shared'
+import { parseConfig, validateConfig, type ConfigIssue } from '@newsdesk/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { checkPassword, clearSession, hasSession, issueSession, requireSession, setPassword } from '../auth.js'
+import {
+  checkPassword,
+  clearSession,
+  hasSession,
+  isGateTrusted,
+  issueSession,
+  requireSession,
+  setPassword,
+} from '../auth.js'
 import {
   ConfigRejected,
   configToYaml,
@@ -21,11 +29,35 @@ import type { ReceiveOptions } from '../ports/ingest/receive.js'
 import type { InferenceDriver } from '../ports/inference/types.js'
 
 const loginBody = z.object({ password: z.string().min(1) })
-const configBody = z.object({ yaml: z.string() })
+/**
+ * Two ways to say the same thing: `yaml` is the document as typed in the
+ * Advanced editor, `config` the object the forms build. Both land in the same
+ * `writeConfig`, so neither is a second source of truth.
+ */
+const configBody = z.union([
+  z.object({ yaml: z.string() }),
+  z.object({ config: z.record(z.string(), z.unknown()) }),
+])
 const passwordBody = z.object({ current: z.string().min(1), next: z.string().min(8) })
 
 function issuesReply(issues: ConfigIssue[]) {
   return { error: 'configuration rejected', issues }
+}
+
+/**
+ * A shape failure carries a path per problem; flattening it to one string
+ * would put the forms back to hunting through a document for the field that
+ * upset zod.
+ */
+function issuesFrom(err: unknown): ConfigIssue[] {
+  if (err instanceof z.ZodError) {
+    return err.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message }))
+  }
+  return [{ path: '', message: err instanceof Error ? err.message : String(err) }]
+}
+
+function candidateFrom(body: z.infer<typeof configBody>): unknown {
+  return 'yaml' in body ? yamlToConfig(body.yaml) : body.config
 }
 
 export interface PlacementOptions extends ReceiveOptions {
@@ -97,7 +129,16 @@ export function registerRoutes(
     return { ok: true }
   })
 
-  app.get('/api/v1/auth/me', async (request) => ({ authenticated: hasSession(request) }))
+  /**
+   * `passwordRequired` is false when something else already vouched for this
+   * request — the SSO gate in front, or a dev stack with the password off. In
+   * both cases signing out would clear a cookie that was never what let you
+   * in, so the UI hides the button rather than offering a no-op.
+   */
+  app.get('/api/v1/auth/me', async (request) => ({
+    authenticated: hasSession(request),
+    passwordRequired: !isGateTrusted(request),
+  }))
 
   app.post(
     '/api/v1/auth/password',
@@ -126,35 +167,34 @@ export function registerRoutes(
     }
   })
 
-  /** Dry run: parse and validate without touching the database. */
+  /**
+   * Dry run: parse and validate without touching the database.
+   *
+   * Both renderings of the candidate come back, which is also how the
+   * Configuration screen converts between its forms and its editor — the
+   * browser never has to serialise the document itself, so there is one
+   * definition of what the document looks like.
+   */
   app.post('/api/v1/config/validate', { preHandler: requireSession }, async (request, reply) => {
     const parsed = configBody.safeParse(request.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'yaml required' })
+    if (!parsed.success) return reply.code(400).send({ error: 'yaml or config required' })
     try {
-      const candidate = yamlToConfig(parsed.data.yaml)
-      const { parseConfig } = await import('@newsdesk/shared')
-      const { issues } = parseConfig(candidate)
-      return { ok: issues.length === 0, issues }
+      const { config, issues } = parseConfig(candidateFrom(parsed.data))
+      return { ok: issues.length === 0, issues, config, yaml: configToYaml(config) }
     } catch (err) {
-      return reply.code(400).send({
-        error: 'could not parse',
-        issues: [{ path: '', message: err instanceof Error ? err.message : String(err) }],
-      })
+      return reply.code(400).send({ error: 'could not parse', issues: issuesFrom(err) })
     }
   })
 
   app.put('/api/v1/config', { preHandler: requireSession }, async (request, reply) => {
     const parsed = configBody.safeParse(request.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'yaml required' })
+    if (!parsed.success) return reply.code(400).send({ error: 'yaml or config required' })
     try {
-      const config = writeConfig(db, yamlToConfig(parsed.data.yaml), 'ui')
+      const config = writeConfig(db, candidateFrom(parsed.data), 'ui')
       return { ok: true, yaml: configToYaml(config), config }
     } catch (err) {
       if (err instanceof ConfigRejected) return reply.code(422).send(issuesReply(err.issues))
-      return reply.code(400).send({
-        error: 'could not parse',
-        issues: [{ path: '', message: err instanceof Error ? err.message : String(err) }],
-      })
+      return reply.code(400).send({ error: 'could not parse', issues: issuesFrom(err) })
     }
   })
 

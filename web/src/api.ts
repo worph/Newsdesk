@@ -34,12 +34,65 @@ export interface McpEndpointRow {
   oauth: OAuthSummary
 }
 
+/**
+ * The configuration as the forms edit it. Declared here rather than imported
+ * from @newsdesk/shared for the same reason every other type in this file is:
+ * the browser wants the shape, not zod. The server remains the authority —
+ * anything built here is validated by `parseConfig` before it is stored.
+ */
+export interface Voice {
+  id: string
+  name: string
+  tone: string
+  audience: string
+  rules?: string
+  examples?: string
+}
+
+export type StringerKind = 'report' | 'timeline' | 'snapshot' | 'tip'
+
+export interface Stringer {
+  id: string
+  name: string
+  kind: StringerKind
+  enabled: boolean
+  hint?: string
+}
+
+/** Read-only in the forms until the outlet editor lands; see IMPLEMENTATION 5.2. */
+export interface Outlet {
+  id: string
+  name: string
+  description: string
+  role: 'publish' | 'notify'
+  driver: 'mcp' | 'webhook' | 'builtin'
+  enabled: boolean
+  voice?: string
+  endpoint?: string
+  tool?: string
+  destination_key?: string
+  args: Record<string, unknown>
+}
+
+export interface AppConfig {
+  charter: string
+  mcp_endpoints: Array<{ id: string; name: string; url: string }>
+  voices: Voice[]
+  stringers: Stringer[]
+  outlets: Outlet[]
+  /** Untouched by the forms — round-tripped so saving cannot drop it. */
+  reporting?: unknown
+}
+
 export interface ConfigPayload {
   yaml: string
-  config: unknown
+  config: AppConfig
   issues: ConfigIssue[]
   ingestToken: string
 }
+
+/** Either the typed object the forms build or the document the editor holds. */
+export type ConfigInput = { config: AppConfig } | { yaml: string }
 
 export class ApiError extends Error {
   constructor(
@@ -235,21 +288,22 @@ export interface ChatMessage {
 }
 
 export const api = {
-  me: () => request<{ authenticated: boolean }>('/api/v1/auth/me'),
+  /** `passwordRequired: false` — a gate or a dev stack signed you in, so there is nothing to sign out of. */
+  me: () => request<{ authenticated: boolean; passwordRequired: boolean }>('/api/v1/auth/me'),
   login: (password: string) =>
     request<{ ok: true }>('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ password }) }),
   logout: () => request<{ ok: true }>('/api/v1/auth/logout', { method: 'POST' }),
   health: () => request<Health>('/healthz'),
   getConfig: () => request<ConfigPayload>('/api/v1/config'),
-  validateConfig: (yaml: string) =>
-    request<{ ok: boolean; issues: ConfigIssue[] }>('/api/v1/config/validate', {
+  validateConfig: (input: ConfigInput) =>
+    request<{ ok: boolean; issues: ConfigIssue[]; config: AppConfig; yaml: string }>('/api/v1/config/validate', {
       method: 'POST',
-      body: JSON.stringify({ yaml }),
+      body: JSON.stringify(input),
     }),
-  saveConfig: (yaml: string) =>
-    request<{ ok: true; yaml: string }>('/api/v1/config', {
+  saveConfig: (input: ConfigInput) =>
+    request<{ ok: true; yaml: string; config: AppConfig }>('/api/v1/config', {
       method: 'PUT',
-      body: JSON.stringify({ yaml }),
+      body: JSON.stringify(input),
     }),
   rotateIngestToken: () =>
     request<{ ingestToken: string }>('/api/v1/config/ingest-token/rotate', { method: 'POST' }),

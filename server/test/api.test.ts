@@ -29,7 +29,7 @@ stringers:
     kind: tip
 outlets:
   - id: discord-test
-    name: Discord #news-test
+    name: "Discord #news-test"
     description: test channel for a general audience
     role: publish
     driver: mcp
@@ -101,7 +101,7 @@ describe('auth', () => {
   it('accepts the right password and reports the session', async () => {
     const cookie = await login()
     const me = await app.inject({ method: 'GET', url: '/api/v1/auth/me', headers: { cookie } })
-    expect(me.json()).toEqual({ authenticated: true })
+    expect(me.json()).toEqual({ authenticated: true, passwordRequired: true })
   })
 
   it('refuses a forged session cookie', async () => {
@@ -163,8 +163,38 @@ describe('config round trip', () => {
       headers: { cookie },
       payload: { yaml: VALID_YAML },
     })
-    expect(res.json()).toEqual({ ok: true, issues: [] })
+    const body = res.json()
+    expect(body.ok).toBe(true)
+    expect(body.issues).toEqual([])
+    // Both renderings come back: the Configuration screen converts between its
+    // forms and its editor through this call rather than serialising itself.
+    expect(body.config.outlets[0].id).toBe('discord-test')
+    expect(body.yaml).toContain('discord-test')
     expect(readConfig(handle.db).charter).toBe('')
+  })
+
+  it('accepts a config object as well as a document, and reports shape errors by path', async () => {
+    const cookie = await login()
+    const { parse } = await import('yaml')
+    const config = parse(VALID_YAML) as Record<string, unknown>
+
+    const ok = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/config',
+      headers: { cookie },
+      payload: { config },
+    })
+    expect(ok.statusCode).toBe(200)
+    expect(readConfig(handle.db).outlets[0]?.id).toBe('discord-test')
+
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/api/v1/config/validate',
+      headers: { cookie },
+      payload: { config: { ...config, voices: [{ id: 'x', name: '', tone: 't', audience: 'a' }] } },
+    })
+    expect(bad.statusCode).toBe(400)
+    expect(bad.json().issues[0].path).toBe('voices.0.name')
   })
 
   it('reports a YAML syntax error rather than throwing', async () => {

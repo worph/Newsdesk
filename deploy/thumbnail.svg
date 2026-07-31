@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="784" height="442" viewBox="0 0 784 442">
+  <rect width="784" height="442" fill="#1B2A41"/>
+
+  <!-- faint rule, masthead furniture -->
+  <rect x="366" y="243" width="330" height="3" fill="#3A4E6B"/>
+
+  <!-- the glyph, same drawing as icon.svg, scaled and placed left -->
+  <g transform="translate(74 89) scale(0.516)">
+    <g transform="rotate(-8 256 256)">
+      <rect x="132" y="126" width="248" height="252" rx="16" fill="#7E93B0"/>
+    </g>
+    <rect x="136" y="120" width="240" height="272" rx="16" fill="#FFFFFF"/>
+    <rect x="162" y="148" width="188" height="26" rx="7" fill="#1B2A41"/>
+    <rect x="162" y="192" width="86" height="66" rx="8" fill="#C6D2E1"/>
+    <rect x="262" y="194" width="88" height="12" rx="6" fill="#B7C4D6"/>
+    <rect x="262" y="218" width="88" height="12" rx="6" fill="#B7C4D6"/>
+    <rect x="262" y="242" width="66" height="12" rx="6" fill="#B7C4D6"/>
+    <rect x="162" y="278" width="188" height="12" rx="6" fill="#B7C4D6"/>
+    <rect x="162" y="302" width="188" height="12" rx="6" fill="#B7C4D6"/>
+    <rect x="162" y="326" width="124" height="12" rx="6" fill="#B7C4D6"/>
+    <circle cx="372" cy="372" r="72" fill="#1B2A41"/>
+    <circle cx="372" cy="372" r="60" fill="#2FBF71"/>
+    <path d="M344 372 L365 393 L402 350" fill="none" stroke="#FFFFFF" stroke-width="18"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <text x="366" y="214" font-family="DejaVu Serif" font-weight="bold" font-size="66"
+        fill="#FFFFFF" letter-spacing="-1">Newsdesk</text>
+  <text x="366" y="286" font-family="DejaVu Sans" font-size="23" fill="#9FB2CC">An editorial desk for</text>
+  <text x="366" y="318" font-family="DejaVu Sans" font-size="23" fill="#9FB2CC">automated news.</text>
+  <text x="366" y="366" font-family="DejaVu Sans" font-weight="bold" font-size="21" fill="#2FBF71">Nothing publishes without you.</text>
+</svg>

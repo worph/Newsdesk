@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Newsdesk: the wire comes in, a human signs it off. -->
+  <rect width="512" height="512" rx="112" fill="#1B2A41"/>
+
+  <!-- the stack: a second sheet behind, so it reads as "the wire", not one page -->
+  <g transform="rotate(-8 256 256)">
+    <rect x="132" y="126" width="248" height="252" rx="16" fill="#7E93B0"/>
+  </g>
+
+  <!-- the page on the desk -->
+  <rect x="136" y="120" width="240" height="272" rx="16" fill="#FFFFFF"/>
+
+  <!-- masthead -->
+  <rect x="162" y="148" width="188" height="26" rx="7" fill="#1B2A41"/>
+
+  <!-- lead art + column -->
+  <rect x="162" y="192" width="86" height="66" rx="8" fill="#C6D2E1"/>
+  <rect x="262" y="194" width="88" height="12" rx="6" fill="#B7C4D6"/>
+  <rect x="262" y="218" width="88" height="12" rx="6" fill="#B7C4D6"/>
+  <rect x="262" y="242" width="66" height="12" rx="6" fill="#B7C4D6"/>
+
+  <!-- body copy -->
+  <rect x="162" y="278" width="188" height="12" rx="6" fill="#B7C4D6"/>
+  <rect x="162" y="302" width="188" height="12" rx="6" fill="#B7C4D6"/>
+  <rect x="162" y="326" width="124" height="12" rx="6" fill="#B7C4D6"/>
+
+  <!-- the approval gate: nothing publishes without this -->
+  <circle cx="372" cy="372" r="72" fill="#1B2A41"/>
+  <circle cx="372" cy="372" r="60" fill="#2FBF71"/>
+  <path d="M344 372 L365 393 L402 350" fill="none" stroke="#FFFFFF" stroke-width="18"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

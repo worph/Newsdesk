@@ -517,6 +517,19 @@ just the list of things standing at it.
 | 7 | **Voices** | voice, audience, rules, examples | edit a voice |
 | 8 | **Sources** | registry: kind, hint, enabled, ingest token, watermark state, last filing received | add a source, rotate a token |
 
+Screens 5–8 are **tabs of one Configuration screen**, plus an **Advanced** tab holding the whole
+configuration as a document. The forms are the default because none of what they edit is technical;
+the document stays because it is the export format and, for now, the only way to reach endpoints,
+the `args_spec` and the reporting block — Destinations is read-only there apart from its on/off
+switch until the catalogue picker of screen 6 exists.
+
+The two views never diverge: switching between them converts the pending edit through
+`POST /api/v1/config/validate`, which returns the candidate as both an object and a document, and
+saving `PUT`s whichever one was edited into the same `writeConfig`. A candidate that cannot be
+parsed has no other rendering, so the switch is refused and the parse error is shown instead of a
+stale view. Ids are derived from the name while a row is new and frozen once saved, because an
+outlet points at a voice by id.
+
 ### D. Operations — when something is wrong
 
 | # | Screen | Scope | Primary action |

@@ -150,7 +150,8 @@ describe('gate trust through the app', () => {
   it('reports the visitor as authenticated, so the UI shows no login form', async () => {
     app = await build(async (peer) => peer === GATE_IP)
     const res = await app.inject({ method: 'GET', url: '/api/v1/auth/me', remoteAddress: GATE_IP })
-    expect(res.json()).toEqual({ authenticated: true })
+    // No password was involved, so the UI offers nothing to sign out of.
+    expect(res.json()).toEqual({ authenticated: true, passwordRequired: false })
   })
 
   it('still challenges a request that did not come through the gate', async () => {
@@ -158,7 +159,7 @@ describe('gate trust through the app', () => {
     const res = await app.inject({ method: 'GET', url: '/api/v1/config', remoteAddress: OTHER_IP })
     expect(res.statusCode).toBe(401)
     expect(await app.inject({ method: 'GET', url: '/api/v1/auth/me', remoteAddress: OTHER_IP }).then((r) => r.json()))
-      .toEqual({ authenticated: false })
+      .toEqual({ authenticated: false, passwordRequired: true })
   })
 
   it('challenges everything when no gate is configured', async () => {
@@ -231,6 +232,32 @@ describe('gate trust through the app', () => {
     app = await build(gateCheck)
     await app.inject({ method: 'GET', url: '/icon.svg', remoteAddress: GATE_IP })
     expect(gateCheck).not.toHaveBeenCalled()
+  })
+
+  it('signs every request in when auth is disabled, without opening ingest', async () => {
+    // The dev stack switch. It is the same trust the gate grants, so it must
+    // reach exactly as far — a session, and nothing the ingest token guards.
+    app = await buildApp({
+      db: handle.db,
+      sessionSecret: 'test-secret',
+      publicDir: join(dir, 'no-public'),
+      logLevel: 'silent',
+      disableAuth: true,
+    })
+    await app.ready()
+
+    expect((await app.inject({ method: 'GET', url: '/api/v1/config' })).statusCode).toBe(200)
+    expect(await app.inject({ method: 'GET', url: '/api/v1/auth/me' }).then((r) => r.json())).toEqual({
+      authenticated: true,
+      passwordRequired: false,
+    })
+
+    const forged = await app.inject({
+      method: 'POST',
+      url: '/api/v1/filings',
+      payload: { stringer_id: 'tip-line', text: 'no token presented' },
+    })
+    expect(forged.statusCode).toBe(401)
   })
 
   it('still accepts the password login while a gate is configured', async () => {

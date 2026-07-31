@@ -51,9 +51,18 @@ Filed material flows straight through: ingest trims it, the managing editor open
 proposes placements, the writer drafts one piece per placement, and each draft waits for you at
 **Review**. Nothing reaches a destination without an explicit approval of that exact payload.
 
-Sign in with **`newsdesk`** (override with `NEWSDESK_ADMIN_PASSWORD`). The ingest token is fixed to
-`dev-ingest-token` (override with `NEWSDESK_INGEST_TOKEN`) so the stringer can be configured from
-the same compose file.
+**There is no login screen in dev.** `NEWSDESK_DISABLE_AUTH` defaults to `true` in the dev compose
+file, which signs every request in — the same trust the SSO gate grants in production, granted
+unconditionally. It reaches exactly as far as a session does: the ingest endpoints still want their
+bearer token. To get the password back for a session, start the stack with
+`NEWSDESK_DISABLE_AUTH=false`; it is still **`newsdesk`** (override with `NEWSDESK_ADMIN_PASSWORD`),
+and no volume needs re-creating.
+
+The variable is refused outright by a production build — the released image sets
+`NODE_ENV=production`, where the flag is ignored and the desk logs that it ignored it.
+
+The ingest token is fixed to `dev-ingest-token` (override with `NEWSDESK_INGEST_TOKEN`) so the
+stringer can be configured from the same compose file.
 
 Source is bind-mounted, so editing `server/src` or `web/src` reloads in place. `node_modules` lives
 in an anonymous volume — dependencies are installed **in the image**, so the native `better-sqlite3`

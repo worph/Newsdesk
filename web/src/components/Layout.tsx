@@ -45,6 +45,10 @@ function HealthPill() {
 
 export function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
+  // Served from the cache App already filled. False when a gate — or a dev
+  // stack with the password off — is what signed you in, and clearing the
+  // cookie would change nothing.
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: api.me, retry: false })
 
   async function signOut() {
     await api.logout()
@@ -101,9 +105,13 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
 
         <div className="hidden px-5 py-4 md:block">
-          <button onClick={signOut} className="text-sm text-desk-500 hover:underline">
-            Sign out
-          </button>
+          {me?.passwordRequired === false ? (
+            <span className="text-xs text-desk-500">signed in without a password</span>
+          ) : (
+            <button onClick={signOut} className="text-sm text-desk-500 hover:underline">
+              Sign out
+            </button>
+          )}
         </div>
       </nav>
 

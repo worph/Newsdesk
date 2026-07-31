@@ -3,7 +3,7 @@ import { buildApp, VERSION } from './app.js'
 import { setPassword } from './auth.js'
 import { importConfigFileOnFirstBoot, isUnconfigured, readReporting } from './config/store.js'
 import { openDb, runMigrations } from './db/index.js'
-import { loadEnv } from './env.js'
+import { disableAuthIgnored, loadEnv } from './env.js'
 import { managingEditorHandler } from './pipeline/managing-editor.js'
 import { enqueue, JobQueue } from './pipeline/queue.js'
 import { reporterHandler } from './pipeline/reporter.js'
@@ -60,6 +60,7 @@ async function main(): Promise<void> {
     publicDir: env.publicDir,
     logLevel: env.logLevel,
     trustedGate: env.trustedGate,
+    disableAuth: env.disableAuth,
     receiveOptions: {
       enqueueManagingEditor,
       enqueueReporter: (filingId) => {
@@ -79,6 +80,12 @@ async function main(): Promise<void> {
       publicUrl: env.publicUrl,
     },
   })
+
+  if (env.disableAuth) {
+    app.log.warn('NEWSDESK_DISABLE_AUTH is set — every request counts as signed in. Development only.')
+  } else if (disableAuthIgnored()) {
+    app.log.error('NEWSDESK_DISABLE_AUTH ignored: this is a production build and the password stands.')
+  }
 
   // First boot: set the admin password from the environment, or mint a random
   // one and log it once. Never leave the desk open.

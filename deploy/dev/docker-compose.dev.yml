@@ -44,6 +44,11 @@ services:
       # configured from this same file.
       NEWSDESK_ADMIN_PASSWORD: "${NEWSDESK_ADMIN_PASSWORD:-newsdesk}"
       NEWSDESK_INGEST_TOKEN: "${NEWSDESK_INGEST_TOKEN:-dev-ingest-token}"
+      # No login screen in dev: every request counts as signed in. The password
+      # above is still set, so NEWSDESK_DISABLE_AUTH=false gives it back
+      # without re-creating the volume. Refused outright by a production build,
+      # which sets NODE_ENV=production.
+      NEWSDESK_DISABLE_AUTH: "${NEWSDESK_DISABLE_AUTH:-true}"
       # The Vite dev server is the origin a browser reaches the desk on, so an
       # OAuth redirect has to come back there, not to the API container.
       NEWSDESK_PUBLIC_URL: "${NEWSDESK_PUBLIC_URL:-http://localhost:${WEB_PORT:-5173}}"

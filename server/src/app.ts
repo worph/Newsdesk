@@ -26,6 +26,11 @@ export interface AppOptions {
   trustedGate?: string
   /** Injectable for tests, which have no container network to resolve on. */
   gateCheck?: GateCheck
+  /**
+   * Treat every request as signed in. Development only — `loadEnv` refuses to
+   * set it in a production build, and nothing else should pass it.
+   */
+  disableAuth?: boolean
 }
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
@@ -37,6 +42,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   })
 
   await app.register(cookie, { secret: options.sessionSecret })
+
+  // The same trust flag the SSO gate sets, granted unconditionally: the desk
+  // is single-user, so "already authenticated" is the whole of what a session
+  // proves and there is nothing else to skip.
+  if (options.disableAuth) {
+    app.addHook('onRequest', async (request) => {
+      ;(request as unknown as Record<symbol, unknown>)[GATE_TRUSTED] = true
+    })
+  }
 
   const gateCheck = options.gateCheck ?? (options.trustedGate ? createGateCheck(options.trustedGate) : undefined)
   if (gateCheck) {

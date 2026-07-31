@@ -106,6 +106,16 @@ x-casaos:
   main: newsdesk
   webui_port: 80
   index: /
+  # The dashboard tile's click URL. A store install has scheme/port_map/hostname
+  # injected from the PCS REF_* env (casa-img, route/v2/appstore_pcs.go), which
+  # only fills in keys that are absent — so pinning the two deployment-independent
+  # ones here is a no-op there, and the difference between a working link and
+  # http://<dashboard-host>:/ when the stack is installed from this file directly.
+  # `hostname` stays out: it is REF_DOMAIN-specific (newsdesk-<domain>), so a
+  # compose-file install has to add it by hand. Maison reads x-compose-app below
+  # instead and resolves the host itself, so its tile is right either way.
+  scheme: https
+  port_map: "443"
   # Docker would otherwise create the bind mount as root:root and the
   # non-root runtime user could not write the database. Literal 1000:1000
   # because CasaOS install-time substitution strips ${VAR:-default} fallbacks;
@@ -118,8 +128,13 @@ x-casaos:
   tags: ["automation", "personal"]
   developer: worph
   store_app_id: newsdesk
-  icon: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Newsdesk/icon.png
-  thumbnail: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Newsdesk/thumbnail.png
+  # Served straight out of this repo (deploy/icon.png, deploy/thumbnail.png) —
+  # the app owns its own artwork, so the tile is not waiting on Newsdesk landing
+  # in the Yundera AppStore. jsDelivr caches a branch ref for a while; bump to a
+  # tag (@v0.1.0) once the artwork stops changing. Both files are generated from
+  # the .svg sources beside them: rsvg-convert -w 512 -h 512 -o icon.png icon.svg
+  icon: https://cdn.jsdelivr.net/gh/worph/Newsdesk@main/deploy/icon.png
+  thumbnail: https://cdn.jsdelivr.net/gh/worph/Newsdesk@main/deploy/thumbnail.png
   title:
     en_us: Newsdesk
   tagline:
@@ -141,7 +156,7 @@ x-casaos:
       - Reads free-text reports from any stringer that can POST
       - Finds the stories in them and kills duplicates *semantically* — the same
         release arriving from three stringers becomes one story with three sources
-      - Placements each story by a charter you write in prose, not configuration
+      - Places each story by a charter you write in prose, not configuration
       - Drafts once per destination, in that destination's voice
       - Puts a human approval between every draft and every channel
 

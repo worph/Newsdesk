@@ -85,7 +85,9 @@ stringers:
 # and the assistant.
 outlets:
   - id: discord-test
-    name: Discord #news-test
+    # Quoted: an unquoted `#` starts a YAML comment, so this name would
+    # otherwise be stored as "Discord".
+    name: "Discord #news-test"
     description: test channel, general public audience, announcements of app releases
     role: publish
     driver: mcp

@@ -48,7 +48,8 @@ outlets:
   # deliver in dev. It exists so the managing editor has somewhere to placement stories and
   # the writer has a voice and slots to fill. Publishing is Phase 3.
   - id: discord-test
-    name: Discord #news-test
+    # Quoted: an unquoted `#` starts a YAML comment.
+    name: "Discord #news-test"
     description: |
       Test channel. General audience of self-hosters. Announcements of app
       releases and curated external links worth their attention.

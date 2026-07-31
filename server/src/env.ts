@@ -26,6 +26,17 @@ export interface Env {
    * as well. Unset means the password is the only way in.
    */
   trustedGate: string | undefined
+  /**
+   * Development convenience: every request counts as signed in, so the local
+   * stack does not ask for a password on each fresh browser profile. Refused
+   * in a production build regardless of the variable — see loadEnv.
+   */
+  disableAuth: boolean
+}
+
+/** True when the variable is set but the build refuses to honour it. */
+export function disableAuthIgnored(): boolean {
+  return process.env.NEWSDESK_DISABLE_AUTH === 'true' && process.env.NODE_ENV === 'production'
 }
 
 export function loadEnv(): Env {
@@ -45,5 +56,8 @@ export function loadEnv(): Env {
     logLevel: process.env.NEWSDESK_LOG_LEVEL ?? 'info',
     publicUrl: process.env.NEWSDESK_PUBLIC_URL,
     trustedGate: process.env.NEWSDESK_TRUSTED_GATE,
+    // The production image sets NODE_ENV=production, so an open desk cannot be
+    // one stray environment variable away from a real deployment.
+    disableAuth: process.env.NEWSDESK_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production',
   }
 }
