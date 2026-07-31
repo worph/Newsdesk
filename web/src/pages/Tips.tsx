@@ -8,7 +8,7 @@ import { ApiError, api } from '../api'
  * and no credentials and wants to be one tap on a phone. Also the landing
  * point for the Android share target, which arrives as ?url=&text=&title=.
  */
-export function Ideas() {
+export function Tips() {
   const [params, setParams] = useSearchParams()
   const [text, setText] = useState('')
   const [url, setUrl] = useState('')
@@ -27,7 +27,7 @@ export function Ideas() {
   }, [params, setParams])
 
   const submit = useMutation({
-    mutationFn: () => api.postIdea({ text: text.trim(), ...(url.trim() ? { url: url.trim() } : {}) }),
+    mutationFn: () => api.postTip({ text: text.trim(), ...(url.trim() ? { url: url.trim() } : {}) }),
     onSuccess: () => {
       setSent('Captured.')
       setText('')
@@ -47,20 +47,20 @@ export function Ideas() {
   return (
     <div className="mx-auto max-w-xl space-y-5 px-4 pb-16 md:px-6">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight">Idea box</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Tip line</h1>
         <p className="text-sm text-desk-500">
-          Anything worth writing about. It is filed as a submission and read by the director like any other
-          source — treated as data, never as an instruction.
+          Anything worth writing about. It is filed as a submission and read by the managing editor
+          like any other stringer — treated as data, never as an instruction.
         </p>
       </header>
 
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="space-y-1.5">
-          <label htmlFor="idea" className="text-sm font-medium">
-            Idea
+          <label htmlFor="tip" className="text-sm font-medium">
+            Tip
           </label>
           <textarea
-            id="idea"
+            id="tip"
             value={text}
             autoFocus
             rows={5}
@@ -71,11 +71,11 @@ export function Ideas() {
         </div>
 
         <div className="space-y-1.5">
-          <label htmlFor="idea-url" className="text-sm font-medium">
+          <label htmlFor="tip-url" className="text-sm font-medium">
             Link <span className="font-normal text-desk-500">(optional)</span>
           </label>
           <input
-            id="idea-url"
+            id="tip-url"
             type="url"
             inputMode="url"
             value={url}

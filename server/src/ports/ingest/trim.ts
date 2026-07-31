@@ -1,7 +1,7 @@
 /**
  * Cheap deterministic work done BEFORE any inference, purely to keep the
  * expensive judgement small. None of this is a deduplication authority — that
- * is the director's job, semantically, because the same story can arrive
+ * is the managing editor's job, semantically, because the same story can arrive
  * through a different door with different wording and no shared identifier.
  * This only avoids paying an LLM to re-read material it has already seen.
  *
@@ -9,13 +9,13 @@
  */
 
 export interface TrimResult {
-  /** What the director will actually be given. Empty means "nothing new". */
+  /** What the managing editor will actually be given. Empty means "nothing new". */
   considered: string
-  /** New watermark for a timeline source, when it advanced. */
+  /** New watermark for a timeline stringer, when it advanced. */
   watermark?: string
-  /** New stored snapshot for a snapshot source. */
+  /** New stored snapshot for a snapshot stringer. */
   snapshot?: string
-  /** Human-readable account of what happened, shown in the Inbox. */
+  /** Human-readable account of what happened, shown in the Wire. */
   note: string
 }
 
@@ -25,7 +25,7 @@ export interface TimelineEntry {
 }
 
 // Leading markdown decoration, then an ISO-ish date. Deliberately narrow:
-// guessing at loose date formats produces silent mis-trimming, and a source
+// guessing at loose date formats produces silent mis-trimming, and a stringer
 // whose dates we cannot read falls back to "consider everything" instead.
 const DATE_LINE =
   /^\s*(?:[-*+]\s+|#{1,6}\s+|>\s+)?\[?(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?)\]?/
@@ -39,7 +39,7 @@ function normalizeDate(raw: string): string | null {
 /**
  * Split free text into dated entries. Text before the first dated line is the
  * preamble and is never dropped — it is usually a title or framing the
- * director needs to read the entries at all.
+ * managing editor needs to read the entries at all.
  */
 export function parseTimeline(text: string): { preamble: string; entries: TimelineEntry[] } {
   const lines = text.split('\n')
@@ -73,8 +73,8 @@ export function trimTimeline(text: string, watermark: string | null): TrimResult
   const { preamble, entries } = parseTimeline(text)
 
   if (entries.length === 0) {
-    // Better to hand over everything than to silently drop a source whose date
-    // format we do not recognise. Said out loud so it is visible in the Inbox.
+    // Better to hand over everything than to silently drop a stringer whose date
+    // format we do not recognise. Said out loud so it is visible in the Wire.
     return { considered: text, note: 'no dated entries recognised — considered the whole submission' }
   }
 
@@ -84,7 +84,7 @@ export function trimTimeline(text: string, watermark: string | null): TrimResult
   )
 
   if (!watermark) {
-    // Baseline: a fresh source must not flood the desk with its whole backlog.
+    // Baseline: a fresh stringer must not flood the desk with its whole backlog.
     const mostRecent = entries.reduce((best, e) => (e.at && best.at && e.at > best.at ? e : best))
     const skipped = entries.length - 1
     return {
@@ -113,7 +113,7 @@ export function trimTimeline(text: string, watermark: string | null): TrimResult
 const DIFF_LIMIT = 2000
 
 /**
- * Longest common subsequence over lines, so the director is handed the change
+ * Longest common subsequence over lines, so the managing editor is handed the change
  * rather than the whole state.
  */
 export function diffLines(previous: string, next: string): string {
@@ -189,7 +189,7 @@ export function trim({ kind, text, watermark, lastSnapshot }: TrimInput): TrimRe
     case 'snapshot':
       return trimSnapshot(text, lastSnapshot)
     default:
-      // A report or an idea is considered whole — depth is the source's
+      // A report or a tip is considered whole — depth is the stringer's
       // business, and there is nothing deterministic to trim.
       return { considered: text, note: 'considered whole' }
   }

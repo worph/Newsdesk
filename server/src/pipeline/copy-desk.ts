@@ -10,13 +10,13 @@ import { fillPrompt, loadPrompt } from '../prompts/load.js'
 import { slotsShapeHint, slotsZodSchema } from '../schema/slots.js'
 
 /**
- * The assistant edits the document in place, beside it, in the editor's own
+ * The copy desk edits the document in place, beside it, in the editor's own
  * words. It returns a reply and the FULL updated slots — never a partial patch
  * and never a tool call against the world.
  *
  * Every turn writes a version, so "undo" is the history rather than an accept
  * ceremony on each suggestion. Safety lives in the version list, which is why
- * the assistant can be allowed to rewrite the document directly.
+ * the copy desk can be allowed to rewrite the document directly.
  *
  * See ARCHITECTURE.md section 8.
  */
@@ -24,7 +24,7 @@ import { slotsShapeHint, slotsZodSchema } from '../schema/slots.js'
 /**
  * Insertion order, not timestamp order.
  *
- * A turn writes the user message and the assistant reply in one transaction,
+ * A turn writes the user message and the copy desk's reply in one transaction,
  * so their `created_at` values tie to the millisecond — and the id tiebreaker
  * is a random UUID, which would render the conversation in a random order.
  * SQLite's rowid is monotonic for inserts and nothing here is ever deleted.
@@ -48,7 +48,7 @@ function renderSlots(args: ArgsSpec, slots: Record<string, string>): string {
     .join('\n\n')
 }
 
-export function buildAssistantPrompt(
+export function buildCopyDeskPrompt(
   db: Db,
   publicationId: string,
   message: string,
@@ -67,8 +67,8 @@ export function buildAssistantPrompt(
   const args = JSON.parse(target.argsSpec) as ArgsSpec
   const slots = publication.slots ? (JSON.parse(publication.slots) as Record<string, string>) : {}
 
-  const persona = target.personaId
-    ? db.select().from(schema.personas).where(eq(schema.personas.id, target.personaId)).get()
+  const voice = target.voiceId
+    ? db.select().from(schema.voices).where(eq(schema.voices.id, target.voiceId)).get()
     : undefined
 
   const history = db
@@ -78,10 +78,10 @@ export function buildAssistantPrompt(
     .orderBy(CHAT_ORDER)
     .all()
 
-  const prompt = fillPrompt(loadPrompt('assistant'), {
-    PERSONA: persona
-      ? [`voice: ${persona.voice}`, `audience: ${persona.audience}`, ...(persona.rules ? [persona.rules] : [])].join('\n')
-      : '(no persona configured — keep the draft as it reads)',
+  const prompt = fillPrompt(loadPrompt('copy-desk'), {
+    VOICE: voice
+      ? [`tone: ${voice.tone}`, `audience: ${voice.audience}`, ...(voice.rules ? [voice.rules] : [])].join('\n')
+      : '(no voice configured — keep the draft as it reads)',
     TARGET: [`name: ${target.name}`, '', target.description.trim()].join('\n'),
     STORY: [`title: ${story.title}`, ...(story.url ? [`url: ${story.url}`] : []), '', story.summary].join('\n'),
     SLOTS: renderSlots(args, slots),
@@ -93,19 +93,19 @@ export function buildAssistantPrompt(
   return { prompt, args }
 }
 
-export interface AssistantReply {
+export interface CopyDeskReply {
   reply: string
   slots: Record<string, string>
   versionId: string
 }
 
-export async function runAssistant(
+export async function runCopyDesk(
   db: Db,
   driver: InferenceDriver,
   publicationId: string,
   message: string,
-): Promise<AssistantReply> {
-  const { prompt, args } = buildAssistantPrompt(db, publicationId, message)
+): Promise<CopyDeskReply> {
+  const { prompt, args } = buildCopyDeskPrompt(db, publicationId, message)
 
   // The full draft, not a patch: anything omitted would silently be lost.
   const resultSchema = z.object({
@@ -118,7 +118,7 @@ export async function runAssistant(
     .join('\n  ')}\n}`
 
   const result = await runStructured(db, driver, {
-    purpose: 'assistant',
+    purpose: 'copy-desk',
     refId: publicationId,
     prompt,
     schema: resultSchema,
@@ -126,7 +126,7 @@ export async function runAssistant(
   })
 
   const versionId = randomUUID()
-  const assistantMessageId = randomUUID()
+  const replyMessageId = randomUUID()
 
   db.transaction((tx) => {
     tx.insert(schema.chatMessages)
@@ -138,13 +138,13 @@ export async function runAssistant(
         id: versionId,
         publicationId,
         slots: JSON.stringify(result.slots),
-        origin: 'assistant',
+        origin: 'copy-desk',
       })
       .run()
 
     tx.insert(schema.chatMessages)
       .values({
-        id: assistantMessageId,
+        id: replyMessageId,
         publicationId,
         role: 'assistant',
         content: result.reply,

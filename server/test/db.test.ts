@@ -23,17 +23,17 @@ afterEach(() => {
 
 async function seedTarget() {
   const { db } = handle
-  await db.insert(schema.personas).values({
+  await db.insert(schema.voices).values({
     id: 'alicia',
     name: 'Alicia',
-    voice: 'concise',
+    tone: 'concise',
     audience: 'self-hosters',
   })
   await db.insert(schema.targets).values({
     id: 'discord-test',
     name: 'Discord #news-test',
     description: 'test channel',
-    personaId: 'alicia',
+    voiceId: 'alicia',
     tool: 'discord-mcp__send_embed',
     argsSpec: JSON.stringify({ channelId: '1514993197082742814' }),
   })
@@ -60,11 +60,11 @@ describe('migrations', () => {
       'inference_calls',
       'jobs',
       'mcp_endpoints',
-      'personas',
+      'voices',
       'publications',
       'push_subscriptions',
       'settings',
-      'sources',
+      'stringers',
       'stories',
       'story_submissions',
       'submissions',
@@ -89,7 +89,7 @@ describe('the story x target ledger', () => {
       storyId: 'story-1',
       targetId: 'discord-test',
       status: 'PROPOSED',
-      origin: 'director',
+      origin: 'managing-editor',
     })
     await expect(
       db.insert(schema.publications).values({
@@ -111,7 +111,7 @@ describe('the story x target ledger', () => {
         storyId: 'story-1',
         targetId: 'nowhere',
         status: 'PROPOSED',
-        origin: 'director',
+        origin: 'managing-editor',
       }),
     ).rejects.toThrow(/FOREIGN KEY/i)
   })
@@ -120,14 +120,14 @@ describe('the story x target ledger', () => {
 describe('submissions', () => {
   it('accepts two submissions carrying the same content — dedup is not a key lookup', async () => {
     const { db } = handle
-    await db.insert(schema.sources).values([
+    await db.insert(schema.stringers).values([
       { id: 'github', name: 'GitHub stringer', kind: 'report' },
       { id: 'korben', name: 'korben', kind: 'timeline' },
     ])
     const text = 'WireGuard Easy Host v15.3.0 shipped'
     await db.insert(schema.submissions).values([
-      { id: 'sub-1', sourceId: 'github', kind: 'report', text, status: 'RECEIVED' },
-      { id: 'sub-2', sourceId: 'korben', kind: 'timeline', text, status: 'RECEIVED' },
+      { id: 'sub-1', stringerId: 'github', kind: 'report', text, status: 'RECEIVED' },
+      { id: 'sub-2', stringerId: 'korben', kind: 'timeline', text, status: 'RECEIVED' },
     ])
     const rows = await db.select().from(schema.submissions)
     expect(rows).toHaveLength(2)

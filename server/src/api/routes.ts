@@ -43,7 +43,7 @@ export function registerRoutes(
   receiveOptions: RouteOptions = {},
 ): void {
   registerIngestRoutes(app, db, receiveOptions)
-  registerStoryRoutes(app, db, receiveOptions.enqueueDirector, receiveOptions.enqueueWriter)
+  registerStoryRoutes(app, db, receiveOptions.enqueueManagingEditor, receiveOptions.enqueueWriter)
   registerPublicationRoutes(app, db, receiveOptions.enqueuePublish, receiveOptions.driver)
   registerMcpRoutes(app, db, receiveOptions.publicUrl)
 

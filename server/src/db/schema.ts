@@ -6,7 +6,7 @@ import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'driz
  * JSON columns hold driver-specific blobs.
  *
  * Note what is deliberately absent: there is NO uniqueness constraint on
- * incoming content. Deduplication is the director's judgement, recorded on the
+ * incoming content. Deduplication is the managing editor's judgement, recorded on the
  * story with its reason and the ids it compared against.
  */
 
@@ -25,24 +25,24 @@ export const mcpEndpoints = sqliteTable('mcp_endpoints', {
   status: text('status'),
 })
 
-export const personas = sqliteTable('personas', {
+export const voices = sqliteTable('voices', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
-  voice: text('voice').notNull(),
+  tone: text('tone').notNull(),
   audience: text('audience').notNull(),
   rules: text('rules'),
   examples: text('examples'),
 })
 
-export const sources = sqliteTable('sources', {
+export const stringers = sqliteTable('stringers', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
-  kind: text('kind').notNull(), // report | timeline | snapshot | idea
+  kind: text('kind').notNull(), // report | timeline | snapshot | tip
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   hint: text('hint'),
-  /** Last considered timestamp, for timeline sources. */
+  /** Last considered timestamp, for timeline stringers. */
   watermark: text('watermark'),
-  /** Previous body, for snapshot sources, so the director is handed the change. */
+  /** Previous body, for snapshot stringers, so the managing editor is handed the change. */
   lastSnapshot: text('last_snapshot'),
   createdAt: text('created_at').notNull().default(now),
 })
@@ -50,12 +50,12 @@ export const sources = sqliteTable('sources', {
 export const targets = sqliteTable('targets', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
-  /** The director reads this to decide what belongs here. */
+  /** The managing editor reads this to decide what belongs here. */
   description: text('description').notNull(),
   role: text('role').notNull().default('publish'), // publish | notify
   driver: text('driver').notNull().default('mcp'), // mcp | webhook | builtin
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
-  personaId: text('persona_id').references(() => personas.id),
+  voiceId: text('voice_id').references(() => voices.id),
   endpointId: text('endpoint_id').references(() => mcpEndpoints.id),
   tool: text('tool'),
   destinationKey: text('destination_key'),
@@ -77,12 +77,12 @@ export const submissions = sqliteTable(
   'submissions',
   {
     id: text('id').primaryKey(),
-    sourceId: text('source_id')
+    stringerId: text('stringer_id')
       .notNull()
-      .references(() => sources.id),
+      .references(() => stringers.id),
     kind: text('kind').notNull(),
     text: text('text').notNull(),
-    /** The slice actually sent to the director, after watermark or snapshot diff. */
+    /** The slice actually sent to the managing editor, after watermark or snapshot diff. */
     considered: text('considered'),
     refs: text('refs'),
     filedAt: text('filed_at'),
@@ -90,7 +90,7 @@ export const submissions = sqliteTable(
     status: text('status').notNull(), // RECEIVED|PROCESSING|PROCESSED|FAILED
     outcome: text('outcome'),
   },
-  (t) => [index('submissions_status_idx').on(t.status), index('submissions_source_idx').on(t.sourceId)],
+  (t) => [index('submissions_status_idx').on(t.status), index('submissions_stringer_idx').on(t.stringerId)],
 )
 
 export const stories = sqliteTable(
@@ -98,7 +98,7 @@ export const stories = sqliteTable(
   {
     id: text('id').primaryKey(),
     title: text('title').notNull(),
-    /** What the director understood; the writers' factual basis. */
+    /** What the managing editor understood; the writers' factual basis. */
     summary: text('summary').notNull(),
     body: text('body'),
     url: text('url'),
@@ -111,7 +111,7 @@ export const stories = sqliteTable(
     /** Coarse and cosmetic: sorts the queue, never filters. */
     label: text('label'),
     dropReason: text('drop_reason'),
-    /** JSON snapshot of the director's calls, kept for the override diff. */
+    /** JSON snapshot of the managing editor's calls, kept for the override diff. */
     proposedRoutes: text('proposed_routes'),
     createdAt: text('created_at').notNull().default(now),
   },
@@ -144,10 +144,10 @@ export const publications = sqliteTable(
       .notNull()
       .references(() => targets.id),
     status: text('status').notNull(),
-    /** 'director' | 'human' — was this route proposed, or added by the editor? */
+    /** 'managing-editor' | 'human' — was this route proposed, or added by the editor? */
     origin: text('origin').notNull(),
     routeReason: text('route_reason'),
-    /** The director's note to the writer. */
+    /** The managing editor's note to the writer. */
     angle: text('angle'),
     /** JSON: current authored slot values. */
     slots: text('slots'),
@@ -165,7 +165,7 @@ export const publications = sqliteTable(
   ],
 )
 
-/** Every assistant edit and manual save. Safety lives here, not in an accept ceremony. */
+/** Every copy-desk edit and manual save. Safety lives here, not in an accept ceremony. */
 export const draftVersions = sqliteTable(
   'draft_versions',
   {
@@ -174,7 +174,7 @@ export const draftVersions = sqliteTable(
       .notNull()
       .references(() => publications.id),
     slots: text('slots').notNull(),
-    origin: text('origin').notNull(), // writer | assistant | human
+    origin: text('origin').notNull(), // writer | copy-desk | human
     createdAt: text('created_at').notNull().default(now),
   },
   (t) => [index('draft_versions_pub_idx').on(t.publicationId)],
@@ -202,7 +202,7 @@ export const jobs = sqliteTable(
   'jobs',
   {
     id: text('id').primaryKey(),
-    kind: text('kind').notNull(), // direct | write | publish
+    kind: text('kind').notNull(), // assign | write | publish
     refId: text('ref_id').notNull(),
     status: text('status').notNull(), // PENDING|RUNNING|DONE|FAILED
     attempts: integer('attempts').notNull().default(0),
@@ -233,7 +233,7 @@ export const events = sqliteTable(
 export const inferenceCalls = sqliteTable('inference_calls', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   at: text('at').notNull().default(now),
-  purpose: text('purpose').notNull(), // director | writer | assistant
+  purpose: text('purpose').notNull(), // managing-editor | writer | copy-desk
   refId: text('ref_id'),
   durationMs: integer('duration_ms'),
   ok: integer('ok', { mode: 'boolean' }).notNull(),

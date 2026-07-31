@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { ToolSchema } from '../ports/inference/types.js'
 
 /**
- * The director's vocabulary, generated from the live target list so an unknown
+ * The managing editor's vocabulary, generated from the live target list so an unknown
  * destination is impossible rather than merely validated.
  *
  * The tool calls in ARCHITECTURE.md section 5.1 are expressed here as one JSON
@@ -23,12 +23,12 @@ export interface TargetChoice {
   name: string
   description: string
   role: string
-  personaSummary?: string
+  voiceSummary?: string
 }
 
 /**
  * The result's shape, defined once with a plain string `target_id` so the type
- * is stable. `directorResultSchema` below narrows that key to a generated
+ * is stable. `managingEditorResultSchema` below narrows that key to a generated
  * enum; enum members are strings, so the validated value still satisfies this.
  */
 const routeShape = z.object({
@@ -55,15 +55,15 @@ const resultShape = z.object({
   no_story_reason: z.string().optional(),
 })
 
-export type DirectorResult = z.infer<typeof resultShape>
-export type DirectorStory = DirectorResult['stories'][number]
+export type ManagingEditorResult = z.infer<typeof resultShape>
+export type ManagingEditorStory = ManagingEditorResult['stories'][number]
 
 /**
  * Build the result validator. `targetIds` becomes an enum, so a route to a
  * destination that does not exist fails validation and is fed back for
  * correction rather than reaching a database row.
  */
-export function directorResultSchema(targetIds: string[]): z.ZodType<DirectorResult> {
+export function managingEditorResultSchema(targetIds: string[]): z.ZodType<ManagingEditorResult> {
   const targetId =
     targetIds.length > 0
       ? z.enum(targetIds as [string, ...string[]])
@@ -75,7 +75,7 @@ export function directorResultSchema(targetIds: string[]): z.ZodType<DirectorRes
       .array(storyShape.extend({ routes: z.array(routeShape.extend({ target_id: targetId })).default([]) }))
       .default([]),
     no_story_reason: z.string().optional(),
-  }) as unknown as z.ZodType<DirectorResult>
+  }) as unknown as z.ZodType<ManagingEditorResult>
 }
 
 /**
@@ -83,7 +83,7 @@ export function directorResultSchema(targetIds: string[]): z.ZodType<DirectorRes
  * matched. Checked after parsing rather than in the schema so the message can
  * name the offending story, and so the retry gets something actionable.
  */
-export function checkVerdictLinks(result: DirectorResult, knownStoryIds: Set<string>): string[] {
+export function checkVerdictLinks(result: ManagingEditorResult, knownStoryIds: Set<string>): string[] {
   const problems: string[] = []
 
   for (const story of result.stories) {
@@ -106,7 +106,7 @@ export function checkVerdictLinks(result: DirectorResult, knownStoryIds: Set<str
 }
 
 /** The same vocabulary as real tools, for a driver that can be handed schemas. */
-export function directorTools(targets: TargetChoice[]): ToolSchema[] {
+export function managingEditorTools(targets: TargetChoice[]): ToolSchema[] {
   const targetIds = targets.map((t) => t.id)
 
   return [
@@ -183,7 +183,7 @@ export function directorTools(targets: TargetChoice[]): ToolSchema[] {
 }
 
 /** Compact shape hint for the text driver — the same contract, in prose. */
-export function directorShapeHint(targetIds: string[]): string {
+export function managingEditorShapeHint(targetIds: string[]): string {
   const ids = targetIds.map((id) => `"${id}"`).join(' | ') || '(no targets configured)'
   return [
     '{',

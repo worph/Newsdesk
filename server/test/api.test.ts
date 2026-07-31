@@ -18,22 +18,22 @@ mcp_endpoints:
   - id: beacon
     name: yunderalabs beacon
     url: http://beacon-backend:9300/mcp
-personas:
+voices:
   - id: alicia
     name: Alicia
-    voice: concise, technical, anti-hype
+    tone: concise, technical, anti-hype
     audience: self-hosters and homelabbers
-sources:
-  - id: idea-box
-    name: Idea box
-    kind: idea
+stringers:
+  - id: tip-line
+    name: Tip line
+    kind: tip
 targets:
   - id: discord-test
     name: Discord #news-test
     description: test channel for a general audience
     role: publish
     driver: mcp
-    persona: alicia
+    voice: alicia
     endpoint: beacon
     tool: discord-mcp__send_embed
     args:
@@ -205,7 +205,7 @@ describe('config round trip', () => {
       .run()
     handle.sqlite
       .prepare(
-        "insert into publications (id,story_id,target_id,status,origin) values ('p1','s1','discord-test','PUBLISHED','director')",
+        "insert into publications (id,story_id,target_id,status,origin) values ('p1','s1','discord-test','PUBLISHED','managing-editor')",
       )
       .run()
 

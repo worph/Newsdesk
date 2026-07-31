@@ -24,7 +24,7 @@ export const slotDefSchema = z.object({
   label: z.string().min(1, 'a slot needs a label — it is what the editor sees'),
   max: z.number().int().positive().optional(),
   optional: z.boolean().default(false),
-  /** At most one per target: the slot that gets the full editor and the assistant. */
+  /** At most one per target: the slot that gets the full editor and the copy desk. */
   primary: z.boolean().default(false),
   /** Guidance passed through to the writer prompt. */
   hint: z.string().optional(),

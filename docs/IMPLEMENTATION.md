@@ -41,11 +41,11 @@ design depends on it — decide at M0.
         delivery/     driver interface; drivers: mcp, webhook, builtin
         ingest/       HTTP handlers; watermark + snapshot diffing; (later) mcp-pull
         mcp/          shared MCP client, endpoint registry, tool discovery + catalogue cache
-      pipeline/       director, writer, assistant, publisher, queue, scheduler
+      pipeline/       managing editor, writer, assistant, publisher, queue, scheduler
       schema/         slot spec -> tool schema generation; payload merge; validators
       api/            routes
       render/         slot rendering, sanitization, per-driver formatters
-      prompts/        director.md, writer.md, assistant.md (versioned)
+      prompts/        managing editor.md, writer.md, assistant.md (versioned)
     test/             fixtures: submissions, recorded inference results, dedup regression set
   web/                React app, service worker, manifest
   deploy/
@@ -63,9 +63,9 @@ SQLite. Timestamps are ISO-8601 UTC text. JSON columns hold driver-specific blob
 ```sql
 -- configuration -------------------------------------------------------------
 CREATE TABLE sources (
-  id          TEXT PRIMARY KEY,          -- 'github-yundera-root', 'korben', 'idea-box'
+  id          TEXT PRIMARY KEY,          -- 'github-yundera-root', 'korben', 'tip-line'
   name        TEXT NOT NULL,
-  kind        TEXT NOT NULL,             -- 'report' | 'timeline' | 'snapshot' | 'idea'
+  kind        TEXT NOT NULL,             -- 'report' | 'timeline' | 'snapshot' | 'tip'
   enabled     INTEGER NOT NULL DEFAULT 1,
   hint        TEXT,                      -- narrowing note, subordinate to the charter
   watermark   TEXT,                      -- JSON: last considered timestamp (timeline)
@@ -73,7 +73,7 @@ CREATE TABLE sources (
   created_at  TEXT NOT NULL
 );
 
-CREATE TABLE personas (
+CREATE TABLE voices (
   id TEXT PRIMARY KEY, name TEXT NOT NULL,
   voice TEXT NOT NULL, audience TEXT NOT NULL, rules TEXT, examples TEXT
 );
@@ -91,11 +91,11 @@ CREATE TABLE mcp_endpoints (             -- Beacon aggregators and standalone se
 CREATE TABLE targets (
   id          TEXT PRIMARY KEY,          -- 'discord-news', 'nextcloud-tech'
   name        TEXT NOT NULL,
-  description TEXT NOT NULL,             -- the director reads this: what belongs here
+  description TEXT NOT NULL,             -- the managing editor reads this: what belongs here
   role        TEXT NOT NULL,             -- 'publish' | 'notify'
   driver      TEXT NOT NULL,             -- 'mcp' | 'webhook' | 'builtin'
   enabled     INTEGER NOT NULL DEFAULT 1,
-  persona_id  TEXT REFERENCES personas(id),
+  voice_id  TEXT REFERENCES voices(id),
   endpoint_id TEXT REFERENCES mcp_endpoints(id),
   tool        TEXT,                      -- 'discord-mcp__send_embed'
   args_spec   TEXT NOT NULL              -- JSON: each key is literal | derived | slot
@@ -109,7 +109,7 @@ CREATE TABLE charter (                   -- append-only; latest row wins
 -- content -------------------------------------------------------------------
 CREATE TABLE submissions (
   id          TEXT PRIMARY KEY,
-  source_id   TEXT NOT NULL REFERENCES sources(id),
+  stringer_id TEXT NOT NULL REFERENCES stringers(id),
   kind        TEXT NOT NULL,
   text        TEXT NOT NULL,
   considered  TEXT,                      -- the slice actually sent (post watermark/diff)
@@ -132,7 +132,7 @@ CREATE TABLE stories (
   compared_ids  TEXT,                    -- JSON: what the verdict was made against
   label         TEXT,                    -- coarse, cosmetic: sorts the queue, never filters
   drop_reason   TEXT,
-  proposed_routes TEXT,                  -- JSON snapshot of the director's calls
+  proposed_routes TEXT,                  -- JSON snapshot of the managing editor's calls
   created_at    TEXT NOT NULL
 );
 
@@ -147,9 +147,9 @@ CREATE TABLE publications (              -- the story x target ledger
   story_id     TEXT NOT NULL REFERENCES stories(id),
   target_id    TEXT NOT NULL REFERENCES targets(id),
   status       TEXT NOT NULL,            -- PROPOSED|DRAFTING|AWAITING_APPROVAL|APPROVED|PUBLISHED|REJECTED|FAILED
-  origin       TEXT NOT NULL,            -- 'director' | 'human'
+  origin       TEXT NOT NULL,            -- 'managing-editor' | 'human'
   route_reason TEXT,
-  angle        TEXT,                     -- the director's note to the writer
+  angle        TEXT,                     -- the managing editor's note to the writer
   slots        TEXT,                     -- JSON: current authored values {title, description, image}
   payload      TEXT,                     -- JSON actually sent, merged and frozen at approval
   external_id  TEXT, external_url TEXT, error TEXT,
@@ -177,7 +177,7 @@ CREATE TABLE chat_messages (
 -- operations ----------------------------------------------------------------
 CREATE TABLE jobs (
   id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL,                    -- 'direct' | 'write' | 'publish'
+  kind TEXT NOT NULL,                    -- 'assign' | 'write' | 'publish'
   ref_id TEXT NOT NULL,
   status TEXT NOT NULL,                  -- PENDING|RUNNING|DONE|FAILED
   attempts INTEGER NOT NULL DEFAULT 0,
@@ -207,14 +207,14 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 Notes:
 
-- **No uniqueness constraint on incoming content.** Deduplication is the director's verdict, recorded
+- **No uniqueness constraint on incoming content.** Deduplication is the managing editor's verdict, recorded
   on the story with its reason and the ids it compared against.
 - `publications.slots` is the live authored state; `payload` is the merged, frozen object written at
   approval and sent verbatim — which is what makes publish idempotent and retry safe.
 - `stories.proposed_routes` versus the `publications` rows is the **override diff**;
-  `publications.origin` distinguishes a route the director proposed from one the editor added, and a
+  `publications.origin` distinguishes a route the managing editor proposed from one the editor added, and a
   switched-off proposal leaves a `REJECTED` row rather than disappearing.
-- `submissions.considered` records exactly what was sent to the director after watermarking or
+- `submissions.considered` records exactly what was sent to the managing editor after watermarking or
   snapshot diffing — essential when debugging "why was this missed?"
 - FTS5 over `stories(title, summary)` when the corpus outgrows a wholesale prompt; not in v1.
 
@@ -363,10 +363,22 @@ for us. Because the failure is silent, `noteRefreshToken` records a warning on a
 that arrives without a refresh token, and it is shown on the callback page and in Settings rather
 than discovered in the middle of the night.
 
-**Verified live against `beacon-yunderalabs.nsl.sh` on 2026-07-31** — discovery, dynamic
-registration and the built authorization request, carrying `code_challenge_method=S256`,
-`scope=mcp offline_access` and `prompt=consent`. Only the browser consent and token exchange remain
-unverified, since by construction they need a human at a browser.
+**Verified end to end against `beacon-yunderalabs.nsl.sh` on 2026-07-31**, through the real UI in a
+real browser: Connect → discovery → dynamic registration → an authorization request carrying
+`code_challenge_method=S256`, `scope=mcp offline_access` and `prompt=consent` → login → callback →
+tokens stored, **with a refresh token**. `/healthz` for that endpoint went from `unauthorized` to
+`ok`, and `overview` + `server_doc` then enumerated six aggregated servers including
+**`discord-mcp`** — the thing the move off `?hash=` had blocked.
+
+Two things worth knowing next time:
+
+- **The granted `scope` comes back as `mcp`, not `mcp offline_access` — yet a refresh token *is*
+  issued.** The presence of the refresh token, not the reported scope, is the only reliable signal
+  that a connection will survive, which is what `noteRefreshToken` and `summarise` key on. Trusting
+  the scope string here would have raised a false warning on a perfectly good connection.
+- **The login is two OIDC hops**: the Beacon's AppShield delegates to `auth-yunderalabs.nsl.sh`
+  (Dex), which offers CasaOS or a local account. An existing CasaOS session carries straight through
+  both with no password prompt; a fresh browser profile will need real credentials.
 
 **Runtime.** `attachAuth` gives an endpoint row an `OAuthClientProvider` when it has a connection;
 the SDK then owns the `Authorization` header and refreshes the access token when it expires. A
@@ -398,12 +410,12 @@ interface InferenceDriver {
 Three templates in `server/src/prompts/`, each delimiting ingested content and labelling it
 untrusted:
 
-- **director** — charter, target catalogue (id, description, persona summary), source hint, the
+- **managing editor** — charter, target catalogue (id, description, voice summary), source hint, the
   considered slice of the submission, and every story from the comparison window. Emits
   `open_story` / `duplicate_of` / `update_of` / `needs_context` / `propose_route` / `no_story`.
-- **writer** — story summary and material, persona, the route's `angle`, slot definitions. Emits
+- **writer** — story summary and material, voice, the route's `angle`, slot definitions. Emits
   `submit_draft` with the generated schema.
-- **assistant** — persona, current slots, conversation, editor's turn. Returns a reply and the full
+- **assistant** — voice, current slots, conversation, editor's turn. Returns a reply and the full
   updated slots. Never a tool call against the world, never a partial patch.
 
 ## 6. API surface
@@ -412,13 +424,14 @@ All `/api/v1`. Session cookie for the UI; bearer token for ingest.
 
 ```
 POST   /submissions                ingest (token). Free text. Object or array.
-POST   /ideas                      internal idea box + PWA share target
+POST   /tips                       internal tip line + PWA share target
+                                   (`/ideas` still accepted — the pre-rename spelling)
 
 GET    /stories?status=&q=         queue, spiked, archive (one endpoint, filtered)
 GET    /stories/:id                story, contributing submissions, publications, related story
-POST   /stories/:id/rerun          re-run the director
-POST   /stories/:id/routes         add a route the director did not propose
-GET    /submissions?status=        raw inbox, including "no story" outcomes
+POST   /stories/:id/rerun          re-run the managing editor
+POST   /stories/:id/routes         add a route the managing editor did not propose
+GET    /submissions?status=        the raw wire, including "no story" outcomes
 
 PATCH  /publications/:id           save slots (creates a version)
 POST   /publications/:id/chat      { message } -> { reply, slots }
@@ -430,7 +443,7 @@ POST   /publications/:id/reject    { reason }
 POST   /publications/:id/retry     re-send the frozen payload
 
 GET/PUT  /charter                  read latest / append new version
-CRUD     /sources /targets /personas /mcp-endpoints
+CRUD     /sources /targets /voices /mcp-endpoints
 POST     /mcp-endpoints/:id/discover     refresh the tool catalogue
 POST     /targets/propose-args           LLM proposes an args_spec from a tool schema
 POST     /targets/:id/test               dry-run with a sample story
@@ -452,38 +465,38 @@ mobile-first; the rest are configuration and forensics and may be desktop-leanin
 | # | Screen | Scope | Primary action |
 |---|---|---|---|
 | 1 | **Queue** (the gate) | everything awaiting a decision: stories with their per-target route chips, oldest first. Home screen; badge = publications in `AWAITING_APPROVAL` | open a story |
-| 2 | **Review** | one publication: the primary slot as a document, other slots as fields, the director's reason and angle, assistant chat, version history, "what will be sent", related stories. Tabs across targets when a story has several routes | **approve** / spike |
-| 3 | **Idea box** | one field plus optional link; also the landing page for the Android share sheet and the `?url=` deep link | submit |
+| 2 | **Review** | one publication: the primary slot as a document, other slots as fields, the managing editor's reason and angle, assistant chat, version history, "what will be sent", related stories. Tabs across targets when a story has several routes | **approve** / spike |
+| 3 | **Tip line** | one field plus optional link; also the landing page for the Android share sheet and the `?url=` deep link | submit |
 
-The gate as a *concept* is enforced on screen 2 (approve is the only path to the wire); screen 1 is
+The gate as a *concept* is enforced on screen 2 (approve is the only path to the press); screen 1 is
 just the list of things standing at it.
 
 ### B. What happened — weekly
 
 | # | Screen | Scope | Primary action |
 |---|---|---|---|
-| 4 | **Stories** | one browser with filters: awaiting, spiked, needs-context, published. The spiked filter is where invariant 6 lives — every drop with its reason, and for a duplicate, the story it matched, side by side | search, reopen, re-run the director |
+| 4 | **Stories** | one browser with filters: awaiting, spiked, needs-context, published. The spiked filter is where invariant 6 lives — every drop with its reason, and for a duplicate, the story it matched, side by side | search, reopen, re-run the managing editor |
 
 ### C. Tuning — occasional
 
 | # | Screen | Scope | Primary action |
 |---|---|---|---|
-| 5 | **Charter** | the prose, with recent overrides beside it (what the director proposed versus what you decided) and version history | edit the guidance |
-| 6 | **Targets** | list and editor: endpoint → server → tool picker from the discovered catalogue, the `args_spec` builder with the propose-args assistant, persona, role, description, dry-run test | add or fix a destination |
-| 7 | **Personas** | voice, audience, rules, examples | edit a voice |
+| 5 | **Charter** | the prose, with recent overrides beside it (what the managing editor proposed versus what you decided) and version history | edit the guidance |
+| 6 | **Targets** | list and editor: endpoint → server → tool picker from the discovered catalogue, the `args_spec` builder with the propose-args assistant, voice, role, description, dry-run test | add or fix a destination |
+| 7 | **Voices** | voice, audience, rules, examples | edit a voice |
 | 8 | **Sources** | registry: kind, hint, enabled, ingest token, watermark state, last submission received | add a source, rotate a token |
 
 ### D. Operations — when something is wrong
 
 | # | Screen | Scope | Primary action |
 |---|---|---|---|
-| 9 | **Inbox** | raw submissions as filed, including "no story" outcomes and what slice was actually considered. Answers "did the stringer even file?" | inspect, re-process |
+| 9 | **Wire** | raw submissions as filed, including "no story" outcomes and what slice was actually considered. Answers "did the stringer even file?" | inspect, re-process |
 | 10 | **Log** | events and errors, queue state, inference call history, per-endpoint health. Must be fully usable with every port broken (invariant 7) | diagnose |
 | 11 | **Settings** | auth, push registration, inference driver and endpoint, comparison window, retention | configure |
 
-**Navigation.** Mobile: bottom bar with Queue · Ideas · More, everything else behind More. Desktop:
+**Navigation.** Mobile: bottom bar with Queue · Tips · More, everything else behind More. Desktop:
 sidebar with the four groups. **Deep links:** push notification → `/publications/:id`; Android share
-sheet → `/ideas?url=…&text=…`.
+sheet → `/tips?url=…&text=…`.
 
 **Responsive treatment of screen 2**, the one that matters: desktop puts document and chat side by
 side with target tabs on top; mobile gives the document full width and the chat as a bottom sheet,
@@ -495,7 +508,7 @@ on mobile.
 Android and desktop only; iOS explicitly out of scope.
 
 - installable manifest, plus a `share_target` declaration so Newsdesk appears in Android's share
-  sheet and a shared link becomes an idea submission
+  sheet and a shared link becomes a tip submission
 - service worker for install and push only — no offline editing in v1 (a stale draft overwriting a
   published one is worse than an error message)
 - web push via VAPID keys generated on first boot and stored in `settings`; the notification says how
@@ -504,9 +517,53 @@ Android and desktop only; iOS explicitly out of scope.
 
 ## 9. Security
 
-- **Auth**: single user (argon2 password) + session cookie, `SameSite=Lax`, secure. Optional OIDC
-  later, which on Yundera can hang off the existing `casaos-oidc-bridge`.
-- **Ingest token**: separate from the session, rotatable, scoped to `POST /submissions` and `/ideas`.
+- **Auth**: single user (argon2 password) + session cookie, `SameSite=Lax`, secure.
+
+### 9.1 Trusting the SSO gate (`NEWSDESK_TRUSTED_GATE`)
+
+On Yundera an AppShield sidecar terminates OIDC/Authelia SSO in front of the desk. Without more,
+that is two logins for one visitor: the platform's, then the desk's.
+
+**AppShield forwards no identity.** Verified against appshield 2.0.9's `nginx.conf` (2026-07-31):
+the protected `location /` sets `Host`, `X-Real-IP`, `X-Forwarded-{For,Proto,Host,Port}`, `Cookie`
+and the websocket upgrade headers, and the only `auth_request_set` is `$auth_cookie`, for
+propagating `Set-Cookie`. There is no `Remote-User`, no email, no groups. AppShield is a binary
+gate — pass, or `302` to the login — not an identity proxy.
+
+That is sufficient here, because the desk is single-user: there is no identity to map, and "this
+request came through the gate" is the whole fact needed.
+
+**Why the check is on the socket and not a header.** The backend sits on the shared `pcs` network
+and every other container can reach `newsdesk-backend:8080` directly — deliberately, since that is
+how stringers file submissions. So any neighbour could send `X-Forwarded-User: admin`. `request.ip`
+is no better: the app runs `trustProxy: true`, which makes it the left-most `X-Forwarded-For` entry
+and therefore caller-controlled. The one thing a header cannot forge is the socket it arrived on,
+so `gate.ts` compares `request.raw.socket.remoteAddress` against the resolved address of the gate
+container named by `NEWSDESK_TRUSTED_GATE`.
+
+Consequences that shaped the implementation:
+
+- **Resolved per request, cached 5s.** Docker recycles container addresses; a long-lived answer
+  could keep trusting an address since reassigned to a different container. The TTL bounds that
+  window while absorbing the burst of calls one page load makes.
+- **Fails closed.** An unresolvable gate grants nothing, and the password login still works.
+- **Scoped to `/api/`.** The SPA shell is static; asking DNS about each asset would buy nothing.
+- **Addresses normalised.** Node reports an IPv4 peer on a dual-stack socket as `::ffff:a.b.c.d`
+  while DNS returns the bare form — compared raw, the trust silently never fires.
+- **The ingest token is unaffected.** It remains the only credential for `POST /submissions`; the
+  gate is not a way to file without it.
+
+**CSRF moves to the gate.** The desk's own defence was its `SameSite=Lax` session cookie; a
+gate-trusted request no longer presents one, so the gate's cookie policy is what stops a
+cross-site POST. AppShield sets all of its session cookies `sameSite: 'lax'` (checked in
+`auth-service/app.js`, 2026-07-31), so a forged cross-site POST arrives without the SSO cookie and
+is bounced to the login rather than reaching us. Lax does admit top-level **GET** navigations,
+which is safe here only because every state-changing route is a POST — the one state-changing GET,
+the OAuth callback, carries its own single-use `state`. **A future state-changing GET would be a
+CSRF hole**; keep mutations on POST.
+
+Unset the variable and the password is the only way in, which is the behaviour off Yundera.
+- **Ingest token**: separate from the session, rotatable, scoped to `POST /submissions` and `/tips`.
 - **Prompt injection**: submission text is quoted, delimited, labelled untrusted. Model output
   becomes a row, never an action. A human approves before every external effect.
 - **Destination integrity**: channel ids and endpoints are literals in `args_spec`; no model-authored
@@ -519,11 +576,11 @@ Android and desktop only; iOS explicitly out of scope.
 
 **M0 — skeleton.** Container, SQLite + migrations, auth, `/healthz`, SPA shell, navigation.
 
-**M1 — ingest.** `POST /submissions`, sources, watermark and snapshot diffing, Inbox screen. Wire the
+**M1 — ingest.** `POST /submissions`, sources, watermark and snapshot diffing, Wire screen. Wire the
 two n8n stringers. *Exit: real GitHub reports and korben entries land, and re-filing an overlapping
 window trims correctly.*
 
-**M2 — the director.** MCP endpoints + discovery, targets with `args_spec`, personas, charter.
+**M2 — the managing editor.** MCP endpoints + discovery, targets with `args_spec`, voices, charter.
 Inference port with both driver capabilities, job queue with backoff. Submissions become stories with
 dedup verdicts, routes, reasons and angles. Queue and Stories screens. *Exit: the same release filed
 by two different stringers produces one story with two sources, and a redundant re-file is caught as
@@ -536,7 +593,7 @@ sent payload byte-identical to the approved one.*
 
 **M4 — assistant.** Chat beside the document, in-place slot editing, version history and revert.
 
-**M5 — PWA.** Install, Android web push, share target, Idea box.
+**M5 — PWA.** Install, Android web push, share target, Tip line.
 
 **M6 — operations.** Log screen, override statistics beside the charter, target dry-run,
 propose-args assistant.

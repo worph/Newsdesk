@@ -14,8 +14,8 @@ describe('the shipped example configuration', () => {
     expect(issues).toEqual([])
     expect(config.charter.length).toBeGreaterThan(0)
     expect(config.targets.length).toBeGreaterThan(0)
-    expect(config.personas.length).toBeGreaterThan(0)
-    expect(config.sources.length).toBeGreaterThan(0)
+    expect(config.voices.length).toBeGreaterThan(0)
+    expect(config.stringers.length).toBeGreaterThan(0)
   })
 
   it('pins a literal destination on every publish target', () => {

@@ -41,7 +41,7 @@ beforeEach(async () => {
       storyId,
       targetId: 'discord-test',
       status: 'AWAITING_APPROVAL',
-      origin: 'director',
+      origin: 'managing-editor',
       routeReason: 'self-hosters run it',
       angle: 'lead on the upgrade',
       slots: JSON.stringify({ title: 'Immich 1.142.0', description: 'Adds Intel QSV transcoding.' }),
@@ -199,7 +199,7 @@ describe('approval — the gate', () => {
 
 describe('rejection', () => {
   it('leaves a REJECTED row rather than deleting the proposal', async () => {
-    // That row is half of the override diff — what the director proposed
+    // That row is half of the override diff — what the managing editor proposed
     // against what you decided.
     const response = await post(`/api/v1/publications/${publicationId}/reject`, { reason: 'too thin' })
     expect(response.statusCode).toBe(200)

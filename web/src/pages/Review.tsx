@@ -3,12 +3,12 @@ import MarkdownIt from 'markdown-it'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, type SlotDef } from '../api'
-import { AssistantChat } from '../components/AssistantChat'
+import { CopyDesk } from '../components/CopyDesk'
 import { Badge, when } from '../components/StoryCard'
 
 /**
  * One publication: the primary slot as a document, the rest as fields, the
- * director's reason and angle beside it, and exactly what will be sent.
+ * managing editor's reason and angle beside it, and exactly what will be sent.
  *
  * Approve is the only path to the wire, and it is per destination — a story
  * running in two places is two independent decisions, which the target strip
@@ -245,7 +245,7 @@ export function Review() {
         </section>
       )}
 
-        <AssistantChat
+        <CopyDesk
           publicationId={publication.id}
           disabled={settled}
           onSlots={(next) => setDraft(next)}

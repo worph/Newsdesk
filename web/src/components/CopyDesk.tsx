@@ -3,13 +3,13 @@ import { useState } from 'react'
 import { api } from '../api'
 
 /**
- * The assistant, beside the document rather than in place of it.
+ * The copy desk, beside the document rather than in place of it.
  *
  * Every turn rewrites the draft directly and writes a version. There is no
  * accept ceremony per suggestion, because safety lives in the history — which
  * is what makes editing conversational instead of a diff review.
  */
-export function AssistantChat({
+export function CopyDesk({
   publicationId,
   disabled,
   onSlots,
@@ -29,7 +29,7 @@ export function AssistantChat({
   const send = useMutation({
     mutationFn: (text: string) => api.sendChat(publicationId, text),
     onSuccess: (result) => {
-      // The assistant returns the whole draft, so the editor sees its edit
+      // The copy desk returns the whole draft, so the editor sees its edit
       // land in the document immediately rather than after a refresh.
       onSlots(result.slots)
       setMessage('')
@@ -44,7 +44,7 @@ export function AssistantChat({
   return (
     <section className="flex h-full min-h-64 flex-col rounded-lg border border-desk-200 dark:border-desk-800">
       <h2 className="border-b border-desk-200 px-3 py-2 text-xs font-medium tracking-wide text-desk-500 uppercase dark:border-desk-800">
-        Assistant
+        Copy desk
       </h2>
 
       <div className="flex-1 space-y-2.5 overflow-auto px-3 py-3">

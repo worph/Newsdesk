@@ -11,12 +11,12 @@ import { api } from '../api'
 const NAV = [
   { group: 'Desk', items: [
     { to: '/queue', label: 'Queue', ready: true },
-    { to: '/ideas', label: 'Idea box', ready: true },
+    { to: '/tips', label: 'Tip line', ready: true },
   ] },
   { group: 'Archive', items: [{ to: '/stories', label: 'Stories', ready: true }] },
   { group: 'Tuning', items: [{ to: '/config', label: 'Configuration', ready: true }] },
   { group: 'Operations', items: [
-    { to: '/inbox', label: 'Inbox', ready: true },
+    { to: '/wire', label: 'Wire', ready: true },
     { to: '/log', label: 'Log', ready: false },
     { to: '/settings', label: 'Settings', ready: true },
   ] },

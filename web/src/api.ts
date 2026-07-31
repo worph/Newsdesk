@@ -68,8 +68,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export interface SubmissionRow {
   id: string
-  sourceId: string
-  sourceName: string | null
+  stringerId: string
+  stringerName: string | null
   kind: string
   status: string
   outcome: string | null
@@ -126,8 +126,8 @@ export interface StoryDetail {
   story: StoryRow & { comparedIds: string[]; proposedRoutes: unknown[]; body: string | null }
   submissions: Array<{
     id: string
-    sourceId: string
-    sourceName: string | null
+    stringerId: string
+    stringerName: string | null
     kind: string
     receivedAt: string
     considered: string | null
@@ -189,7 +189,7 @@ export interface DraftVersion {
   id: string
   publicationId: string
   slots: Record<string, string>
-  origin: 'writer' | 'assistant' | 'human'
+  origin: 'writer' | 'copy-desk' | 'human'
   createdAt: string
 }
 
@@ -234,16 +234,16 @@ export const api = {
       { method: 'POST' },
     ),
 
-  listSubmissions: (params: { source?: string; limit?: number } = {}) => {
+  listSubmissions: (params: { stringer?: string; limit?: number } = {}) => {
     const search = new URLSearchParams()
-    if (params.source) search.set('source', params.source)
+    if (params.stringer) search.set('stringer', params.stringer)
     if (params.limit) search.set('limit', String(params.limit))
     const qs = search.toString()
     return request<{ submissions: SubmissionRow[] }>(`/api/v1/submissions${qs ? `?${qs}` : ''}`)
   },
   getSubmission: (id: string) => request<{ submission: SubmissionDetail }>(`/api/v1/submissions/${id}`),
-  postIdea: (body: { text: string; url?: string }) =>
-    request<{ result: { id: string; note: string } }>('/api/v1/ideas', {
+  postTip: (body: { text: string; url?: string }) =>
+    request<{ result: { id: string; note: string } }>('/api/v1/tips', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

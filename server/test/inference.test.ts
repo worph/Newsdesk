@@ -69,7 +69,7 @@ describe('runStructured', () => {
     const driver = scriptedDriver(['{"verdict":"NEW","reason":"first sighting"}'])
 
     const result = await runStructured(db, driver, {
-      purpose: 'director',
+      purpose: 'managing-editor',
       prompt: 'decide',
       schema: shape,
       shapeHint: '{ verdict, reason }',
@@ -83,7 +83,7 @@ describe('runStructured', () => {
     const driver = scriptedDriver(['{"verdict":"NEW","reason":"x"}'])
 
     await runStructured(db, driver, {
-      purpose: 'director',
+      purpose: 'managing-editor',
       prompt: 'decide',
       schema: shape,
       shapeHint: '{ verdict, reason }',
@@ -101,7 +101,7 @@ describe('runStructured', () => {
     ])
 
     const result = await runStructured(db, driver, {
-      purpose: 'director',
+      purpose: 'managing-editor',
       prompt: 'decide',
       schema: shape,
       shapeHint: '{ verdict, reason }',
@@ -119,7 +119,7 @@ describe('runStructured', () => {
 
     await expect(
       runStructured(db, driver, {
-        purpose: 'director',
+        purpose: 'managing-editor',
         prompt: 'decide',
         schema: shape,
         shapeHint: '{ verdict, reason }',
@@ -134,7 +134,7 @@ describe('runStructured', () => {
     const driver = scriptedDriver(['garbage', '{"verdict":"NEW","reason":"ok"}'])
 
     await runStructured(db, driver, {
-      purpose: 'director',
+      purpose: 'managing-editor',
       refId: 'sub-1',
       prompt: 'decide',
       schema: shape,
@@ -147,8 +147,8 @@ describe('runStructured', () => {
       ok: number
     }>
     expect(rows).toHaveLength(2)
-    expect(rows[0]).toMatchObject({ purpose: 'director', ref_id: 'sub-1', ok: 0 })
-    expect(rows[1]).toMatchObject({ purpose: 'director', ref_id: 'sub-1', ok: 1 })
+    expect(rows[0]).toMatchObject({ purpose: 'managing-editor', ref_id: 'sub-1', ok: 0 })
+    expect(rows[1]).toMatchObject({ purpose: 'managing-editor', ref_id: 'sub-1', ok: 1 })
   })
 
   it('lets a transport failure out immediately, for the queue to back off on', async () => {
@@ -165,7 +165,7 @@ describe('runStructured', () => {
     // Rewording the prompt cannot fix a dead upstream — waiting can.
     await expect(
       runStructured(db, driver, {
-        purpose: 'director',
+        purpose: 'managing-editor',
         prompt: 'decide',
         schema: shape,
         shapeHint: '{ verdict, reason }',

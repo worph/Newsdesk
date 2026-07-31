@@ -80,7 +80,7 @@ export function Config() {
       <header className="space-y-1">
         <h1 className="text-xl font-semibold tracking-tight">Configuration</h1>
         <p className="text-sm text-desk-500">
-          The charter, personas, sources and targets, as one document. Saving validates first — a publish
+          The charter, voices, stringers and targets, as one document. Saving validates first — a publish
           target that does not pin its destination is rejected, because an unpinned destination posts to
           the bridge default.
         </p>

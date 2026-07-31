@@ -11,7 +11,7 @@
 
 ## The one rule
 
-**Stringers file inclusively. The director kills.**
+**Stringers file inclusively. The managing editor kills.**
 
 A stringer's prompt must never be asked to judge newsworthiness — it says *"report anything
 plausibly interesting, with evidence."* Newsworthiness lives in exactly one place, the charter,
@@ -30,39 +30,42 @@ Authorization: Bearer <ingest token from the Configuration screen>
 Content-Type: application/json
 
 {
-  "source_id": "github-appstore",     // must already exist in Configuration
-  "kind":      "report",              // optional; defaults to the source's kind
+  "stringer_id": "github-appstore",     // must already exist in Configuration
+  "kind":      "report",              // optional; defaults to the stringer's kind
   "text":      "…free text, any depth…",
   "refs":      { "url": "…" },        // optional, opportunistic
   "filed_at":  "2026-07-28T09:12:00Z" // optional
 }
 ```
 
+The pre-rename spellings `source_id` and `kind: "idea"` are still accepted, so a workflow filed
+before the vocabulary change keeps working untouched.
+
 An **array** is accepted too, and is the normal shape for a feed:
 
 ```json
-[{ "source_id": "korben", "text": "…" }, { "source_id": "korben", "text": "…" }]
+[{ "stringer_id": "korben", "text": "…" }, { "stringer_id": "korben", "text": "…" }]
 ```
 
 Responses: `201` with a `results` array, `422` when *nothing* landed (every row named an unknown
-source), `401` on a bad token, `400` on a malformed body. A mixed batch still returns `201` and
+stringer), `401` on a bad token, `400` on a malformed body. A mixed batch still returns `201` and
 keeps its good rows — one bad row never loses the others.
 
 **Stringers keep no state.** No cursor, no last-seen id, no dedup table. Re-filing an overlapping
 window every run is expected and safe. That is deliberate: it is what lets a stringer stay dumb, and
 it is why the desk, not the producer, is the authority on what is new.
 
-## Kinds, and what each gets before the director sees it
+## Kinds, and what each gets before the managing editor sees it
 
 Newsdesk does a little cheap deterministic work before spending an LLM call. None of it is
-deduplication — that is the director's semantic judgement — it only avoids re-reading material.
+deduplication — that is the managing editor's semantic judgement — it only avoids re-reading material.
 
 | `kind` | What you file | What the desk does |
 |---|---|---|
 | `report` | a written report, any depth | nothing; considered whole |
 | `timeline` | dated entries | keeps only entries after the source's watermark, then advances it |
 | `snapshot` | the current state of something | diffs against the previous snapshot and considers only the change |
-| `idea` | a human note | nothing; considered whole |
+| `tip` | a human note | nothing; considered whole |
 
 Two baselines, so a fresh source never floods the desk:
 
@@ -70,7 +73,7 @@ Two baselines, so a fresh source never floods the desk:
   it skipped
 - the **first snapshot** is recorded as a baseline and considers nothing — there is no change yet
 
-Both are visible in the Inbox rather than silent.
+Both are visible in the Wire rather than silent.
 
 ### Writing a timeline so it can be trimmed
 
@@ -86,7 +89,7 @@ mis-trimming:
 ```
 
 Text before the first dated line is a preamble and is never dropped. If **no** dates are recognised
-the whole submission is considered and the Inbox says so — loud, rather than silently dropping the
+the whole submission is considered and the Wire says so — loud, rather than silently dropping the
 source.
 
 ---
@@ -100,7 +103,7 @@ the written report.
 Schedule (hourly)
   → GitHub node(s): commits / releases since the last run  [GitHub credential lives here]
   → MCP node: ask an LLM to write a report
-  → HTTP Request: POST /api/v1/submissions   { source_id: "github-appstore", kind: "report" }
+  → HTTP Request: POST /api/v1/submissions   { stringer_id: "github-appstore", kind: "report" }
 ```
 
 The report-writing prompt, roughly:
@@ -120,7 +123,7 @@ request, an app's `x-casaos` metadata — and put it in the report. **Newsdesk n
 Schedule (every 30 min)
   → RSS Read node
   → Code node: format entries as "- <ISO date> <title>\n  <summary>\n  <link>"
-  → HTTP Request: POST /api/v1/submissions   { source_id: "korben", kind: "timeline" }
+  → HTTP Request: POST /api/v1/submissions   { stringer_id: "korben", kind: "timeline" }
 ```
 
 Where the feed carries only a summary, fetch the article and include its text — the relevance
@@ -140,7 +143,7 @@ BASE=http://localhost:8080
 curl -s -X POST "$BASE/api/v1/submissions" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{
-    "source_id": "github-appstore",
+    "stringer_id": "github-appstore",
     "kind": "report",
     "text": "WireGuardEasyHost v15.3.0 shipped. Adds a one-click client QR export and fixes a crash when the LAN interface changes name. https://github.com/Yundera/AppStore/releases/tag/wireguardeasyhost-v15.3.0"
   }'
@@ -149,7 +152,7 @@ curl -s -X POST "$BASE/api/v1/submissions" \
 curl -s -X POST "$BASE/api/v1/submissions" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '[{
-    "source_id": "korben",
+    "stringer_id": "korben",
     "kind": "timeline",
     "text": "- 2026-07-27 Un guide pour auto-héberger son cloud\n  https://korben.info/...\n- 2026-07-28 Le retour des NAS maison\n  https://korben.info/..."
   }]'
@@ -157,15 +160,15 @@ curl -s -X POST "$BASE/api/v1/submissions" \
 # A snapshot — only the diff against the previous one is considered
 curl -s -X POST "$BASE/api/v1/submissions" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"source_id": "appstore-state", "kind": "snapshot", "text": "immich 1.141.0\njellyfin 10.11.11\nnextcloud 31.0.2"}'
+  -d '{"stringer_id": "appstore-state", "kind": "snapshot", "text": "immich 1.141.0\njellyfin 10.11.11\nnextcloud 31.0.2"}'
 
-# An idea (session cookie or the ingest token)
-curl -s -X POST "$BASE/api/v1/ideas" \
+# A tip (session cookie or the ingest token)
+curl -s -X POST "$BASE/api/v1/tips" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"text": "worth writing about", "url": "https://example.com/post"}'
 ```
 
-Then open **Inbox** to see what landed, what was considered, and why anything was trimmed.
+Then open **Wire** to see what landed, what was considered, and why anything was trimmed.
 
 ## Failure modes, and where they show
 
@@ -173,6 +176,6 @@ Then open **Inbox** to see what landed, what was considered, and why anything wa
 |---|---|
 | `401` | the ingest token — rotate it on the Configuration screen and update the stringer |
 | `422`, `unknown source "x"` | the source is not in Configuration, or the id differs |
-| Filed but `considered: false` | normal for a baseline, an unchanged snapshot, or an already-seen window — the Inbox gives the reason |
+| Filed but `considered: false` | normal for a baseline, an unchanged snapshot, or an already-seen window — the Wire gives the reason |
 | Filed, source disabled | stored rather than dropped, and marked as such; enable the source in Configuration |
-| Nothing arriving at all | the Inbox is empty — the problem is upstream, in the stringer or its schedule |
+| Nothing arriving at all | the Wire is empty — the problem is upstream, in the stringer or its schedule |

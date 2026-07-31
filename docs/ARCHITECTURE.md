@@ -29,12 +29,12 @@ The whole design falls out of the roles.
 | Role | Who plays it | Responsibility |
 |---|---|---|
 | **Stringers** | external n8n workflows | have the credentials, go and look, **file reports** — inclusively, with evidence |
-| **The Director** | one LLM call inside the app | reads reports, **finds the stories**, kills duplicates, decides where each one runs |
+| **The Managing Editor** | one LLM call inside the app | reads reports, **finds the stories**, kills duplicates, decides where each one runs |
 | **Writers** | one LLM call per destination | fill that destination's authoring slots, in its voice |
 | **The Editor** | you | rewrite anything, approve or spike each piece individually |
-| **The Wire** | MCP targets | dumbly send exactly what was approved |
+| **The Press** | MCP targets | dumbly send exactly what was approved |
 
-The load-bearing division: **stringers file, the director kills.** A stringer's prompt must never be
+The load-bearing division: **stringers file, the managing editor kills.** A stringer's prompt must never be
 asked to judge newsworthiness — it says "report anything plausibly interesting." Newsworthiness
 lives in exactly one place, the charter, inside the app. Split it across two systems and you end up
 tuning relevance in two prompts and never knowing which one dropped the story.
@@ -45,7 +45,7 @@ tuning relevance in two prompts and never knowing which one dropped the story.
 > publish merges and sends.**
 
 Every mechanism below is an elaboration of that sentence. Model calls happen only on the way *in*
-(finding stories, filling slots, helping you edit). Everything from approval to the wire is
+(finding stories, filling slots, helping you edit). Everything from approval to the press is
 deterministic.
 
 ## 4. The three ports
@@ -54,11 +54,11 @@ deterministic.
 ┌─────────────────────┐      ┌──────────────────────────────┐      ┌──────────────────────┐
 │   INGEST (external) │      │          NEWSDESK             │      │  DELIVERY (external) │
 │                     │      │                               │      │                      │
-│  n8n stringer ──────┼─────▶│  ① director  (find + dedup    │─────▶│  discord-mcp         │
+│  n8n stringer ──────┼─────▶│  ① managing editor  (find + dedup    │─────▶│  discord-mcp         │
 │    GitHub (creds)   │ HTTP │              + route)         │ MCP  │  telegram-mcp        │
 │  n8n stringer ──────┼─────▶│  ② writers   (fill slots)     │─────▶│  nextcloud-talk-mcp  │
 │    RSS              │ push │  ③ editor    (review UI)      │      │  …future…            │
-│  idea box (internal)┼──────│  ④ wire      (merge + send)   │      └──────────────────────┘
+│  tip line (internal)┼──────│  ④ press     (merge + send)   │      └──────────────────────┘
 │  future: MCP pull   │      │        audit · error log      │
 └─────────────────────┘      └───────────────┬──────────────┘
                                              │ MCP
@@ -83,8 +83,8 @@ no history).
 ```
 POST /api/v1/submissions          Authorization: Bearer <ingest token>
 {
-  "source_id": "github-yundera-root",
-  "kind":      "report",                         // report | timeline | snapshot | idea
+  "stringer_id": "github-yundera-root",
+  "kind":      "report",                         // report | timeline | snapshot | tip
   "text":      "…free text, any depth…",
   "refs":      { "url": "...", "sha": "..." },   // optional, opportunistic
   "filed_at":  "2026-07-28T09:12:00Z"
@@ -94,7 +94,7 @@ POST /api/v1/submissions          Authorization: Bearer <ingest token>
 Two pieces of cheap deterministic work happen before any inference, purely to keep the expensive
 judgement small: **timeline** sources carry a watermark so entries at or before the last considered
 timestamp are not re-examined, and **snapshot** sources are diffed against the previous snapshot so
-the director is handed the *change*, not the whole state. Neither is a deduplication authority —
+the managing editor is handed the *change*, not the whole state. Neither is a deduplication authority —
 they are an economy measure, and a source fitting neither shape simply skips them.
 
 **Enrichment is a stringer concern.** If a story will need the commit body, the linked pull request,
@@ -102,7 +102,7 @@ or an app's metadata, the stringer — which has the credentials — fetches it 
 report. Newsdesk never fetches. A report too thin to write from truthfully produces a story marked
 `NEEDS_CONTEXT`: held, visible, re-runnable, never fabricated around.
 
-*Later, not v1:* a **callback interface** letting the director ask a stringer for more depth on a
+*Later, not v1:* a **callback interface** letting the managing editor ask a stringer for more depth on a
 specific point, and a **pull driver** where a source names an MCP tool and a response mapping. Both
 are additive; push-only covers day one.
 
@@ -131,7 +131,7 @@ concurrency 1 with backoff and jitter — work waits in `PENDING` rather than fa
 the previous system's staggered cron, preflight-polling node, and error-reclassification logic with
 two lines of configuration.
 
-Three call sites, and only three: **director**, **writer**, **assistant**.
+Three call sites, and only three: **managing editor**, **writer**, **assistant**.
 
 ### 4.3 Delivery port — dynamic targets, authored slots
 
@@ -202,7 +202,7 @@ transport. A genuinely multi-step delivery (upload media, then post referencing 
 problem — it is an n8n webhook target. Stringers are n8n on the way in; complicated deliveries are
 n8n on the way out.
 
-## 5. The director
+## 5. The managing editor
 
 One inference call per submission, answering three questions: is there a story here, have we already
 told it, and where does each one run.
@@ -228,11 +228,11 @@ as a route reason.
   rather than merely validated.
 - `reason` — shown beside the route toggle in review.
 - `angle` — an optional note to the writer ("lead on the security implication; this audience runs it
-  in production"). The director has just read the charter and knows *why* the story belongs here;
+  in production"). The managing editor has just read the charter and knows *why* the story belongs here;
   passing that on is free and is the difference between drafts that differ in tone and drafts that
   differ in what they lead with.
 - **No significance score.** A global scalar was always a proxy for "does this clear the bar for
-  *this* audience", which the director can now answer per destination directly, since it reads each
+  *this* audience", which the managing editor can now answer per destination directly, since it reads each
   target's description. Scores are not calibrated between runs, and a filter on one is a false sense
   of control. Routing *is* the judgement. A coarse label may exist to sort the queue for a human; it
   never filters.
@@ -241,7 +241,7 @@ as a route reason.
 
 A key constraint catches the same door twice; it cannot catch **the same story arriving through a
 different door**. The same release can reach the desk from a GitHub stringer, an RSS feed, and
-someone's idea — different wording, different depth, no shared identifier.
+someone's tip — different wording, different depth, no shared identifier.
 
 | Verdict | Meaning | Consequence |
 |---|---|---|
@@ -278,19 +278,19 @@ single editable text field, the standing brief a section editor would give:
 > internal only.
 
 - **The charter is prose; the vocabulary is data.** Target ids come from the schema, not the text.
-- **Proposals, never decisions.** Every route is a toggle with the director's reason beside it.
-  Routes can be switched off, and targets the director did not propose can be switched on.
-- **Overrides are kept.** What the director proposed is stored beside what you decided, forever. That
+- **Proposals, never decisions.** Every route is a toggle with the managing editor's reason beside it.
+  Routes can be switched off, and targets the managing editor did not propose can be switched on.
+- **Overrides are kept.** What the managing editor proposed is stored beside what you decided, forever. That
   diff is the highest-value data the system produces and it is actionable without any training: the
   charter editor shows recent overrides beside the text, so the guidance gets tightened by the person
   whose judgement is being encoded.
 
-Per-source `hint` survives as a narrowing note for noisy sources, subordinate to the charter.
+Per-stringer `hint` survives as a narrowing note for noisy stringers, subordinate to the charter.
 
 ## 6. Flow and state
 
 ```
-  submission        director              writers          editor         wire
+  submission        managing editor              writers          editor        press
  ───────────▶ text ─────────▶ stories ──────▶ slots ─────────▶ approved ──────▶ sent
                   │             │            per target      per target     per target
                   │             ├─ DUPLICATE ─▶ spiked, earlier story linked
@@ -314,9 +314,9 @@ must make it unmistakable that approving one does not ship the other.
 Every transition is written to an append-only event log with a timestamp and an actor (`system` or
 `human`). The audit trail is not bolted on; it is the same rows the UI reads.
 
-## 7. Personas and writing
+## 7. Voices and writing
 
-A **persona** is voice, audience, and rules, stored once and referenced by targets, so several
+A **voice** is voice, audience, and rules, stored once and referenced by targets, so several
 destinations share one and it is edited in a single place.
 
 The writer's tool schema is **generated from the target's slots**:
@@ -329,7 +329,7 @@ submit_draft(text: string≤4096)                                             # 
 so a writer cannot return a shape that will not publish — no missing field, no over-length body, no
 invented key. Writing is **per target** rather than one canonical draft adapted N ways: at this
 volume quality is worth more than saved calls, and the shared story keeps the versions factually
-aligned. The director's `angle` rides along as guidance.
+aligned. The managing editor's `angle` rides along as guidance.
 
 ## 8. Review — an editable document with an assistant beside it
 
@@ -363,11 +363,11 @@ Breaking one of these breaks the product, not just a feature.
 3. **The model never authors a destination.** Channel ids, endpoints, and routing keys are literals
    in configuration. Models fill slots and propose routes from a generated enum; they never write
    an address.
-4. **Ingested text is data, never instructions.** Reports, feed bodies, and submitted ideas are
+4. **Ingested text is data, never instructions.** Reports, feed bodies, and submitted tips are
    attacker-influenced. They enter prompts quoted, delimited, and labelled untrusted; a model's
    output becomes a database row, never an action; a human stands between every model output and
    every external effect. Drafts are sanitized on render, never injected as HTML.
-5. **Deduplication is the director's judgement, bounded and reviewable** — a bounded comparison
+5. **Deduplication is the managing editor's judgement, bounded and reviewable** — a bounded comparison
    window, a recorded reason, the related story linked, and the editor as last check.
 6. **A drop is recorded and visible.** Silence and "nothing happened" must never look alike.
 7. **The internal log is authoritative; external alerting is best-effort.** If Beacon is down, alerts
@@ -389,10 +389,10 @@ Breaking one of these breaks the product, not just a feature.
 | Discord / Telegram / Nextcloud credentials | their MCP servers | already deployed, already scoped |
 | Multi-step or exotic delivery | an n8n webhook target | symmetry with stringers; no agent needed |
 | Scheduling of Newsdesk's own work | Newsdesk | it owns its clock; n8n does not orchestrate it |
-| Idea capture | Newsdesk | no protocol, no credentials, and it wants to be one tap on a phone |
+| Tip capture | Newsdesk | no protocol, no credentials, and it wants to be one tap on a phone |
 
 The existing `telegram-news-idea` chat continues to work as an ordinary push source while people are
-used to it; the internal idea box is a shortcut, not a replacement.
+used to it; the internal tip line is a shortcut, not a replacement.
 
 ## 11. Deployment shape
 

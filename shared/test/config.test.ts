@@ -7,10 +7,10 @@ function baseConfig(): unknown {
   return {
     charter: 'AppStore releases go to the test channel for a general audience.',
     mcp_endpoints: [{ id: 'beacon', name: 'yunderalabs beacon', url: 'http://beacon-backend:9300/mcp' }],
-    personas: [
-      { id: 'alicia', name: 'Alicia', voice: 'concise, technical, anti-hype', audience: 'self-hosters' },
+    voices: [
+      { id: 'alicia', name: 'Alicia', tone: 'concise, technical, anti-hype', audience: 'self-hosters' },
     ],
-    sources: [{ id: 'idea-box', name: 'Idea box', kind: 'idea' }],
+    stringers: [{ id: 'tip-line', name: 'Tip line', kind: 'tip' }],
     targets: [
       {
         id: 'discord-test',
@@ -18,7 +18,7 @@ function baseConfig(): unknown {
         description: 'test channel for a general audience',
         role: 'publish',
         driver: 'mcp',
-        persona: 'alicia',
+        voice: 'alicia',
         endpoint: 'beacon',
         tool: 'discord-mcp__send_embed',
         args: {
@@ -150,18 +150,18 @@ describe('slots', () => {
 })
 
 describe('references and templates', () => {
-  it('rejects an unknown persona', () => {
+  it('rejects an unknown voice', () => {
     const issues = issuesFor((c) => {
-      c.targets[0].persona = 'nobody'
+      c.targets[0].voice = 'nobody'
     })
-    expect(issues).toContainEqual(expect.stringContaining('unknown persona "nobody"'))
+    expect(issues).toContainEqual(expect.stringContaining('unknown voice "nobody"'))
   })
 
-  it('requires a persona on a publish target', () => {
+  it('requires a voice on a publish target', () => {
     const issues = issuesFor((c) => {
-      delete c.targets[0].persona
+      delete c.targets[0].voice
     })
-    expect(issues).toContainEqual(expect.stringContaining('needs a persona'))
+    expect(issues).toContainEqual(expect.stringContaining('needs a voice'))
   })
 
   it('rejects an unknown endpoint', () => {

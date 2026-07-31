@@ -35,8 +35,8 @@ describe('backoff', () => {
 describe('claiming', () => {
   it('takes the oldest due job and marks it RUNNING', () => {
     const { db } = openTestDb()
-    enqueue(db, 'direct', 'sub-1')
-    enqueue(db, 'direct', 'sub-2')
+    enqueue(db, 'assign', 'sub-1')
+    enqueue(db, 'assign', 'sub-2')
 
     const first = claimNext(db, new Date())
     expect(first?.refId).toBe('sub-1')
@@ -48,7 +48,7 @@ describe('claiming', () => {
 
   it('does not claim a job whose backoff has not elapsed', () => {
     const { db } = openTestDb()
-    enqueue(db, 'direct', 'later', new Date(Date.now() + 60_000))
+    enqueue(db, 'assign', 'later', new Date(Date.now() + 60_000))
     expect(claimNext(db, new Date())).toBeUndefined()
   })
 
@@ -61,7 +61,7 @@ describe('claiming', () => {
 describe('restart', () => {
   it('returns interrupted jobs to the queue, because one instance means nobody else has them', () => {
     const { db } = openTestDb()
-    enqueue(db, 'direct', 'sub-1')
+    enqueue(db, 'assign', 'sub-1')
     claimNext(db, new Date())
 
     expect(reclaimRunning(db)).toBe(1)
@@ -78,11 +78,11 @@ describe('running jobs', () => {
   it('runs a handler and marks the job DONE', async () => {
     const { db } = openTestDb()
     const seen: string[] = []
-    const queue = new JobQueue(db).register('direct', async (_db, refId) => {
+    const queue = new JobQueue(db).register('assign', async (_db, refId) => {
       seen.push(refId)
     })
 
-    enqueue(db, 'direct', 'sub-1')
+    enqueue(db, 'assign', 'sub-1')
     expect(await queue.tick()).toBe(1)
 
     expect(seen).toEqual(['sub-1'])
@@ -91,12 +91,12 @@ describe('running jobs', () => {
 
   it('reschedules a retryable failure instead of failing it', async () => {
     const { db } = openTestDb()
-    const queue = new JobQueue(db, { now: () => 1_000_000, random: () => 1 }).register('direct', async () => {
+    const queue = new JobQueue(db, { now: () => 1_000_000, random: () => 1 }).register('assign', async () => {
       throw mcpError('HTTP 503', true)
     })
 
     // Due on the queue's clock, not the wall clock the default enqueue uses.
-    enqueue(db, 'direct', 'sub-1', new Date(1_000_000))
+    enqueue(db, 'assign', 'sub-1', new Date(1_000_000))
     await queue.tick()
 
     const row = db.select().from(schema.jobs).get()
@@ -109,11 +109,11 @@ describe('running jobs', () => {
 
   it('fails a terminal error immediately — waiting cannot fix a refusal', async () => {
     const { db } = openTestDb()
-    const queue = new JobQueue(db).register('direct', async () => {
+    const queue = new JobQueue(db).register('assign', async () => {
       throw mcpError('HTTP 422 bad arguments', false)
     })
 
-    enqueue(db, 'direct', 'sub-1')
+    enqueue(db, 'assign', 'sub-1')
     await queue.tick()
 
     expect(db.select().from(schema.jobs).get()?.status).toBe('FAILED')
@@ -122,13 +122,13 @@ describe('running jobs', () => {
   it('gives up after the attempt ceiling', async () => {
     const { db } = openTestDb()
     const queue = new JobQueue(db, { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 }).register(
-      'direct',
+      'assign',
       async () => {
         throw mcpError('HTTP 503', true)
       },
     )
 
-    enqueue(db, 'direct', 'sub-1')
+    enqueue(db, 'assign', 'sub-1')
     for (let i = 0; i < 5; i++) await queue.tick()
 
     const row = db.select().from(schema.jobs).get()
@@ -139,12 +139,12 @@ describe('running jobs', () => {
   it('a deferral waits without spending an attempt', async () => {
     const { db } = openTestDb()
     let calls = 0
-    const queue = new JobQueue(db, { now: () => 1_000_000 }).register('direct', async () => {
+    const queue = new JobQueue(db, { now: () => 1_000_000 }).register('assign', async () => {
       calls++
       throw new Deferred('endpoint not configured yet', 30_000)
     })
 
-    enqueue(db, 'direct', 'sub-1', new Date(1_000_000))
+    enqueue(db, 'assign', 'sub-1', new Date(1_000_000))
     await queue.tick()
 
     const row = db.select().from(schema.jobs).get()
@@ -171,16 +171,16 @@ describe('running jobs', () => {
     const { db } = openTestDb()
     let peak = 0
     let active = 0
-    const queue = new JobQueue(db).register('direct', async () => {
+    const queue = new JobQueue(db).register('assign', async () => {
       active++
       peak = Math.max(peak, active)
       await new Promise((r) => setTimeout(r, 5))
       active--
     })
 
-    enqueue(db, 'direct', 'a')
-    enqueue(db, 'direct', 'b')
-    enqueue(db, 'direct', 'c')
+    enqueue(db, 'assign', 'a')
+    enqueue(db, 'assign', 'b')
+    enqueue(db, 'assign', 'c')
     await queue.tick()
 
     expect(peak).toBe(1)

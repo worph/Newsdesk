@@ -9,10 +9,10 @@ import {
 } from '../src/schema/slots.js'
 import {
   checkVerdictLinks,
-  directorResultSchema,
-  directorShapeHint,
-  directorTools,
-} from '../src/schema/director.js'
+  managingEditorResultSchema,
+  managingEditorShapeHint,
+  managingEditorTools,
+} from '../src/schema/managing-editor.js'
 
 const discordArgs: ArgsSpec = {
   channelId: '1514993197082742814',
@@ -95,11 +95,11 @@ describe('slot spec as a validator', () => {
   })
 })
 
-describe('director vocabulary', () => {
+describe('managing editor vocabulary', () => {
   const targets = ['discord-test', 'nextcloud-internal']
 
   it('accepts a well-formed result', () => {
-    const parsed = directorResultSchema(targets).safeParse({
+    const parsed = managingEditorResultSchema(targets).safeParse({
       stories: [
         {
           title: 'Immich 1.142.0',
@@ -115,7 +115,7 @@ describe('director vocabulary', () => {
   it('refuses a route to a destination that does not exist', () => {
     // The enum is generated from live targets, so an unknown destination is
     // impossible rather than merely validated later.
-    const parsed = directorResultSchema(targets).safeParse({
+    const parsed = managingEditorResultSchema(targets).safeParse({
       stories: [
         {
           title: 'T',
@@ -129,14 +129,14 @@ describe('director vocabulary', () => {
   })
 
   it('treats zero routes as valid — that is the newsworthiness gate', () => {
-    const parsed = directorResultSchema(targets).safeParse({
+    const parsed = managingEditorResultSchema(targets).safeParse({
       stories: [{ title: 'T', summary: 'S', verdict: 'NEW', routes: [] }],
     })
     expect(parsed.success).toBe(true)
   })
 
   it('accepts an empty result with a reason', () => {
-    const parsed = directorResultSchema(targets).safeParse({
+    const parsed = managingEditorResultSchema(targets).safeParse({
       stories: [],
       no_story_reason: 'a sponsored deal post, excluded by the charter',
     })
@@ -144,14 +144,14 @@ describe('director vocabulary', () => {
   })
 
   it('requires a reason on every route', () => {
-    const parsed = directorResultSchema(targets).safeParse({
+    const parsed = managingEditorResultSchema(targets).safeParse({
       stories: [{ title: 'T', summary: 'S', verdict: 'NEW', routes: [{ target_id: 'discord-test' }] }],
     })
     expect(parsed.success).toBe(false)
   })
 
   it('generates the tool vocabulary with target_id as a live enum', () => {
-    const tools = directorTools(
+    const tools = managingEditorTools(
       targets.map((id) => ({ id, name: id, description: 'd', role: 'publish' })),
     )
     const route = tools.find((t) => t.name === 'propose_route')
@@ -160,14 +160,14 @@ describe('director vocabulary', () => {
   })
 
   it('names the live targets in the text-driver hint', () => {
-    expect(directorShapeHint(targets)).toContain('"discord-test" | "nextcloud-internal"')
+    expect(managingEditorShapeHint(targets)).toContain('"discord-test" | "nextcloud-internal"')
   })
 })
 
 describe('verdict links', () => {
   const known = new Set(['story-a', 'story-b'])
   const result = (over: Record<string, unknown>) =>
-    directorResultSchema(['discord-test']).parse({
+    managingEditorResultSchema(['discord-test']).parse({
       stories: [{ title: 'T', summary: 'S', verdict: 'NEW', routes: [], ...over }],
     })
 

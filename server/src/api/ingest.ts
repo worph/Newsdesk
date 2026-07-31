@@ -1,5 +1,5 @@
 import { and, desc, eq, type SQL } from 'drizzle-orm'
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, RouteHandlerMethod } from 'fastify'
 import { z } from 'zod'
 import { hasSession, requireIngestToken, requireSession } from '../auth.js'
 import type { Db } from '../db/index.js'
@@ -12,31 +12,35 @@ import {
   type SubmissionInput,
 } from '../ports/ingest/receive.js'
 
-const ideaBodySchema = z.object({
-  text: z.string().min(1),
-  url: z.string().optional(),
-  source_id: z.string().optional(),
-})
+const tipBodySchema = z
+  .object({
+    text: z.string().min(1),
+    url: z.string().optional(),
+    stringer_id: z.string().optional(),
+    /** Pre-rename spelling, still accepted. */
+    source_id: z.string().optional(),
+  })
+  .transform(({ source_id, ...rest }) => ({ ...rest, stringer_id: rest.stringer_id ?? source_id }))
 
 const listQuerySchema = z.object({
   status: z.string().optional(),
-  source: z.string().optional(),
+  stringer: z.string().optional(),
   limit: z.coerce.number().int().positive().max(500).optional(),
 })
 
-function resolveIdeaSource(db: Db, requested?: string): { id: string } | { error: string } {
+function resolveTipStringer(db: Db, requested?: string): { id: string } | { error: string } {
   if (requested) {
-    const found = db.select().from(schema.sources).where(eq(schema.sources.id, requested)).get()
-    return found ? { id: found.id } : { error: `unknown source "${requested}"` }
+    const found = db.select().from(schema.stringers).where(eq(schema.stringers.id, requested)).get()
+    return found ? { id: found.id } : { error: `unknown stringer "${requested}"` }
   }
-  const ideaSources = db.select().from(schema.sources).where(eq(schema.sources.kind, 'idea')).all()
-  if (ideaSources.length === 0) {
-    return { error: 'no source of kind "idea" is configured — add one in Configuration' }
+  const tipStringers = db.select().from(schema.stringers).where(eq(schema.stringers.kind, 'tip')).all()
+  if (tipStringers.length === 0) {
+    return { error: 'no stringer of kind "tip" is configured — add one in Configuration' }
   }
-  if (ideaSources.length > 1) {
-    return { error: 'several idea sources are configured — name one with source_id' }
+  if (tipStringers.length > 1) {
+    return { error: 'several tip stringers are configured — name one with stringer_id' }
   }
-  return { id: ideaSources[0]!.id }
+  return { id: tipStringers[0]!.id }
 }
 
 export function registerIngestRoutes(
@@ -55,7 +59,7 @@ export function registerIngestRoutes(
     const inputs: SubmissionInput[] = Array.isArray(parsed.data) ? parsed.data : [parsed.data]
     const results = receiveSubmissions(db, inputs, receiveOptions)
 
-    // An unknown source is the filer's mistake and worth a non-2xx, but only
+    // An unknown stringer is the filer's mistake and worth a non-2xx, but only
     // when nothing at all landed — a mixed batch should not lose its good rows.
     const accepted = results.filter((r) => r.status !== 'REJECTED')
     if (accepted.length === 0) {
@@ -65,29 +69,29 @@ export function registerIngestRoutes(
   })
 
   /**
-   * The idea box. Accepts a session (the in-app form and the Android share
+   * The tip line. Accepts a session (the in-app form and the Android share
    * target) or the ingest token (a bookmarklet, a script).
    */
-  app.post('/api/v1/ideas', async (request, reply) => {
+  const fileTip: RouteHandlerMethod = async (request, reply) => {
     if (!hasSession(request)) {
       const guard = requireIngestToken(db)
       await guard(request, reply)
       if (reply.sent) return reply
     }
 
-    const parsed = ideaBodySchema.safeParse(request.body)
+    const parsed = tipBodySchema.safeParse(request.body)
     if (!parsed.success) return reply.code(400).send({ error: 'text required' })
 
-    const source = resolveIdeaSource(db, parsed.data.source_id)
-    if ('error' in source) return reply.code(422).send({ error: source.error })
+    const stringer = resolveTipStringer(db, parsed.data.stringer_id)
+    if ('error' in stringer) return reply.code(422).send({ error: stringer.error })
 
     const text = parsed.data.url ? `${parsed.data.text}\n\n${parsed.data.url}` : parsed.data.text
     const [result] = receiveSubmissions(
       db,
       [
         {
-          source_id: source.id,
-          kind: 'idea',
+          stringer_id: stringer.id,
+          kind: 'tip',
           text,
           ...(parsed.data.url ? { refs: { url: parsed.data.url } } : {}),
         },
@@ -95,7 +99,12 @@ export function registerIngestRoutes(
       receiveOptions,
     )
     return reply.code(201).send({ result })
-  })
+  }
+
+  app.post('/api/v1/tips', fileTip)
+  // The pre-rename spelling, kept for bookmarklets and any share-sheet entry
+  // installed before the desk learned the word "tip".
+  app.post('/api/v1/ideas', fileTip)
 
   // ── reading ───────────────────────────────────────────────────────────────
 
@@ -105,13 +114,13 @@ export function registerIngestRoutes(
 
     const filters: SQL[] = []
     if (parsed.data.status) filters.push(eq(schema.submissions.status, parsed.data.status))
-    if (parsed.data.source) filters.push(eq(schema.submissions.sourceId, parsed.data.source))
+    if (parsed.data.stringer) filters.push(eq(schema.submissions.stringerId, parsed.data.stringer))
 
     const base = db
       .select({
         id: schema.submissions.id,
-        sourceId: schema.submissions.sourceId,
-        sourceName: schema.sources.name,
+        stringerId: schema.submissions.stringerId,
+        stringerName: schema.stringers.name,
         kind: schema.submissions.kind,
         status: schema.submissions.status,
         outcome: schema.submissions.outcome,
@@ -121,7 +130,7 @@ export function registerIngestRoutes(
         considered: schema.submissions.considered,
       })
       .from(schema.submissions)
-      .leftJoin(schema.sources, eq(schema.submissions.sourceId, schema.sources.id))
+      .leftJoin(schema.stringers, eq(schema.submissions.stringerId, schema.stringers.id))
 
     const rows = (filters.length ? base.where(and(...filters)) : base)
       .orderBy(desc(schema.submissions.receivedAt))
@@ -143,12 +152,12 @@ export function registerIngestRoutes(
     const row = db.select().from(schema.submissions).where(eq(schema.submissions.id, id)).get()
     if (!row) return reply.code(404).send({ error: 'not found' })
 
-    const source = db.select().from(schema.sources).where(eq(schema.sources.id, row.sourceId)).get()
+    const stringer = db.select().from(schema.stringers).where(eq(schema.stringers.id, row.stringerId)).get()
     return {
       submission: {
         ...row,
         refs: row.refs ? JSON.parse(row.refs) : null,
-        sourceName: source?.name ?? row.sourceId,
+        stringerName: stringer?.name ?? row.stringerId,
       },
     }
   })

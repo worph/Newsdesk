@@ -7,18 +7,34 @@ import { logEvent } from '../../events.js'
 import { trim } from './trim.js'
 
 /**
- * A submission is free text filed by a source, at whatever depth that source
+ * A submission is free text filed by a stringer, at whatever depth that stringer
  * works in. It is explicitly NOT a normalized news item and carries no
  * required identifier — there is nothing to key on, and deduplication is the
- * director's judgement rather than a constraint.
+ * managing editor's judgement rather than a constraint.
  */
-export const submissionInputSchema = z.object({
-  source_id: z.string().min(1),
-  kind: z.enum(['report', 'timeline', 'snapshot', 'idea']).optional(),
-  text: z.string().min(1, 'a submission needs text'),
-  refs: z.record(z.string(), z.unknown()).optional(),
-  filed_at: z.string().optional(),
-})
+/**
+ * `source_id` and `kind: idea` are the pre-rename spelling. They stay accepted
+ * because the filers are n8n workflows nobody wants to redeploy for a word —
+ * the ingest contract is the one place the vocabulary change must not break.
+ */
+export const submissionInputSchema = z
+  .object({
+    stringer_id: z.string().min(1).optional(),
+    source_id: z.string().min(1).optional(),
+    kind: z.enum(['report', 'timeline', 'snapshot', 'tip', 'idea']).optional(),
+    text: z.string().min(1, 'a submission needs text'),
+    refs: z.record(z.string(), z.unknown()).optional(),
+    filed_at: z.string().optional(),
+  })
+  .refine((v) => v.stringer_id !== undefined || v.source_id !== undefined, {
+    message: 'stringer_id is required',
+    path: ['stringer_id'],
+  })
+  .transform(({ source_id, kind, ...rest }) => ({
+    ...rest,
+    stringer_id: rest.stringer_id ?? source_id!,
+    ...(kind ? { kind: kind === 'idea' ? ('tip' as const) : kind } : {}),
+  }))
 
 export const submissionsBodySchema = z.union([
   submissionInputSchema,
@@ -29,7 +45,7 @@ export type SubmissionInput = z.infer<typeof submissionInputSchema>
 
 export interface ReceiveResult {
   id: string | null
-  sourceId: string
+  stringerId: string
   status: 'RECEIVED' | 'PROCESSING' | 'PROCESSED' | 'REJECTED'
   considered: boolean
   note: string
@@ -41,11 +57,11 @@ export interface ReceiveOptions {
    * transaction that stores it — so a queued job can never reference a
    * submission that was rolled back.
    *
-   * Absent means no director is wired (tests, or a desk configured without
+   * Absent means no managing editor is wired (tests, or a desk configured without
    * inference); the submission then finishes as PROCESSED, exactly as it did
    * before Phase 2.
    */
-  enqueueDirector?: (submissionId: string) => void
+  enqueueManagingEditor?: (submissionId: string) => void
 }
 
 /**
@@ -58,87 +74,87 @@ export function receiveSubmission(
   input: SubmissionInput,
   options: ReceiveOptions = {},
 ): ReceiveResult {
-  const source = db.select().from(schema.sources).where(eq(schema.sources.id, input.source_id)).get()
+  const stringer = db.select().from(schema.stringers).where(eq(schema.stringers.id, input.stringer_id)).get()
 
-  if (!source) {
+  if (!stringer) {
     return {
       id: null,
-      sourceId: input.source_id,
+      stringerId: input.stringer_id,
       status: 'REJECTED',
       considered: false,
-      note: `unknown source "${input.source_id}" — add it in Configuration first`,
+      note: `unknown stringer "${input.stringer_id}" — add it in Configuration first`,
     }
   }
 
-  const kind = input.kind ?? source.kind
+  const kind = input.kind ?? stringer.kind
   const id = randomUUID()
 
-  // A disabled source is stored rather than refused: losing a filed report is
-  // worse than storing one nobody asked for, and the Inbox shows why it slept.
-  if (!source.enabled) {
+  // A disabled stringer is stored rather than refused: losing a filed report is
+  // worse than storing one nobody asked for, and the Wire shows why it slept.
+  if (!stringer.enabled) {
     db.insert(schema.submissions)
       .values({
         id,
-        sourceId: source.id,
+        stringerId: stringer.id,
         kind,
         text: input.text,
         considered: null,
         refs: input.refs ? JSON.stringify(input.refs) : null,
         filedAt: input.filed_at ?? null,
         status: 'PROCESSED',
-        outcome: 'source disabled — stored but not processed',
+        outcome: 'stringer disabled — stored but not processed',
       })
       .run()
     logEvent(db, {
       level: 'warn',
-      code: 'SUBMISSION_SOURCE_DISABLED',
-      message: `filed to disabled source "${source.id}"`,
+      code: 'SUBMISSION_STRINGER_DISABLED',
+      message: `filed to disabled stringer "${stringer.id}"`,
     })
     return {
       id,
-      sourceId: source.id,
+      stringerId: stringer.id,
       status: 'PROCESSED',
       considered: false,
-      note: 'source disabled — stored but not processed',
+      note: 'stringer disabled — stored but not processed',
     }
   }
 
   const result = trim({
     kind,
     text: input.text,
-    watermark: source.watermark,
-    lastSnapshot: source.lastSnapshot,
+    watermark: stringer.watermark,
+    lastSnapshot: stringer.lastSnapshot,
   })
 
   // Nothing new is a finished submission, not a pending one: only material
-  // the director has not seen is worth an inference call.
+  // the managing editor has not seen is worth an inference call.
   const hasNewMaterial = result.considered.length > 0
-  const willDirect = hasNewMaterial && options.enqueueDirector !== undefined
+  const willAssign = hasNewMaterial && options.enqueueManagingEditor !== undefined
 
   db.transaction((tx) => {
     tx.insert(schema.submissions)
       .values({
         id,
-        sourceId: source.id,
+        stringerId: stringer.id,
         kind,
         text: input.text,
         considered: result.considered || null,
         refs: input.refs ? JSON.stringify(input.refs) : null,
         filedAt: input.filed_at ?? null,
-        status: willDirect ? 'PROCESSING' : 'PROCESSED',
-        outcome: willDirect ? `${result.note} — queued for the director` : result.note,
+        status: willAssign ? 'PROCESSING' : 'PROCESSED',
+        outcome: willAssign ? `${result.note} — queued for the managing editor` : result.note,
       })
       .run()
 
-    if (willDirect) options.enqueueDirector?.(id)
+    if (willAssign) options.enqueueManagingEditor?.(id)
 
     if (result.watermark !== undefined || result.snapshot !== undefined) {
-      tx.update(schema.sources)
+      tx.update(schema.stringers)
         .set({
           ...(result.watermark !== undefined ? { watermark: result.watermark } : {}),
           ...(result.snapshot !== undefined ? { lastSnapshot: result.snapshot } : {}),
         })
-        .where(eq(schema.sources.id, source.id))
+        .where(eq(schema.stringers.id, stringer.id))
         .run()
     }
   })
@@ -146,14 +162,14 @@ export function receiveSubmission(
   logEvent(db, {
     level: 'info',
     code: 'SUBMISSION_RECEIVED',
-    message: `${source.id}: ${result.note}`,
+    message: `${stringer.id}: ${result.note}`,
     detail: { submissionId: id, kind, consideredChars: result.considered.length },
   })
 
   return {
     id,
-    sourceId: source.id,
-    status: willDirect ? 'PROCESSING' : 'PROCESSED',
+    stringerId: stringer.id,
+    status: willAssign ? 'PROCESSING' : 'PROCESSED',
     considered: result.considered.length > 0,
     note: result.note,
   }

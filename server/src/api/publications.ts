@@ -7,7 +7,7 @@ import { requireSession } from '../auth.js'
 import type { Db } from '../db/index.js'
 import { schema } from '../db/index.js'
 import { logEvent } from '../events.js'
-import { listChat, runAssistant } from '../pipeline/assistant.js'
+import { listChat, runCopyDesk } from '../pipeline/copy-desk.js'
 import type { InferenceDriver } from '../ports/inference/types.js'
 import { mergePayload, PayloadIncomplete, previewPayload } from '../render/payload.js'
 import { authoringKeys } from '../schema/slots.js'
@@ -67,7 +67,7 @@ export function registerPublicationRoutes(
   })
 
   /**
-   * One turn with the assistant. It returns a reply and the whole updated
+   * One turn with the copy desk. It returns a reply and the whole updated
    * draft, which replaces the slots wholesale — a partial patch would silently
    * drop whatever it left out.
    */
@@ -84,7 +84,7 @@ export function registerPublicationRoutes(
     }
 
     try {
-      const result = await runAssistant(db, driver(), id, parsed.data.message)
+      const result = await runCopyDesk(db, driver(), id, parsed.data.message)
       return result
     } catch (err) {
       return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) })

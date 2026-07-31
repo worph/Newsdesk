@@ -137,7 +137,7 @@ describe('notifying', () => {
           storyId,
           targetId: 'discord-test',
           status,
-          origin: 'director',
+          origin: 'managing-editor',
         })
         .run()
     }

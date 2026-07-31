@@ -51,7 +51,20 @@ export function clearSession(reply: FastifyReply): void {
   reply.clearCookie(SESSION_COOKIE, { path: '/' })
 }
 
+/**
+ * Set by the gate-trust hook in app.ts when the request arrived through the
+ * SSO sidecar. Absent (and false) when no gate is configured.
+ */
+export const GATE_TRUSTED = Symbol.for('newsdesk.gateTrusted')
+
+export function isGateTrusted(request: FastifyRequest): boolean {
+  return (request as unknown as Record<symbol, unknown>)[GATE_TRUSTED] === true
+}
+
 export function hasSession(request: FastifyRequest): boolean {
+  // The SSO gate in front of us has already authenticated this visitor, and
+  // the desk is single-user — there is no second fact a password would add.
+  if (isGateTrusted(request)) return true
   const raw = request.cookies[SESSION_COOKIE]
   if (!raw) return false
   const unsigned = request.unsignCookie(raw)

@@ -33,12 +33,12 @@ export function Queue() {
       <header className="space-y-1">
         <h1 className="text-xl font-semibold tracking-tight">Queue</h1>
         <p className="text-sm text-desk-500">
-          Stories awaiting a decision, oldest first. Each chip is one destination the director proposed —
+          Stories awaiting a decision, oldest first. Each chip is one destination the managing editor proposed —
           approving one never ships the others.
         </p>
         {working > 0 && (
           <p className="text-xs text-desk-500">
-            {working} submission{working === 1 ? '' : 's'} still with the director…
+            {working} submission{working === 1 ? '' : 's'} still with the managing editor…
           </p>
         )}
       </header>
@@ -47,7 +47,7 @@ export function Queue() {
         <div className="rounded-lg border border-dashed border-desk-300 px-4 py-10 text-center dark:border-desk-700">
           <p className="text-sm text-desk-500">Nothing waiting.</p>
           <p className="mt-1 text-xs text-desk-500">
-            Stories the director routed appear here. Spiked ones are under Stories.
+            Stories the managing editor routed appear here. Spiked ones are under Stories.
           </p>
         </div>
       ) : (

@@ -8,10 +8,10 @@ import { runStructured } from '../ports/inference/structured.js'
 import { fillPrompt, loadPrompt } from '../prompts/load.js'
 import {
   checkVerdictLinks,
-  directorResultSchema,
-  directorShapeHint,
-  type DirectorResult,
-} from '../schema/director.js'
+  managingEditorResultSchema,
+  managingEditorShapeHint,
+  type ManagingEditorResult,
+} from '../schema/managing-editor.js'
 
 /**
  * One inference call per submission: is there a story, have we told it, where
@@ -24,17 +24,17 @@ import {
 /** Days of stories included wholesale for comparison. No embeddings at this volume. */
 export const COMPARISON_WINDOW_DAYS = 30
 
-export interface DirectorContext {
+export interface ManagingEditorContext {
   prompt: string
   targetIds: string[]
   knownStoryIds: Set<string>
 }
 
-function personaSummary(db: Db, personaId: string | null): string | undefined {
-  if (!personaId) return undefined
-  const persona = db.select().from(schema.personas).where(eq(schema.personas.id, personaId)).get()
-  if (!persona) return undefined
-  return `${persona.voice}; for ${persona.audience}`
+function voiceSummary(db: Db, voiceId: string | null): string | undefined {
+  if (!voiceId) return undefined
+  const voice = db.select().from(schema.voices).where(eq(schema.voices.id, voiceId)).get()
+  if (!voice) return undefined
+  return `${voice.tone}; for ${voice.audience}`
 }
 
 function renderTargets(db: Db): { text: string; ids: string[] } {
@@ -46,7 +46,7 @@ function renderTargets(db: Db): { text: string; ids: string[] } {
 
   const text = targets
     .map((target) => {
-      const voice = personaSummary(db, target.personaId)
+      const voice = voiceSummary(db, target.voiceId)
       return [
         `### ${target.id}`,
         `name: ${target.name}`,
@@ -89,35 +89,35 @@ function renderRecentStories(db: Db, windowDays: number): { text: string; ids: S
   return { text, ids: new Set(recent.map((s) => s.id)) }
 }
 
-export function buildDirectorContext(
+export function buildManagingEditorContext(
   db: Db,
-  submission: { id: string; sourceId: string; considered: string | null; text: string },
+  submission: { id: string; stringerId: string; considered: string | null; text: string },
   windowDays = COMPARISON_WINDOW_DAYS,
-): DirectorContext {
-  const source = db.select().from(schema.sources).where(eq(schema.sources.id, submission.sourceId)).get()
+): ManagingEditorContext {
+  const stringer = db.select().from(schema.stringers).where(eq(schema.stringers.id, submission.stringerId)).get()
   const charterRow = db.select().from(schema.charter).orderBy(desc(schema.charter.id)).limit(1).get()
   const targets = renderTargets(db)
   const recent = renderRecentStories(db, windowDays)
 
-  const sourceLines = [
-    `id: ${submission.sourceId}`,
-    ...(source ? [`name: ${source.name}`, `kind: ${source.kind}`] : []),
-    ...(source?.hint
+  const stringerLines = [
+    `id: ${submission.stringerId}`,
+    ...(stringer ? [`name: ${stringer.name}`, `kind: ${stringer.kind}`] : []),
+    ...(stringer?.hint
       ? [
           '',
-          `Narrowing note for this source (subordinate to the charter): ${source.hint}`,
+          `Narrowing note for this stringer (subordinate to the charter): ${stringer.hint}`,
         ]
       : []),
   ].join('\n')
 
-  const prompt = fillPrompt(loadPrompt('director'), {
+  const prompt = fillPrompt(loadPrompt('managing-editor'), {
     CHARTER: charterRow?.text.trim() ?? '(no charter written yet — do not route anything)',
     TARGETS: targets.text,
-    SOURCE: sourceLines,
+    STRINGER: stringerLines,
     WINDOW_DAYS: String(windowDays),
     RECENT_STORIES: recent.text,
-    // The trimmed slice is what the director sees. Falling back to the whole
-    // text would silently undo the watermark on a source we misread.
+    // The trimmed slice is what the managing editor sees. Falling back to the whole
+    // text would silently undo the watermark on a stringer we misread.
     SUBMISSION: submission.considered ?? submission.text,
   })
 
@@ -132,23 +132,23 @@ export interface AppliedResult {
 }
 
 /**
- * Turn the director's answer into rows. Every branch here is one of the tool
+ * Turn the managing editor's answer into rows. Every branch here is one of the tool
  * calls in ARCHITECTURE.md section 5.1, and every drop leaves a visible reason
  * — silence and "nothing happened" must never look alike.
  */
 export interface ApplyOptions {
   /**
-   * Called for each publication the director proposed, inside the same
+   * Called for each publication the managing editor proposed, inside the same
    * transaction — so a queued draft job can never reference a publication
    * that was rolled back.
    */
   enqueueWriter?: (publicationId: string) => void
 }
 
-export function applyDirectorResult(
+export function applyManagingEditorResult(
   db: Db,
   submissionId: string,
-  result: DirectorResult,
+  result: ManagingEditorResult,
   options: ApplyOptions = {},
 ): AppliedResult {
   const storyIds: string[] = []
@@ -227,7 +227,7 @@ export function applyDirectorResult(
               storyId: id,
               targetId: route.target_id,
               status: 'PROPOSED',
-              origin: 'director',
+              origin: 'managing-editor',
               routeReason: route.reason,
               angle: route.angle ?? null,
               slots: null,
@@ -283,8 +283,8 @@ export function applyDirectorResult(
   return { storyIds, routed, dropped, outcome }
 }
 
-/** Run the director over one submission and record the outcome. */
-export async function directSubmission(
+/** Run the managing editor over one submission and record the outcome. */
+export async function assignSubmission(
   db: Db,
   driver: InferenceDriver,
   submissionId: string,
@@ -299,16 +299,16 @@ export async function directSubmission(
 
   if (!submission) throw new Error(`submission "${submissionId}" not found`)
 
-  const context = buildDirectorContext(db, submission, windowDays)
+  const context = buildManagingEditorContext(db, submission, windowDays)
 
-  let result: DirectorResult
+  let result: ManagingEditorResult
   try {
     result = await runStructured(db, driver, {
-      purpose: 'director',
+      purpose: 'managing-editor',
       refId: submissionId,
       prompt: context.prompt,
-      schema: directorResultSchema(context.targetIds),
-      shapeHint: directorShapeHint(context.targetIds),
+      schema: managingEditorResultSchema(context.targetIds),
+      shapeHint: managingEditorShapeHint(context.targetIds),
     })
   } catch (err) {
     db.update(schema.submissions)
@@ -324,7 +324,7 @@ export async function directSubmission(
   if (problems.length > 0) {
     logEvent(db, {
       level: 'warn',
-      code: 'DIRECTOR_VERDICT_UNLINKED',
+      code: 'MANAGING_EDITOR_VERDICT_UNLINKED',
       message: `downgraded ${problems.length} unverifiable verdict(s) to NEW`,
       detail: { submissionId, problems },
     })
@@ -344,7 +344,7 @@ export async function directSubmission(
     }
   }
 
-  const applied = applyDirectorResult(db, submissionId, result, options)
+  const applied = applyManagingEditorResult(db, submissionId, result, options)
 
   db.update(schema.submissions)
     .set({ status: 'PROCESSED', outcome: applied.outcome })
@@ -355,9 +355,9 @@ export async function directSubmission(
 }
 
 /** Registered against the queue's `direct` kind. */
-export function directorHandler(driver: () => InferenceDriver, options: ApplyOptions = {}) {
+export function managingEditorHandler(driver: () => InferenceDriver, options: ApplyOptions = {}) {
   return async (db: Db, refId: string): Promise<void> => {
-    await directSubmission(db, driver(), refId, options)
+    await assignSubmission(db, driver(), refId, options)
   }
 }
 

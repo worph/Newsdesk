@@ -4,7 +4,7 @@ import { setPassword } from './auth.js'
 import { importConfigFileOnFirstBoot, isUnconfigured } from './config/store.js'
 import { openDb, runMigrations } from './db/index.js'
 import { loadEnv } from './env.js'
-import { directorHandler } from './pipeline/director.js'
+import { managingEditorHandler } from './pipeline/managing-editor.js'
 import { enqueue, JobQueue } from './pipeline/queue.js'
 import { writerHandler } from './pipeline/writer.js'
 import { publishHandler } from './ports/delivery/index.js'
@@ -34,7 +34,7 @@ async function main(): Promise<void> {
     enqueue(db, 'write', publicationId)
   }
 
-  queue.register('direct', directorHandler(driver, { enqueueWriter }))
+  queue.register('assign', managingEditorHandler(driver, { enqueueWriter }))
   queue.register('write', writerHandler(driver))
   queue.register('publish', publishHandler())
 
@@ -43,9 +43,10 @@ async function main(): Promise<void> {
     sessionSecret,
     publicDir: env.publicDir,
     logLevel: env.logLevel,
+    trustedGate: env.trustedGate,
     receiveOptions: {
-      enqueueDirector: (submissionId) => {
-        enqueue(db, 'direct', submissionId)
+      enqueueManagingEditor: (submissionId) => {
+        enqueue(db, 'assign', submissionId)
       },
       enqueuePublish: (publicationId) => {
         enqueue(db, 'publish', publicationId)

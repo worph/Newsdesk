@@ -41,7 +41,7 @@ export function Stories() {
       <header className="space-y-1">
         <h1 className="text-xl font-semibold tracking-tight">Stories</h1>
         <p className="text-sm text-desk-500">
-          Everything the director opened, including what it dropped and why.
+          Everything the managing editor opened, including what it dropped and why.
         </p>
       </header>
 

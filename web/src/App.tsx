@@ -3,14 +3,14 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { api } from './api'
 import { Layout } from './components/Layout'
 import { Config } from './pages/Config'
-import { Ideas } from './pages/Ideas'
-import { Inbox } from './pages/Inbox'
 import { Login } from './pages/Login'
 import { Queue } from './pages/Queue'
 import { Review } from './pages/Review'
 import { Settings } from './pages/Settings'
 import { Stories } from './pages/Stories'
 import { Story } from './pages/Story'
+import { Tips } from './pages/Tips'
+import { Wire } from './pages/Wire'
 
 export function App() {
   const queryClient = useQueryClient()
@@ -38,8 +38,11 @@ export function App() {
         <Route path="/review/:id" element={<Review />} />
         <Route path="/config" element={<Config />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="/inbox" element={<Inbox />} />
-        <Route path="/ideas" element={<Ideas />} />
+        <Route path="/wire" element={<Wire />} />
+        <Route path="/inbox" element={<Navigate to="/wire" replace />} />
+        <Route path="/tips" element={<Tips />} />
+        {/* the PWA share target and older bookmarks still point at /ideas */}
+        <Route path="/ideas" element={<Navigate to="/tips" replace />} />
         <Route path="*" element={<Navigate to="/queue" replace />} />
       </Routes>
     </Layout>

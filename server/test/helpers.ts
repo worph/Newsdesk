@@ -27,7 +27,7 @@ export function openTestDb(): { db: Db; sqlite: ReturnType<typeof openDb>['sqlit
   return handle
 }
 
-/** The minimum configuration the director needs: a charter, a persona, a target, a source. */
+/** The minimum configuration the managing editor needs: a charter, a voice, a target, a source. */
 export function seedDesk(db: Db, overrides: { charter?: string } = {}): void {
   db.insert(schema.charter)
     .values({
@@ -38,18 +38,18 @@ export function seedDesk(db: Db, overrides: { charter?: string } = {}): void {
 
   db.insert(schema.mcpEndpoints).values({ id: 'beacon', name: 'beacon', url: 'http://beacon/mcp/' }).run()
 
-  db.insert(schema.personas)
+  db.insert(schema.voices)
     .values({
       id: 'alicia',
       name: 'Alicia',
-      voice: 'concise, technical, anti-hype',
+      tone: 'concise, technical, anti-hype',
       audience: 'self-hosters running a personal cloud',
       rules: null,
       examples: null,
     })
     .run()
 
-  db.insert(schema.sources)
+  db.insert(schema.stringers)
     .values({ id: 'korben', name: 'korben.info', kind: 'timeline', enabled: true, hint: 'self-hosting only' })
     .run()
 
@@ -61,7 +61,7 @@ export function seedDesk(db: Db, overrides: { charter?: string } = {}): void {
       role: 'publish',
       driver: 'mcp',
       enabled: true,
-      personaId: 'alicia',
+      voiceId: 'alicia',
       endpointId: 'beacon',
       tool: 'discord-mcp__send_embed',
       destinationKey: null,

@@ -17,7 +17,7 @@ export const INFERENCE_SETTING = {
  *
  * The endpoint is a row rather than an environment variable so a deployment
  * can be repointed from the UI, and so /healthz reports on the same object the
- * director actually calls.
+ * managing editor actually calls.
  */
 export function createInferenceDriver(db: Db): InferenceDriver {
   const driverName = getSetting(db, INFERENCE_SETTING.driver) ?? 'mcp-claude-code'

@@ -23,7 +23,7 @@ review, approval, and audit trail. It is deliberately **not** an integration pla
 │  (GitHub)    │───▶│  drafting · review UI · PWA  │───▶│ telegram-mcp      │
 │ n8n webhook  │    │  approval · audit · errors   │    │ nextcloud-talk-mcp│
 │  (RSS)       │    └──────────────┬──────────────┘    │ …future targets…  │
-│ idea box ────┼──────────┐        │                   └───────────────────┘
+│ tip line ────┼──────────┐        │                   └───────────────────┘
 └──────────────┘          │  INFERENCE (external)
                           │  claude-code via Beacon
                           ▼
@@ -49,23 +49,23 @@ It is a newsroom, and the roles are the design:
 1. **Stringers file reports.** External n8n workflows have the credentials, go and look, and file
    **free text** — a written report on a codebase, a dated list of entries, or a snapshot of some
    current state. Depth is the source's business. They report inclusively and never judge.
-2. **The director reads the wire.** One LLM call, working from a global *editorial charter*, finds
+2. **The managing editor reads the wire.** One LLM call, working from a global *editorial charter*, finds
    the stories in a report, decides whether each one is **new, a duplicate, or a follow-up to
    something already told**, and proposes where each should run — one call to `propose_route` per
    destination, with a reason. No story in a report is a normal, successful outcome, and zero
    routes on a story *is* the newsworthiness gate.
 3. **Duplicates die here, semantically.** The same release can reach the desk from a GitHub report,
-   an RSS feed, and someone's idea, with no shared identifier. The director compares against every
+   an RSS feed, and someone's tip, with no shared identifier. The managing editor compares against every
    story from the last 30 days and links what it matches. Two reports of the same event become
    **one story with two sources** — better founded than either alone.
 4. **Writers draft per destination.** Each proposed route gets its own draft in that destination's
-   persona. The same change can run on a public Discord channel in a public voice *and* in an
+   voice. The same change can run on a public Discord channel in a public voice *and* in an
    internal Nextcloud Talk room in a dry technical one.
 5. **You edit.** A live markdown document with an assistant beside it — "shorter", "lead with the
    security fix", "three headline options" — updating the document in place, every revision
    versioned and revertible.
 6. **You approve, per destination.** Each route is approved or spiked independently.
-7. **The wire sends** exactly the bytes you approved. No inference runs after approval.
+7. **The press prints** exactly the bytes you approved. No inference runs after approval.
 
 The whole pipeline in one line: **config generates the tool schemas · tools enforce the shape · the
 human edits the slots · publish merges and sends.**
@@ -99,11 +99,11 @@ The market is full of tools that publish. Newsdesk's value is upstream of publis
 | Milestone | Contents |
 |---|---|
 | **M0** | container skeleton, SQLite, auth, health |
-| **M1** | submissions, watermark/snapshot diffing, raw inbox; n8n stringers for GitHub and RSS |
-| **M2** | targets, personas, charter, the director → stories with dedup verdicts and routes |
+| **M1** | submissions, watermark/snapshot diffing, the raw wire; n8n stringers for GitHub and RSS |
+| **M2** | targets, voices, charter, the managing editor → stories with dedup verdicts and routes |
 | **M3** | per-target writing, review editor, approve → publish via `discord-mcp` |
 | **M4** | assistant beside the document, versions and revert |
-| **M5** | PWA: install, Android web push, share target, idea box |
+| **M5** | PWA: install, Android web push, share target, tip line |
 | **M6** | error log, run log, override review |
 | **M7** | migration off the existing Docmost/Telegram/n8n pipeline |
 

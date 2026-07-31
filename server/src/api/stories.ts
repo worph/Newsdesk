@@ -112,7 +112,7 @@ function relatedTitles(db: Db, ids: string[]): Map<string, string> {
 export function registerStoryRoutes(
   app: FastifyInstance,
   db: Db,
-  enqueueDirector?: (submissionId: string) => void,
+  enqueueManagingEditor?: (submissionId: string) => void,
   enqueueWriter?: (publicationId: string) => void,
 ): void {
   app.get('/api/v1/stories', { preHandler: requireSession }, async (request, reply) => {
@@ -177,14 +177,14 @@ export function registerStoryRoutes(
         ? db
             .select({
               id: schema.submissions.id,
-              sourceId: schema.submissions.sourceId,
-              sourceName: schema.sources.name,
+              stringerId: schema.submissions.stringerId,
+              stringerName: schema.stringers.name,
               kind: schema.submissions.kind,
               receivedAt: schema.submissions.receivedAt,
               considered: schema.submissions.considered,
             })
             .from(schema.submissions)
-            .leftJoin(schema.sources, eq(schema.submissions.sourceId, schema.sources.id))
+            .leftJoin(schema.stringers, eq(schema.submissions.stringerId, schema.stringers.id))
             .where(inArray(schema.submissions.id, links.map((l) => l.submissionId)))
             .all()
         : []
@@ -206,9 +206,9 @@ export function registerStoryRoutes(
   })
 
   /**
-   * Add a route the director did not propose. `origin: 'human'` is what makes
+   * Add a route the managing editor did not propose. `origin: 'human'` is what makes
    * the override diff readable later — a route you added must never look like
-   * one the director suggested.
+   * one the managing editor suggested.
    */
   app.post('/api/v1/stories/:id/routes', { preHandler: requireSession }, async (request, reply) => {
     const { id } = request.params as { id: string }
@@ -254,7 +254,7 @@ export function registerStoryRoutes(
     }
 
     // A route you added still needs something written for it, exactly like one
-    // the director proposed — otherwise it sits at PROPOSED with no draft and
+    // the managing editor proposed — otherwise it sits at PROPOSED with no draft and
     // no way to reach the gate.
     enqueueWriter?.(publicationId)
 
@@ -270,10 +270,10 @@ export function registerStoryRoutes(
     return reply.code(201).send({ id: publicationId, drafting: Boolean(enqueueWriter) })
   })
 
-  /** Re-run the director over the submissions that produced this story. */
+  /** Re-run the managing editor over the submissions that produced this story. */
   app.post('/api/v1/stories/:id/rerun', { preHandler: requireSession }, async (request, reply) => {
-    if (!enqueueDirector) {
-      return reply.code(503).send({ error: 'no director is wired on this instance' })
+    if (!enqueueManagingEditor) {
+      return reply.code(503).send({ error: 'no managing editor is wired on this instance' })
     }
 
     const { id } = request.params as { id: string }
@@ -290,7 +290,7 @@ export function registerStoryRoutes(
         .set({ status: 'PROCESSING', outcome: 're-queued by the editor' })
         .where(eq(schema.submissions.id, link.submissionId))
         .run()
-      enqueueDirector(link.submissionId)
+      enqueueManagingEditor(link.submissionId)
     }
 
     logEvent(db, {

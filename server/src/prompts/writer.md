@@ -5,7 +5,7 @@ runs here and why. You are not deciding whether it should run; you are writing i
 
 ## Your voice
 
-{{PERSONA}}
+{{VOICE}}
 
 ---
 

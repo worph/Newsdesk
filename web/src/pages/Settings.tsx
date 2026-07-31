@@ -219,7 +219,7 @@ export function Settings() {
         <h2 className="text-sm font-medium">Install</h2>
         <p className="text-sm text-desk-500">
           Use your browser’s “Install app” or “Add to home screen”. Once installed, Newsdesk appears
-          in the Android share sheet — sharing a link files it as an idea.
+          in the Android share sheet — sharing a link files it as a tip.
         </p>
       </section>
 

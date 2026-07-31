@@ -22,26 +22,26 @@ export function readConfig(db: Db): Config {
       .from(schema.mcpEndpoints)
       .all()
       .map((e) => ({ id: e.id, name: e.name, url: e.url })),
-    personas: db
+    voices: db
       .select()
-      .from(schema.personas)
+      .from(schema.voices)
       .all()
       .map((p) => ({
         id: p.id,
         name: p.name,
-        voice: p.voice,
+        tone: p.tone,
         audience: p.audience,
         ...(p.rules ? { rules: p.rules } : {}),
         ...(p.examples ? { examples: p.examples } : {}),
       })),
-    sources: db
+    stringers: db
       .select()
-      .from(schema.sources)
+      .from(schema.stringers)
       .all()
       .map((s) => ({
         id: s.id,
         name: s.name,
-        kind: s.kind as Config['sources'][number]['kind'],
+        kind: s.kind as Config['stringers'][number]['kind'],
         enabled: s.enabled,
         ...(s.hint ? { hint: s.hint } : {}),
       })),
@@ -56,7 +56,7 @@ export function readConfig(db: Db): Config {
         role: t.role as Config['targets'][number]['role'],
         driver: t.driver as Config['targets'][number]['driver'],
         enabled: t.enabled,
-        ...(t.personaId ? { persona: t.personaId } : {}),
+        ...(t.voiceId ? { voice: t.voiceId } : {}),
         ...(t.endpointId ? { endpoint: t.endpointId } : {}),
         ...(t.tool ? { tool: t.tool } : {}),
         ...(t.destinationKey ? { destination_key: t.destinationKey } : {}),
@@ -73,24 +73,24 @@ export class ConfigRejected extends Error {
 }
 
 /**
- * Rows still referenced by content cannot be removed — a source with
+ * Rows still referenced by content cannot be removed — a stringer with
  * submissions, a target with publications. Reported as an issue rather than
  * letting a foreign key error surface as a 500.
  */
 function inUse(db: Db, config: Config): ConfigIssue[] {
   const issues: ConfigIssue[] = []
-  const keepSources = config.sources.map((s) => s.id)
+  const keepStringers = config.stringers.map((s) => s.id)
   const keepTargets = config.targets.map((t) => t.id)
 
-  const orphanedSources = db
-    .selectDistinct({ id: schema.submissions.sourceId })
+  const orphanedStringers = db
+    .selectDistinct({ id: schema.submissions.stringerId })
     .from(schema.submissions)
-    .where(keepSources.length ? notInArray(schema.submissions.sourceId, keepSources) : sql`1=1`)
+    .where(keepStringers.length ? notInArray(schema.submissions.stringerId, keepStringers) : sql`1=1`)
     .all()
-  for (const row of orphanedSources) {
+  for (const row of orphanedStringers) {
     issues.push({
-      path: 'sources',
-      message: `cannot remove source "${row.id}" — submissions reference it. Set enabled: false instead.`,
+      path: 'stringers',
+      message: `cannot remove stringer "${row.id}" — submissions reference it. Set enabled: false instead.`,
     })
   }
 
@@ -117,19 +117,19 @@ export function writeConfig(db: Db, input: unknown, author: string): Config {
 
   db.transaction((tx) => {
     const endpointIds = config.mcp_endpoints.map((e) => e.id)
-    const personaIds = config.personas.map((p) => p.id)
-    const sourceIds = config.sources.map((s) => s.id)
+    const voiceIds = config.voices.map((p) => p.id)
+    const stringerIds = config.stringers.map((s) => s.id)
     const targetIds = config.targets.map((t) => t.id)
 
-    // Targets first on delete (they reference personas and endpoints).
+    // Targets first on delete (they reference voices and endpoints).
     tx.delete(schema.targets)
       .where(targetIds.length ? notInArray(schema.targets.id, targetIds) : sql`1=1`)
       .run()
-    tx.delete(schema.sources)
-      .where(sourceIds.length ? notInArray(schema.sources.id, sourceIds) : sql`1=1`)
+    tx.delete(schema.stringers)
+      .where(stringerIds.length ? notInArray(schema.stringers.id, stringerIds) : sql`1=1`)
       .run()
-    tx.delete(schema.personas)
-      .where(personaIds.length ? notInArray(schema.personas.id, personaIds) : sql`1=1`)
+    tx.delete(schema.voices)
+      .where(voiceIds.length ? notInArray(schema.voices.id, voiceIds) : sql`1=1`)
       .run()
     tx.delete(schema.mcpEndpoints)
       .where(endpointIds.length ? notInArray(schema.mcpEndpoints.id, endpointIds) : sql`1=1`)
@@ -141,20 +141,20 @@ export function writeConfig(db: Db, input: unknown, author: string): Config {
         .onConflictDoUpdate({ target: schema.mcpEndpoints.id, set: { name: e.name, url: e.url } })
         .run()
     }
-    for (const p of config.personas) {
+    for (const p of config.voices) {
       const row = {
         id: p.id,
         name: p.name,
-        voice: p.voice,
+        tone: p.tone,
         audience: p.audience,
         rules: p.rules ?? null,
         examples: p.examples ?? null,
       }
-      tx.insert(schema.personas).values(row).onConflictDoUpdate({ target: schema.personas.id, set: row }).run()
+      tx.insert(schema.voices).values(row).onConflictDoUpdate({ target: schema.voices.id, set: row }).run()
     }
-    for (const s of config.sources) {
+    for (const s of config.stringers) {
       const row = { id: s.id, name: s.name, kind: s.kind, enabled: s.enabled, hint: s.hint ?? null }
-      tx.insert(schema.sources).values(row).onConflictDoUpdate({ target: schema.sources.id, set: row }).run()
+      tx.insert(schema.stringers).values(row).onConflictDoUpdate({ target: schema.stringers.id, set: row }).run()
     }
     for (const t of config.targets) {
       const row = {
@@ -164,7 +164,7 @@ export function writeConfig(db: Db, input: unknown, author: string): Config {
         role: t.role,
         driver: t.driver,
         enabled: t.enabled,
-        personaId: t.persona ?? null,
+        voiceId: t.voice ?? null,
         endpointId: t.endpoint ?? null,
         tool: t.tool ?? null,
         destinationKey: t.destination_key ?? null,

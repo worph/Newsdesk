@@ -25,17 +25,17 @@ export interface DraftContext {
   args: ArgsSpec
 }
 
-function renderPersona(db: Db, personaId: string | null): string {
-  if (!personaId) return '(no persona configured — write plainly and factually)'
-  const persona = db.select().from(schema.personas).where(eq(schema.personas.id, personaId)).get()
-  if (!persona) return '(persona missing — write plainly and factually)'
+function renderVoice(db: Db, voiceId: string | null): string {
+  if (!voiceId) return '(no voice configured — write plainly and factually)'
+  const voice = db.select().from(schema.voices).where(eq(schema.voices.id, voiceId)).get()
+  if (!voice) return '(voice missing — write plainly and factually)'
 
   return [
-    `name: ${persona.name}`,
-    `voice: ${persona.voice}`,
-    `audience: ${persona.audience}`,
-    ...(persona.rules ? ['', 'rules:', persona.rules.trim()] : []),
-    ...(persona.examples ? ['', 'examples:', persona.examples.trim()] : []),
+    `name: ${voice.name}`,
+    `tone: ${voice.tone}`,
+    `audience: ${voice.audience}`,
+    ...(voice.rules ? ['', 'rules:', voice.rules.trim()] : []),
+    ...(voice.examples ? ['', 'examples:', voice.examples.trim()] : []),
   ].join('\n')
 }
 
@@ -55,7 +55,7 @@ function renderMaterial(db: Db, storyId: string): string {
     .all()
 
   return submissions
-    .map((submission) => `--- filed by ${submission.sourceId} ---\n${submission.considered ?? submission.text}`)
+    .map((submission) => `--- filed by ${submission.stringerId} ---\n${submission.considered ?? submission.text}`)
     .join('\n\n')
 }
 
@@ -80,7 +80,7 @@ export function buildDraftContext(db: Db, publicationId: string): DraftContext {
     : undefined
 
   const prompt = fillPrompt(loadPrompt('writer'), {
-    PERSONA: renderPersona(db, target.personaId),
+    VOICE: renderVoice(db, target.voiceId),
     TARGET: [`name: ${target.name}`, '', target.description.trim()].join('\n'),
     STORY: [
       `title: ${story.title}`,

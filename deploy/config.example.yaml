@@ -7,7 +7,7 @@
 
 # ── The charter ─────────────────────────────────────────────────────────────
 # Routing policy as prose: the standing brief a section editor would give. The
-# director reads this together with the target list and proposes where each
+# managing editor reads this together with the target list and proposes where each
 # story runs. Write it the way you would tell a colleague, not as configuration.
 charter: |
   GitHub commits and dev-facing changes go to #dev: developers, technical
@@ -28,11 +28,11 @@ mcp_endpoints:
     url: http://beacon-backend:9300/mcp
 
 # ── Voices ──────────────────────────────────────────────────────────────────
-# A persona is voice, audience and rules, stored once and shared by targets.
-personas:
+# A voice is tone, audience and rules, stored once and shared by targets.
+voices:
   - id: alicia
     name: Alicia
-    voice: concise, technical, anti-hype; never invents a claim
+    tone: concise, technical, anti-hype; never invents a claim
     audience: self-hosters and homelabbers running a personal cloud
     rules: |
       No marketing superlatives. Always say who should care and why.
@@ -40,7 +40,7 @@ personas:
 
   - id: internal-tech
     name: Internal tech
-    voice: dry, factual, no framing for an outside reader
+    tone: dry, factual, no framing for an outside reader
     audience: the team, who already have all the context
     rules: Assume the reader knows the codebase. Lead with the change itself.
 
@@ -52,11 +52,11 @@ personas:
 #   report    a written report, any depth ("what changed this week, with evidence")
 #   timeline  dated entries; a watermark stops old ones being re-examined
 #   snapshot  current state; diffed against the previous snapshot
-#   idea      the internal idea box
-sources:
-  - id: idea-box
-    name: Idea box
-    kind: idea
+#   tip       the internal tip line
+stringers:
+  - id: tip-line
+    name: Tip line
+    kind: tip
 
   - id: github-appstore
     name: GitHub stringer — AppStore releases
@@ -89,7 +89,7 @@ targets:
     description: test channel, general public audience, announcements of app releases
     role: publish
     driver: mcp
-    persona: alicia
+    voice: alicia
     endpoint: beacon
     tool: discord-mcp__send_embed
     args:
@@ -115,7 +115,7 @@ targets:
   #   description: internal technical notes, not for an outside audience
   #   role: publish
   #   driver: mcp
-  #   persona: internal-tech
+  #   voice: internal-tech
   #   endpoint: beacon
   #   tool: nextcloud-talk-mcp__talk_send_message
   #   destination_key: token

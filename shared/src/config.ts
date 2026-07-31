@@ -15,7 +15,7 @@ const idSchema = z
   .min(1)
   .regex(/^[a-z0-9][a-z0-9-]*$/, 'ids are lower-case, digits and hyphens')
 
-export const SOURCE_KINDS = ['report', 'timeline', 'snapshot', 'idea'] as const
+export const STRINGER_KINDS = ['report', 'timeline', 'snapshot', 'tip'] as const
 export const TARGET_ROLES = ['publish', 'notify'] as const
 export const TARGET_DRIVERS = ['mcp', 'webhook', 'builtin'] as const
 
@@ -25,33 +25,33 @@ export const mcpEndpointSchema = z.object({
   url: z.string().url(),
 })
 
-export const personaSchema = z.object({
+export const voiceSchema = z.object({
   id: idSchema,
   name: z.string().min(1),
-  voice: z.string().min(1),
+  tone: z.string().min(1),
   audience: z.string().min(1),
   rules: z.string().optional(),
   examples: z.string().optional(),
 })
 
-export const sourceSchema = z.object({
+export const stringerSchema = z.object({
   id: idSchema,
   name: z.string().min(1),
-  kind: z.enum(SOURCE_KINDS),
+  kind: z.enum(STRINGER_KINDS),
   enabled: z.boolean().default(true),
-  /** A narrowing note for noisy sources. Subordinate to the charter. */
+  /** A narrowing note for noisy stringers. Subordinate to the charter. */
   hint: z.string().optional(),
 })
 
 export const targetSchema = z.object({
   id: idSchema,
   name: z.string().min(1),
-  /** The director reads this to decide what belongs here. */
+  /** The managing editor reads this to decide what belongs here. */
   description: z.string().min(1),
   role: z.enum(TARGET_ROLES).default('publish'),
   driver: z.enum(TARGET_DRIVERS).default('mcp'),
   enabled: z.boolean().default(true),
-  persona: idSchema.optional(),
+  voice: idSchema.optional(),
   endpoint: idSchema.optional(),
   tool: z.string().min(1).optional(),
   /**
@@ -65,14 +65,14 @@ export const targetSchema = z.object({
 export const configSchema = z.object({
   charter: z.string().min(1, 'the charter is the routing policy — it cannot be empty'),
   mcp_endpoints: z.array(mcpEndpointSchema).default([]),
-  personas: z.array(personaSchema).default([]),
-  sources: z.array(sourceSchema).default([]),
+  voices: z.array(voiceSchema).default([]),
+  stringers: z.array(stringerSchema).default([]),
   targets: z.array(targetSchema).default([]),
 })
 
 export type McpEndpoint = z.infer<typeof mcpEndpointSchema>
-export type Persona = z.infer<typeof personaSchema>
-export type Source = z.infer<typeof sourceSchema>
+export type Voice = z.infer<typeof voiceSchema>
+export type Stringer = z.infer<typeof stringerSchema>
 export type Target = z.infer<typeof targetSchema>
 export type Config = z.infer<typeof configSchema>
 
@@ -179,8 +179,8 @@ export function validateConfig(config: Config): ConfigIssue[] {
 
   for (const [label, ids] of [
     ['mcp_endpoints', config.mcp_endpoints.map((e) => e.id)],
-    ['personas', config.personas.map((p) => p.id)],
-    ['sources', config.sources.map((s) => s.id)],
+    ['voices', config.voices.map((p) => p.id)],
+    ['stringers', config.stringers.map((s) => s.id)],
     ['targets', config.targets.map((t) => t.id)],
   ] as const) {
     for (const dupe of duplicates([...ids])) {
@@ -188,17 +188,17 @@ export function validateConfig(config: Config): ConfigIssue[] {
     }
   }
 
-  const personaIds = new Set(config.personas.map((p) => p.id))
+  const voiceIds = new Set(config.voices.map((p) => p.id))
   const endpointIds = new Set(config.mcp_endpoints.map((e) => e.id))
 
   for (const target of config.targets) {
     const path = `targets.${target.id}`
 
-    if (target.persona !== undefined && !personaIds.has(target.persona)) {
-      issues.push({ path: `${path}.persona`, message: `unknown persona "${target.persona}"` })
+    if (target.voice !== undefined && !voiceIds.has(target.voice)) {
+      issues.push({ path: `${path}.voice`, message: `unknown voice "${target.voice}"` })
     }
-    if (target.role === 'publish' && target.persona === undefined) {
-      issues.push({ path: `${path}.persona`, message: 'a publish target needs a persona to write in' })
+    if (target.role === 'publish' && target.voice === undefined) {
+      issues.push({ path: `${path}.voice`, message: 'a publish target needs a voice to write in' })
     }
 
     if (target.driver === 'mcp') {
@@ -226,7 +226,7 @@ export function validateConfig(config: Config): ConfigIssue[] {
     if (slots.length > 0 && primaries.length === 0) {
       issues.push({
         path: `${path}.args`,
-        message: 'exactly one slot must be primary — it is the document the editor and assistant work on',
+        message: 'exactly one slot must be primary — it is the document the editor and the copy desk work on',
       })
     }
 

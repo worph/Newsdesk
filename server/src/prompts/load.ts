@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
  */
 const cache = new Map<string, string>()
 
-export type PromptName = 'director' | 'writer' | 'assistant'
+export type PromptName = 'managing-editor' | 'writer' | 'copy-desk'
 
 export function loadPrompt(name: PromptName): string {
   const cached = cache.get(name)

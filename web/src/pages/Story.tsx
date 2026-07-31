@@ -5,7 +5,7 @@ import { api, type StoryRoute } from '../api'
 import { Badge, when } from '../components/StoryCard'
 
 /**
- * One story: what the director understood, what it compared against, where it
+ * One story: what the managing editor understood, what it compared against, where it
  * proposed to run it and why, and the submissions that contributed.
  *
  * For a duplicate this is the side-by-side that makes the verdict reviewable —
@@ -101,7 +101,7 @@ export function Story() {
         )}
       </header>
 
-      <Section title="Summary" hint="What the director understood. This is the writers' factual basis.">
+      <Section title="Summary" hint="What the managing editor understood. This is the writers' factual basis.">
         <p className="text-sm whitespace-pre-wrap">{story.summary}</p>
       </Section>
 
@@ -128,7 +128,7 @@ export function Story() {
 
       <Section
         title="Routes"
-        hint="Proposals, not decisions. Zero routes is how the director says “not newsworthy”."
+        hint="Proposals, not decisions. Zero routes is how the managing editor says “not newsworthy”."
       >
         {routes.length === 0 ? (
           <p className="text-sm text-desk-500">No destination was proposed.</p>
@@ -159,14 +159,14 @@ export function Story() {
             disabled={rerun.isPending}
             className="rounded-md bg-desk-100 px-2.5 py-1 text-sm text-desk-700 disabled:opacity-40 dark:bg-desk-900 dark:text-desk-300"
           >
-            {rerun.isPending ? 'Re-queuing…' : 'Re-run the director'}
+            {rerun.isPending ? 'Re-queuing…' : 'Re-run the managing editor'}
           </button>
         </div>
         {addRoute.error && (
           <p className="text-xs text-red-600">{(addRoute.error as Error).message}</p>
         )}
         {rerun.isSuccess && (
-          <p className="text-xs text-desk-500">Re-queued. The director will re-read the filing.</p>
+          <p className="text-xs text-desk-500">Re-queued. The managing editor will re-read the filing.</p>
         )}
       </Section>
 
@@ -178,7 +178,7 @@ export function Story() {
           {submissions.map((submission) => (
             <li key={submission.id} className="rounded-md border border-desk-200 px-3 py-2.5 dark:border-desk-800">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{submission.sourceName ?? submission.sourceId}</span>
+                <span className="font-medium">{submission.stringerName ?? submission.stringerId}</span>
                 <Badge>{submission.kind}</Badge>
                 <span className="text-xs text-desk-500">{when(submission.receivedAt)}</span>
               </div>

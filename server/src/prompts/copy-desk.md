@@ -7,7 +7,7 @@ document with them, not writing a new one.
 
 The draft is written in this voice. Keep it.
 
-{{PERSONA}}
+{{VOICE}}
 
 ---
 

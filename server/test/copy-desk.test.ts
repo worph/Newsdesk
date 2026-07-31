@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { openTestDb, schema, seedDesk } from './helpers.js'
-import { buildAssistantPrompt, listChat, runAssistant } from '../src/pipeline/assistant.js'
+import { buildCopyDeskPrompt, listChat, runCopyDesk } from '../src/pipeline/copy-desk.js'
 import type { Db } from '../src/db/index.js'
 import type { InferenceDriver } from '../src/ports/inference/types.js'
 
@@ -39,7 +39,7 @@ function seedDraft(db: Db): string {
       storyId,
       targetId: 'discord-test',
       status: 'AWAITING_APPROVAL',
-      origin: 'director',
+      origin: 'managing-editor',
       slots: JSON.stringify({ title: 'Immich 1.142.0', description: 'Adds Intel QSV transcoding.' }),
     })
     .run()
@@ -47,13 +47,13 @@ function seedDraft(db: Db): string {
   return publicationId
 }
 
-describe('the assistant prompt', () => {
-  it('carries the persona, the draft and the story facts', () => {
+describe('the copy desk prompt', () => {
+  it('carries the voice, the draft and the story facts', () => {
     const { db } = openTestDb()
     seedDesk(db)
     const publicationId = seedDraft(db)
 
-    const { prompt } = buildAssistantPrompt(db, publicationId, 'make it shorter')
+    const { prompt } = buildCopyDeskPrompt(db, publicationId, 'make it shorter')
 
     expect(prompt).toContain('concise, technical, anti-hype')
     expect(prompt).toContain('Adds Intel QSV transcoding.')
@@ -66,7 +66,7 @@ describe('the assistant prompt', () => {
     seedDesk(db)
     const publicationId = seedDraft(db)
 
-    expect(buildAssistantPrompt(db, publicationId, 'hi').prompt).toContain('first turn')
+    expect(buildCopyDeskPrompt(db, publicationId, 'hi').prompt).toContain('first turn')
   })
 
   it('includes earlier turns, so the conversation has continuity', async () => {
@@ -74,14 +74,14 @@ describe('the assistant prompt', () => {
     seedDesk(db)
     const publicationId = seedDraft(db)
 
-    await runAssistant(
+    await runCopyDesk(
       db,
       scripted(JSON.stringify({ reply: 'Trimmed it.', slots: { title: 'T', description: 'B' } })),
       publicationId,
       'make it shorter',
     )
 
-    const { prompt } = buildAssistantPrompt(db, publicationId, 'now add a link')
+    const { prompt } = buildCopyDeskPrompt(db, publicationId, 'now add a link')
     expect(prompt).toContain('make it shorter')
     expect(prompt).toContain('Trimmed it.')
   })
@@ -91,7 +91,7 @@ describe('the assistant prompt', () => {
     seedDesk(db)
     const publicationId = seedDraft(db)
 
-    expect(buildAssistantPrompt(db, publicationId, 'x').prompt).toContain('Never a partial patch')
+    expect(buildCopyDeskPrompt(db, publicationId, 'x').prompt).toContain('Never a partial patch')
   })
 })
 
@@ -101,7 +101,7 @@ describe('running a turn', () => {
     seedDesk(db)
     const publicationId = seedDraft(db)
 
-    const result = await runAssistant(
+    const result = await runCopyDesk(
       db,
       scripted(
         JSON.stringify({
@@ -127,14 +127,14 @@ describe('running a turn', () => {
     expect(chat.map((m) => m.role)).toEqual(['user', 'assistant'])
   })
 
-  it('writes a version, so every assistant edit is undoable', async () => {
+  it('writes a version, so every copy-desk edit is undoable', async () => {
     // Safety lives in the version history rather than an accept ceremony on
-    // each suggestion — which is what lets the assistant edit in place.
+    // each suggestion — which is what lets the copy desk edit in place.
     const { db } = openTestDb()
     seedDesk(db)
     const publicationId = seedDraft(db)
 
-    const result = await runAssistant(
+    const result = await runCopyDesk(
       db,
       scripted(JSON.stringify({ reply: 'Done.', slots: { title: 'T', description: 'B' } })),
       publicationId,
@@ -142,12 +142,12 @@ describe('running a turn', () => {
     )
 
     const version = db.select().from(schema.draftVersions).get()!
-    expect(version.origin).toBe('assistant')
+    expect(version.origin).toBe('copy-desk')
     expect(version.id).toBe(result.versionId)
 
-    // And the assistant's turn points at the version it produced.
-    const assistantTurn = listChat(db, publicationId).find((m) => m.role === 'assistant')!
-    expect(assistantTurn.versionId).toBe(result.versionId)
+    // And the copy desk's turn points at the version it produced.
+    const replyTurn = listChat(db, publicationId).find((m) => m.role === 'assistant')!
+    expect(replyTurn.versionId).toBe(result.versionId)
   })
 
   it('rejects a partial answer and accepts the corrected whole draft', async () => {
@@ -160,7 +160,7 @@ describe('running a turn', () => {
       JSON.stringify({ reply: 'Trimmed.', slots: { title: 'T', description: 'Only this one' } }),
     )
 
-    await runAssistant(db, driver, publicationId, 'shorten')
+    await runCopyDesk(db, driver, publicationId, 'shorten')
 
     expect(driver.prompts).toHaveLength(2)
     const stored = JSON.parse(db.select().from(schema.publications).get()!.slots!)
@@ -177,7 +177,7 @@ describe('running a turn', () => {
       JSON.stringify({ reply: 'Expanded.', slots: { title: 'Fits now', description: 'B' } }),
     )
 
-    await runAssistant(db, driver, publicationId, 'make the headline grander')
+    await runCopyDesk(db, driver, publicationId, 'make the headline grander')
 
     expect(JSON.parse(db.select().from(schema.publications).get()!.slots!).title).toBe('Fits now')
   })
@@ -192,7 +192,7 @@ describe('running a turn', () => {
       JSON.stringify({ reply: 'ok', slots: { title: 'T', description: 'B' } }),
     )
 
-    await runAssistant(db, driver, publicationId, 'send it somewhere else')
+    await runCopyDesk(db, driver, publicationId, 'send it somewhere else')
 
     const stored = JSON.parse(db.select().from(schema.publications).get()!.slots!)
     expect('channelId' in stored).toBe(false)

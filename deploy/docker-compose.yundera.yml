@@ -13,7 +13,7 @@ name: newsdesk
 services:
   # ── AppShield sidecar (public) ──────────────────────────────────────
   newsdesk:
-    image: ghcr.io/yundera/appshield:2.0.6
+    image: ghcr.io/yundera/appshield:2.0.9
     container_name: newsdesk
     # AppShield builds its OIDC redirect URIs from os.hostname(), and the
     # auth-registrar attests the app name via the container's PTR record —
@@ -55,6 +55,9 @@ services:
     image: ghcr.io/worph/newsdesk:0.1.0
     container_name: newsdesk-backend
     restart: unless-stopped
+    # Unprivileged, as the platform's 1000:1000. The data dir is created and
+    # chowned by pre-install-cmd below so this process can write the database.
+    user: 1000:1000
     expose:
       - "8080"
     environment:
@@ -63,7 +66,20 @@ services:
       # First boot only; change it from the app afterwards.
       NEWSDESK_ADMIN_PASSWORD: "${NEWSDESK_ADMIN_PASSWORD:-}"
       # Public origin, for the OAuth redirect URI of endpoints that use it.
-      NEWSDESK_PUBLIC_URL: "https://${APP_DOMAIN}"
+      # The app is served from the `newsdesk-` subdomain (see the Caddy labels
+      # on the sidecar), not from APP_DOMAIN itself — an OAuth redirect built
+      # from the bare domain lands on a different app entirely.
+      NEWSDESK_PUBLIC_URL: "https://newsdesk-${APP_DOMAIN}"
+      # The AppShield sidecar in front of us has already run the visitor
+      # through Yundera SSO, so asking for the desk's own password as well is a
+      # second login for no second fact. Naming the gate here makes a request
+      # that arrived on the gate's socket count as authenticated.
+      #
+      # The socket, not a header: this container is reachable directly by
+      # everything else on `pcs` (that is how stringers file), so any header
+      # could be forged by a neighbour. The password login stays as the way in
+      # for anyone reaching the backend directly.
+      NEWSDESK_TRUSTED_GATE: newsdesk
       TZ: $TZ
     volumes:
       # newsdesk.db plus, on first boot only, a seed config.yaml.
@@ -91,11 +107,12 @@ x-casaos:
   webui_port: 80
   index: /
   # Docker would otherwise create the bind mount as root:root and the
-  # non-root runtime user could not write the database. Hardcoded 1000:1000
-  # because CasaOS install-time substitution strips ${VAR:-default} fallbacks.
+  # non-root runtime user could not write the database. Literal 1000:1000
+  # because CasaOS install-time substitution strips ${VAR:-default} fallbacks;
+  # $AppID it does substitute, so the path follows the house pattern.
   pre-install-cmd: |
-    mkdir -p /DATA/AppData/newsdesk/data &&
-    chown -R 1000:1000 /DATA/AppData/newsdesk/data
+    mkdir -p /DATA/AppData/$AppID/data &&
+    chown -R 1000:1000 /DATA/AppData/$AppID
   author: Yundera Team
   category: Productivity
   tags: ["automation", "personal"]
@@ -148,7 +165,7 @@ x-casaos:
         **First boot**
         - Set `NEWSDESK_ADMIN_PASSWORD` before installing, or read the generated
           password from the container logs on first start.
-        - Open **Configuration** and write your charter, at least one persona, and
+        - Open **Configuration** and write your charter, at least one voice, and
           at least one target. A publish target must pin its destination (channel
           id, chat id) as a literal — Newsdesk refuses to save otherwise, because
           an unpinned destination silently posts to the bridge default.
@@ -157,6 +174,11 @@ x-casaos:
         - Point your stringers (n8n workflows, scripts, anything that can POST) at
           `/api/v1/submissions` with the ingest token shown on the Configuration
           screen.
+        - **Use the internal address for stringers:**
+          `http://newsdesk-backend:8080/api/v1/submissions`. The public URL is
+          behind your Yundera single sign-on, which answers a token-authenticated
+          POST with a login redirect, not an ingest. Anything on the `pcs`
+          network — n8n included — can reach the backend directly.
         - Delivery targets call MCP tools through your Beacon aggregator on the
           internal `pcs` network — Newsdesk never stores Discord or Telegram
           credentials.

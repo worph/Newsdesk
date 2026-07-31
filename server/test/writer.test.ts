@@ -32,7 +32,7 @@ function seedRoutedStory(db: Db, over: { angle?: string; verdict?: string; relat
   db.insert(schema.submissions)
     .values({
       id: submissionId,
-      sourceId: 'korben',
+      stringerId: 'korben',
       kind: 'report',
       text: 'Immich 1.142.0 out. Adds Intel QSV transcoding.',
       considered: 'Immich 1.142.0 out. Adds Intel QSV transcoding.',
@@ -60,7 +60,7 @@ function seedRoutedStory(db: Db, over: { angle?: string; verdict?: string; relat
       storyId,
       targetId: 'discord-test',
       status: 'PROPOSED',
-      origin: 'director',
+      origin: 'managing-editor',
       routeReason: 'self-hosters run it',
       angle: over.angle ?? 'Lead on what changes for someone already running it.',
     })
@@ -70,14 +70,14 @@ function seedRoutedStory(db: Db, over: { angle?: string; verdict?: string; relat
 }
 
 describe('the writer prompt', () => {
-  it('carries the persona, the destination, the story and the angle', () => {
+  it('carries the voice, the destination, the story and the angle', () => {
     const { db } = openTestDb()
     seedDesk(db)
     const { publicationId } = seedRoutedStory(db)
 
     const { prompt } = buildDraftContext(db, publicationId)
 
-    expect(prompt).toContain('concise, technical, anti-hype') // persona voice
+    expect(prompt).toContain('concise, technical, anti-hype') // voice voice
     expect(prompt).toContain('self-hosters running a personal cloud') // audience
     expect(prompt).toContain('Test channel for self-hosters') // target description
     expect(prompt).toContain('Immich v1.142.0') // story
@@ -143,7 +143,7 @@ describe('the writer prompt', () => {
         storyId,
         targetId: 'discord-test',
         status: 'PROPOSED',
-        origin: 'director',
+        origin: 'managing-editor',
         angle: null,
       })
       .run()

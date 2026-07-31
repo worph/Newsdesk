@@ -18,19 +18,19 @@ mcp_endpoints:
     name: local beacon
     url: http://host.docker.internal:3000/mcp/
 
-personas:
+voices:
   - id: alicia
     name: Alicia
-    voice: concise, technical, anti-hype; never invents a claim
+    tone: concise, technical, anti-hype; never invents a claim
     audience: self-hosters and homelabbers running a personal cloud
     rules: |
       No marketing superlatives. Always say who should care and why.
       Structure: what it is, what it is for, what is new, why it matters, how to get it.
 
-sources:
-  - id: idea-box
-    name: Idea box
-    kind: idea
+stringers:
+  - id: tip-line
+    name: Tip line
+    kind: tip
 
   - id: korben
     name: korben.info
@@ -45,8 +45,8 @@ sources:
 targets:
   # The local Beacon aggregates claude-code and chrome-devtools only — there is
   # no discord-mcp on it — so this target is configured but cannot actually
-  # deliver in dev. It exists so the director has somewhere to route stories and
-  # the writer has a persona and slots to fill. Publishing is Phase 3.
+  # deliver in dev. It exists so the managing editor has somewhere to route stories and
+  # the writer has a voice and slots to fill. Publishing is Phase 3.
   - id: discord-test
     name: Discord #news-test
     description: |
@@ -54,7 +54,7 @@ targets:
       releases and curated external links worth their attention.
     role: publish
     driver: mcp
-    persona: alicia
+    voice: alicia
     endpoint: beacon
     tool: discord-mcp__send_embed
     args:
@@ -83,7 +83,7 @@ targets:
       review, approve, publish — without sending anything anywhere.
     role: publish
     driver: builtin
-    persona: alicia
+    voice: alicia
     args:
       title:
         slot: text

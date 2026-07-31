@@ -1,4 +1,4 @@
-You are the director of a small newsroom. A stringer has filed something. Your job is to answer
+You are the managing editor of a small newsroom. A stringer has filed something. Your job is to answer
 three questions, in order:
 
 1. **Is there a story here?**
@@ -28,7 +28,7 @@ These are the only destinations that exist. `target_id` must be one of them, exa
 
 ## Where this filing came from
 
-{{SOURCE}}
+{{STRINGER}}
 
 ---
 

@@ -40,7 +40,7 @@ function Detail({ id }: { id: string }) {
       <section className="space-y-1.5">
         <h3 className="text-xs font-medium tracking-wide text-desk-500 uppercase">Considered</h3>
         <p className="text-xs text-desk-500">
-          The slice actually handed to the director, after the watermark or snapshot diff.
+          The slice actually handed to the managing editor, after the watermark or snapshot diff.
         </p>
         {submission.considered ? (
           <pre className="max-h-72 overflow-auto rounded-md bg-desk-100 p-3 font-mono text-xs whitespace-pre-wrap dark:bg-desk-900">
@@ -88,7 +88,7 @@ function Row({ row }: { row: SubmissionRow }) {
         />
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{row.sourceName ?? row.sourceId}</span>
+            <span className="font-medium">{row.stringerName ?? row.stringerId}</span>
             <KindBadge kind={row.kind} />
             <span className="text-xs text-desk-500">{when(row.receivedAt)}</span>
           </span>
@@ -103,7 +103,7 @@ function Row({ row }: { row: SubmissionRow }) {
   )
 }
 
-export function Inbox() {
+export function Wire() {
   const { data, isPending } = useQuery({
     queryKey: ['submissions'],
     queryFn: () => api.listSubmissions({ limit: 100 }),
@@ -117,9 +117,9 @@ export function Inbox() {
   return (
     <div className="mx-auto max-w-4xl space-y-5 px-4 pb-16 md:px-6">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight">Inbox</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Wire</h1>
         <p className="text-sm text-desk-500">
-          Everything filed by a source, whether or not it yielded anything. A green dot means part of it
+          Everything filed by a stringer, whether or not it yielded anything. A green dot means part of it
           was new.
         </p>
       </header>

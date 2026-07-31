@@ -123,8 +123,8 @@ describe('trim dispatch', () => {
     expect(result.note).toBe('considered whole')
   })
 
-  it('treats an idea like a report', () => {
-    const result = trim({ kind: 'idea', text: 'look at this', watermark: null, lastSnapshot: null })
+  it('treats a tip like a report', () => {
+    const result = trim({ kind: 'tip', text: 'look at this', watermark: null, lastSnapshot: null })
     expect(result.considered).toBe('look at this')
   })
 })

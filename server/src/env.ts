@@ -20,6 +20,12 @@ export interface Env {
    * an inbound request when a reverse proxy sits in front.
    */
   publicUrl: string | undefined
+  /**
+   * Container name of the SSO gate in front of the desk. Set it and a visitor
+   * the gate has already authenticated is not asked for the desk's password
+   * as well. Unset means the password is the only way in.
+   */
+  trustedGate: string | undefined
 }
 
 export function loadEnv(): Env {
@@ -38,5 +44,6 @@ export function loadEnv(): Env {
     ingestToken: process.env.NEWSDESK_INGEST_TOKEN,
     logLevel: process.env.NEWSDESK_LOG_LEVEL ?? 'info',
     publicUrl: process.env.NEWSDESK_PUBLIC_URL,
+    trustedGate: process.env.NEWSDESK_TRUSTED_GATE,
   }
 }

@@ -107,7 +107,7 @@ function logCall(
 }
 
 export interface StructuredRequest<T> {
-  purpose: 'director' | 'writer' | 'assistant'
+  purpose: 'managing-editor' | 'writer' | 'copy-desk'
   refId?: string
   prompt: string
   /** Validates and types the result. Its failure message is fed back on retry. */

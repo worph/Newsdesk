@@ -30,7 +30,7 @@ async function seedStory(over: Partial<typeof schema.stories.$inferInsert> = {})
 function seedSubmission(): string {
   const id = randomUUID()
   db.insert(schema.submissions)
-    .values({ id, sourceId: 'korben', kind: 'report', text: 'filed', considered: 'filed', status: 'PROCESSED' })
+    .values({ id, stringerId: 'korben', kind: 'report', text: 'filed', considered: 'filed', status: 'PROCESSED' })
     .run()
   return id
 }
@@ -47,7 +47,7 @@ beforeEach(async () => {
     sessionSecret: 'test-secret-value-at-least-32-characters',
     publicDir: '/nonexistent',
     logLevel: 'silent',
-    receiveOptions: { enqueueDirector: (id) => queued.push(id) },
+    receiveOptions: { enqueueManagingEditor: (id) => queued.push(id) },
   })
 
   const login = await app.inject({
@@ -78,7 +78,7 @@ describe('GET /stories', () => {
         storyId,
         targetId: 'discord-test',
         status: 'PROPOSED',
-        origin: 'director',
+        origin: 'managing-editor',
         routeReason: 'self-hosters run it',
       })
       .run()
@@ -134,7 +134,7 @@ describe('GET /stories/:id', () => {
     const body = (await get(`/api/v1/stories/${storyId}`)).json()
     expect(body.story.title).toBe('Follow-up')
     expect(body.related.title).toBe('The original')
-    expect(body.submissions[0]).toMatchObject({ sourceId: 'korben', sourceName: 'korben.info' })
+    expect(body.submissions[0]).toMatchObject({ stringerId: 'korben', stringerName: 'korben.info' })
   })
 
   it('404s on an unknown story', async () => {
@@ -143,9 +143,9 @@ describe('GET /stories/:id', () => {
 })
 
 describe('POST /stories/:id/routes', () => {
-  it('adds a route the director did not propose, marked as yours', async () => {
+  it('adds a route the managing editor did not propose, marked as yours', async () => {
     // The override diff is the highest-value data the desk produces, so a
-    // route you added must never look like one the director suggested.
+    // route you added must never look like one the managing editor suggested.
     const storyId = await seedStory()
     const response = await post(`/api/v1/stories/${storyId}/routes`, { target_id: 'discord-test' })
     expect(response.statusCode).toBe(201)
