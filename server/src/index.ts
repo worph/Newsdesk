@@ -52,6 +52,7 @@ async function main(): Promise<void> {
       },
       enqueueWriter,
       driver,
+      publicUrl: env.publicUrl,
     },
   })
 

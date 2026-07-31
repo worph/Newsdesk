@@ -3,6 +3,7 @@ import type { Db } from '../../db/index.js'
 import { schema } from '../../db/index.js'
 import { logEvent } from '../../events.js'
 import { callTool, McpError } from '../mcp/client.js'
+import { attachAuth } from '../mcp/oauth.js'
 
 /**
  * The delivery port sends an already-approved payload. It performs no
@@ -57,7 +58,9 @@ export function createMcpDriver(db: Db): DeliveryDriver {
         throw new McpError(`endpoint "${target.endpointId}" no longer exists`, false)
       }
 
-      const result = await callTool(endpoint, target.tool, payload, { timeoutMs: 280_000 })
+      const result = await callTool(attachAuth(db, endpoint), target.tool, payload, {
+        timeoutMs: 280_000,
+      })
       return { detail: result.text.slice(0, 2000) }
     },
   }

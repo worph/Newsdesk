@@ -11,6 +11,10 @@ services:
       # Set on first boot only; afterwards change it from the app.
       NEWSDESK_ADMIN_PASSWORD: "${NEWSDESK_ADMIN_PASSWORD:-}"
       NEWSDESK_LOG_LEVEL: "${NEWSDESK_LOG_LEVEL:-info}"
+      # Public origin the desk is reached on. The OAuth redirect URI is built
+      # from it and must match what the authorization server has registered,
+      # so it cannot be inferred from the request when a proxy sits in front.
+      NEWSDESK_PUBLIC_URL: "${NEWSDESK_PUBLIC_URL:-}"
     volumes:
       # Holds newsdesk.db and, on first boot only, a seed config.yaml.
       - ./data:/data

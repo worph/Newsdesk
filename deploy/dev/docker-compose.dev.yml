@@ -44,6 +44,9 @@ services:
       # configured from this same file.
       NEWSDESK_ADMIN_PASSWORD: "${NEWSDESK_ADMIN_PASSWORD:-newsdesk}"
       NEWSDESK_INGEST_TOKEN: "${NEWSDESK_INGEST_TOKEN:-dev-ingest-token}"
+      # The Vite dev server is the origin a browser reaches the desk on, so an
+      # OAuth redirect has to come back there, not to the API container.
+      NEWSDESK_PUBLIC_URL: "${NEWSDESK_PUBLIC_URL:-http://localhost:${WEB_PORT:-5173}}"
       # A bind mount backed by a Windows filesystem delivers file contents but
       # not inotify events, so watch mode silently never fires. Polling costs a
       # little CPU; set to "false" if your mount delivers events natively.

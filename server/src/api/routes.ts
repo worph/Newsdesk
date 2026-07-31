@@ -14,6 +14,7 @@ import { checkHealth } from '../health.js'
 import { getOrCreateVapidKeys, removeSubscription, saveSubscription } from '../push.js'
 import { getSetting, getOrCreateSecret, SETTING } from '../settings.js'
 import { registerIngestRoutes } from './ingest.js'
+import { registerMcpRoutes } from './mcp.js'
 import { registerPublicationRoutes } from './publications.js'
 import { registerStoryRoutes } from './stories.js'
 import type { ReceiveOptions } from '../ports/ingest/receive.js'
@@ -31,6 +32,8 @@ export interface RouteOptions extends ReceiveOptions {
   enqueuePublish?: (publicationId: string) => void
   enqueueWriter?: (publicationId: string) => void
   driver?: () => InferenceDriver
+  /** Public origin, for the OAuth redirect URI. */
+  publicUrl?: string
 }
 
 export function registerRoutes(
@@ -42,6 +45,7 @@ export function registerRoutes(
   registerIngestRoutes(app, db, receiveOptions)
   registerStoryRoutes(app, db, receiveOptions.enqueueDirector, receiveOptions.enqueueWriter)
   registerPublicationRoutes(app, db, receiveOptions.enqueuePublish, receiveOptions.driver)
+  registerMcpRoutes(app, db, receiveOptions.publicUrl)
 
   // ── push ──────────────────────────────────────────────────────────────────
   // The public key is needed by the service worker before it can subscribe.

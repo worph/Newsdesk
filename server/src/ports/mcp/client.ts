@@ -1,3 +1,4 @@
+import { type OAuthClientProvider, UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
@@ -17,8 +18,14 @@ export interface McpEndpointRef {
   id: string
   name: string
   url: string
-  /** JSON blob from the row: `{ bearer }` or `{ headers }`. */
+  /** JSON blob from the row: `{ bearer }`, `{ headers }` or `{ oauth }`. */
   auth?: string | null
+  /**
+   * Set for endpoints that authenticate over OAuth. The SDK then owns the
+   * Authorization header, refreshing the access token when it has expired.
+   * Built by `attachAuth` in ./oauth.ts, which is where the db lives.
+   */
+  authProvider?: OAuthClientProvider
 }
 
 export interface McpAuth {
@@ -53,6 +60,12 @@ export class McpError extends Error {
     message: string,
     readonly retryable: boolean,
     readonly status?: number,
+    /**
+     * The endpoint refused us for want of credentials. Not retryable — waiting
+     * changes nothing — but distinct from a broken call, because the fix is a
+     * human reconnecting the endpoint rather than a bug to chase.
+     */
+    readonly needsAuth = false,
   ) {
     super(message)
     this.name = 'McpError'
@@ -65,12 +78,23 @@ const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504])
 export function classifyError(err: unknown): McpError {
   if (err instanceof McpError) return err
 
+  // Raised when the endpoint wants OAuth and we hold no usable token — either
+  // never connected, or a refresh that could not be completed.
+  if (err instanceof UnauthorizedError) {
+    return new McpError(
+      `${err.message || 'endpoint requires authorization'} — reconnect it in Settings`,
+      false,
+      401,
+      true,
+    )
+  }
+
   const message = err instanceof Error ? err.message : String(err)
 
   // The SDK surfaces HTTP failures in the message text rather than as a field.
   const status = Number(/\b(4\d\d|5\d\d)\b/.exec(message)?.[1] ?? Number.NaN)
   if (!Number.isNaN(status)) {
-    return new McpError(message, RETRYABLE_STATUS.has(status), status)
+    return new McpError(message, RETRYABLE_STATUS.has(status), status, status === 401)
   }
 
   const lowered = message.toLowerCase()
@@ -90,9 +114,14 @@ async function withClient<T>(
   endpoint: McpEndpointRef,
   fn: (client: Client) => Promise<T>,
 ): Promise<T> {
-  const headers = authHeaders(parseAuth(endpoint.auth))
+  // With a provider the SDK sets Authorization itself; a static bearer
+  // alongside it would race the refreshed token, so only the other headers
+  // come from the row.
+  const parsed = parseAuth(endpoint.auth)
+  const headers = endpoint.authProvider ? (parsed.headers ?? {}) : authHeaders(parsed)
   const transport = new StreamableHTTPClientTransport(new URL(endpoint.url), {
     ...(Object.keys(headers).length > 0 ? { requestInit: { headers } } : {}),
+    ...(endpoint.authProvider ? { authProvider: endpoint.authProvider } : {}),
   })
   const client = new Client({ name: 'newsdesk', version: '0.1.0' })
 

@@ -318,6 +318,67 @@ Also noted while reading: `telegram-mcp` exposes `ask` / `get_answer`, a human-i
 primitive. Not needed — the PWA is the approval surface — but it is the mechanism the old bridge
 approval was built on, and it should stay unused so there is exactly one gate.
 
+### 5.2.2 Endpoint authentication, including OAuth
+
+`mcp_endpoints.auth` is a JSON blob with three possible shapes, and it is **runtime-owned**: the
+YAML configuration carries only `id`, `name` and `url`, and `writeConfig` updates only those two, so
+pushing a new configuration can never wipe a credential.
+
+| Shape | Meaning |
+|---|---|
+| `{ "bearer": "…" }` | a static token, sent as `Authorization: Bearer` |
+| `{ "headers": { … } }` | arbitrary headers, for endpoints with their own scheme |
+| `{ "oauth": { … } }` | an OAuth 2.1 connection: registered client, tokens, and the one-shot flow material |
+
+**Why OAuth is interactive.** `beacon-yunderalabs.nsl.sh` moved off `?hash=` URLs to OAuth. Its
+authorization server advertises `authorization_code`, `implicit` and `refresh_token` — and **no
+`client_credentials`** — so there is no machine-to-machine grant a daemon could use unattended. The
+desk therefore borrows the operator's browser exactly once; the refresh token that flow returns is
+what keeps delivery working on its own afterwards. This is the one credential the desk holds, and it
+is the desk's own delegated identity, not a third-party API key.
+
+**The flow.** `@modelcontextprotocol/sdk` ≥ 1.30 drives the protocol; `ports/mcp/oauth.ts` only
+supplies storage and the one piece a server cannot do (following a redirect):
+
+1. `POST /api/v1/mcp/endpoints/:id/oauth/start` → the SDK reads the `WWW-Authenticate` challenge,
+   fetches the protected-resource and authorization-server metadata, registers the desk dynamically
+   (RFC 7591) as a **public client with PKCE `S256`** — there is no client secret to store — and
+   builds the authorization URL, which is returned rather than followed.
+2. The operator's browser completes the login in a popup.
+3. `GET /api/v1/mcp/oauth/callback` exchanges the code and stores the tokens.
+
+**The callback is unauthenticated by design.** It is a top-level navigation the desk did not
+initiate, and its CSRF defence is the single-use `state` minted at step 1, compared in constant time
+and consumed on use whether or not the exchange succeeded. Requiring a session cookie as well would
+add a failure mode without adding a barrier an attacker could not already pass.
+
+**Scope and the refresh token.** Scope selection follows SEP-835: the `WWW-Authenticate` scope, then
+the resource's `scopes_supported`, then our configured fallback (`mcp offline_access`). The live
+Beacon advertises `["mcp","offline_access"]`, so the resource decides and the request goes out as
+`scope=mcp offline_access`. `offline_access` matters twice over — the SDK appends `prompt=consent`
+whenever it is present, and **without that an OIDC server silently drops the scope and issues no
+refresh token**, leaving a connection that dies an hour later with no way to renew it. Beacon hit
+exactly this against the same authorization server and had to patch it by hand; SDK 1.30 sends it
+for us. Because the failure is silent, `noteRefreshToken` records a warning on any token response
+that arrives without a refresh token, and it is shown on the callback page and in Settings rather
+than discovered in the middle of the night.
+
+**Verified live against `beacon-yunderalabs.nsl.sh` on 2026-07-31** — discovery, dynamic
+registration and the built authorization request, carrying `code_challenge_method=S256`,
+`scope=mcp offline_access` and `prompt=consent`. Only the browser consent and token exchange remain
+unverified, since by construction they need a human at a browser.
+
+**Runtime.** `attachAuth` gives an endpoint row an `OAuthClientProvider` when it has a connection;
+the SDK then owns the `Authorization` header and refreshes the access token when it expires. A
+failure that means "no usable credential" surfaces as `McpError.needsAuth` — not retryable, because
+waiting cannot help, but distinct from a broken call, because the fix is a human reconnecting.
+`probeEndpoint` presents the stored token so a connected endpoint reads `ok` rather than
+`unauthorized`, and never echoes it back into `/healthz`.
+
+**Configuration.** `NEWSDESK_PUBLIC_URL` sets the origin the redirect URI is built from. It must
+match what was registered, so it cannot be inferred from an inbound request when a reverse proxy
+sits in front. Settings displays the resulting redirect URI.
+
 ### 5.3 Inference drivers
 
 ```ts

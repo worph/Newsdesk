@@ -62,6 +62,8 @@ services:
       NEWSDESK_PORT: "8080"
       # First boot only; change it from the app afterwards.
       NEWSDESK_ADMIN_PASSWORD: "${NEWSDESK_ADMIN_PASSWORD:-}"
+      # Public origin, for the OAuth redirect URI of endpoints that use it.
+      NEWSDESK_PUBLIC_URL: "https://${APP_DOMAIN}"
       TZ: $TZ
     volumes:
       # newsdesk.db plus, on first boot only, a seed config.yaml.

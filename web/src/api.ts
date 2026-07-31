@@ -19,6 +19,21 @@ export interface Health {
   endpoints: EndpointHealth[]
 }
 
+export interface OAuthSummary {
+  status: 'connected' | 'expired' | 'pending' | 'disconnected'
+  connectedAt?: string
+  scope?: string
+  hasRefreshToken: boolean
+  warning?: string
+}
+
+export interface McpEndpointRow {
+  id: string
+  name: string
+  url: string
+  oauth: OAuthSummary
+}
+
 export interface ConfigPayload {
   yaml: string
   config: unknown
@@ -205,6 +220,19 @@ export const api = {
     }),
   rotateIngestToken: () =>
     request<{ ingestToken: string }>('/api/v1/config/ingest-token/rotate', { method: 'POST' }),
+
+  listMcpEndpoints: () =>
+    request<{ redirectUri: string; endpoints: McpEndpointRow[] }>('/api/v1/mcp/endpoints'),
+  startOAuth: (id: string) =>
+    request<{ status: 'connected' | 'redirect'; authorizationUrl?: string }>(
+      `/api/v1/mcp/endpoints/${encodeURIComponent(id)}/oauth/start`,
+      { method: 'POST' },
+    ),
+  forgetOAuth: (id: string) =>
+    request<{ status: 'disconnected' }>(
+      `/api/v1/mcp/endpoints/${encodeURIComponent(id)}/oauth/forget`,
+      { method: 'POST' },
+    ),
 
   listSubmissions: (params: { source?: string; limit?: number } = {}) => {
     const search = new URLSearchParams()

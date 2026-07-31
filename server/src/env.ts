@@ -14,6 +14,12 @@ export interface Env {
    *  configured from the same compose file that starts the desk. */
   ingestToken: string | undefined
   logLevel: string
+  /**
+   * Public origin the desk is reached on. The OAuth redirect URI is built
+   * from it and must match what was registered, so it cannot be inferred from
+   * an inbound request when a reverse proxy sits in front.
+   */
+  publicUrl: string | undefined
 }
 
 export function loadEnv(): Env {
@@ -31,5 +37,6 @@ export function loadEnv(): Env {
     adminPassword: process.env.NEWSDESK_ADMIN_PASSWORD,
     ingestToken: process.env.NEWSDESK_INGEST_TOKEN,
     logLevel: process.env.NEWSDESK_LOG_LEVEL ?? 'info',
+    publicUrl: process.env.NEWSDESK_PUBLIC_URL,
   }
 }
