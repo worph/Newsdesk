@@ -1,7 +1,7 @@
 import type { StoryRow } from '../api'
 
 /**
- * One story as it appears in a list, with its per-target route chips. Shared
+ * One story as it appears in a list, with its per-outlet placement chips. Shared
  * by the Queue and Stories screens because they are the same rows asked
  * different questions.
  */
@@ -16,7 +16,7 @@ export function when(iso: string): string {
 }
 
 const STATUS_STYLE: Record<string, string> = {
-  ROUTED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+  PLACED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
   PROPOSED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
   DROPPED: 'bg-desk-200 text-desk-600 dark:bg-desk-800 dark:text-desk-400',
   NEEDS_CONTEXT: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
@@ -72,16 +72,16 @@ export function StoryCard({ story, onOpen }: { story: StoryRow; onOpen?: () => v
             </span>
           )}
 
-          {story.routes.length > 0 && (
+          {story.placements.length > 0 && (
             <span className="mt-2 flex flex-wrap gap-1.5">
-              {story.routes.map((route) => (
+              {story.placements.map((placement) => (
                 <span
-                  key={route.id}
-                  title={route.routeReason ?? undefined}
+                  key={placement.id}
+                  title={placement.placementReason ?? undefined}
                   className="rounded border border-desk-200 px-1.5 py-0.5 text-[11px] text-desk-600 dark:border-desk-700 dark:text-desk-400"
                 >
-                  {route.targetName ?? route.targetId}
-                  {route.origin === 'human' && ' ·  added'}
+                  {placement.outletName ?? placement.outletId}
+                  {placement.origin === 'human' && ' ·  added'}
                 </span>
               ))}
             </span>

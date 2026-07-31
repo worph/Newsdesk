@@ -26,7 +26,7 @@ const revertBody = z.object({ version_id: z.string().min(1) })
 interface Loaded {
   publication: typeof schema.publications.$inferSelect
   story: typeof schema.stories.$inferSelect
-  target: typeof schema.targets.$inferSelect
+  outlet: typeof schema.outlets.$inferSelect
   args: ArgsSpec
 }
 
@@ -34,9 +34,9 @@ function load(db: Db, id: string): Loaded | undefined {
   const publication = db.select().from(schema.publications).where(eq(schema.publications.id, id)).get()
   if (!publication) return undefined
   const story = db.select().from(schema.stories).where(eq(schema.stories.id, publication.storyId)).get()
-  const target = db.select().from(schema.targets).where(eq(schema.targets.id, publication.targetId)).get()
-  if (!story || !target) return undefined
-  return { publication, story, target, args: JSON.parse(target.argsSpec) as ArgsSpec }
+  const outlet = db.select().from(schema.outlets).where(eq(schema.outlets.id, publication.outletId)).get()
+  if (!story || !outlet) return undefined
+  return { publication, story, outlet, args: JSON.parse(outlet.argsSpec) as ArgsSpec }
 }
 
 function slotsOf(publication: typeof schema.publications.$inferSelect): Record<string, string> {
@@ -104,7 +104,7 @@ export function registerPublicationRoutes(
     const siblings = db
       .select({
         id: schema.publications.id,
-        targetId: schema.publications.targetId,
+        outletId: schema.publications.outletId,
         status: schema.publications.status,
       })
       .from(schema.publications)
@@ -114,13 +114,13 @@ export function registerPublicationRoutes(
     return {
       publication: { ...loaded.publication, slots },
       story: loaded.story,
-      target: {
-        id: loaded.target.id,
-        name: loaded.target.name,
-        description: loaded.target.description,
-        role: loaded.target.role,
-        driver: loaded.target.driver,
-        tool: loaded.target.tool,
+      outlet: {
+        id: loaded.outlet.id,
+        name: loaded.outlet.name,
+        description: loaded.outlet.description,
+        role: loaded.outlet.role,
+        driver: loaded.outlet.driver,
+        tool: loaded.outlet.tool,
       },
       // Only the authoring slots are reviewable; literals and derived values
       // appear in the payload preview instead.
@@ -238,8 +238,8 @@ export function registerPublicationRoutes(
     if (loaded.publication.status === 'REJECTED') {
       return reply.code(409).send({ error: 'this was spiked — reopen it before approving' })
     }
-    if (!loaded.target.enabled) {
-      return reply.code(422).send({ error: `target "${loaded.target.id}" is disabled` })
+    if (!loaded.outlet.enabled) {
+      return reply.code(422).send({ error: `outlet "${loaded.outlet.id}" is disabled` })
     }
 
     let payload: Record<string, unknown>
@@ -270,7 +270,7 @@ export function registerPublicationRoutes(
       code: 'APPROVED',
       storyId: loaded.publication.storyId,
       publicationId: id,
-      message: `approved for ${loaded.target.name}`,
+      message: `approved for ${loaded.outlet.name}`,
       detail: { payload },
     })
 
@@ -303,7 +303,7 @@ export function registerPublicationRoutes(
       code: 'ROUTE_REJECTED',
       storyId: loaded.publication.storyId,
       publicationId: id,
-      message: `spiked for ${loaded.target.name}${reason ? `: ${reason}` : ''}`,
+      message: `spiked for ${loaded.outlet.name}${reason ? `: ${reason}` : ''}`,
     })
 
     return { status: 'REJECTED' }
@@ -337,18 +337,18 @@ export function registerPublicationRoutes(
         id: schema.publications.id,
         storyId: schema.publications.storyId,
         storyTitle: schema.stories.title,
-        targetId: schema.publications.targetId,
-        targetName: schema.targets.name,
+        outletId: schema.publications.outletId,
+        outletName: schema.outlets.name,
         status: schema.publications.status,
         origin: schema.publications.origin,
-        routeReason: schema.publications.routeReason,
+        placementReason: schema.publications.placementReason,
         approvedAt: schema.publications.approvedAt,
         publishedAt: schema.publications.publishedAt,
         error: schema.publications.error,
       })
       .from(schema.publications)
       .leftJoin(schema.stories, eq(schema.publications.storyId, schema.stories.id))
-      .leftJoin(schema.targets, eq(schema.publications.targetId, schema.targets.id))
+      .leftJoin(schema.outlets, eq(schema.publications.outletId, schema.outlets.id))
 
     const rows = (status ? base.where(eq(schema.publications.status, status.toUpperCase())) : base)
       .orderBy(asc(schema.publications.approvedAt))

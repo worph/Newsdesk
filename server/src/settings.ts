@@ -8,6 +8,8 @@ export const SETTING = {
   ingestToken: 'ingest_token',
   adminPasswordHash: 'admin_password_hash',
   configImportedAt: 'config_imported_at',
+  /** The reporting block, as JSON. Configuration, not content — see config/store.ts. */
+  reporting: 'reporting',
 } as const
 
 export function getSetting(db: Db, key: string): string | undefined {

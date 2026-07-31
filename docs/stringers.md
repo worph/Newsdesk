@@ -25,7 +25,7 @@ A confident-sounding invented one poisons a draft.
 ## The contract
 
 ```
-POST /api/v1/submissions
+POST /api/v1/filings
 Authorization: Bearer <ingest token from the Configuration screen>
 Content-Type: application/json
 
@@ -37,9 +37,6 @@ Content-Type: application/json
   "filed_at":  "2026-07-28T09:12:00Z" // optional
 }
 ```
-
-The pre-rename spellings `source_id` and `kind: "idea"` are still accepted, so a workflow filed
-before the vocabulary change keeps working untouched.
 
 An **array** is accepted too, and is the normal shape for a feed:
 
@@ -58,7 +55,8 @@ it is why the desk, not the producer, is the authority on what is new.
 ## Kinds, and what each gets before the managing editor sees it
 
 Newsdesk does a little cheap deterministic work before spending an LLM call. None of it is
-deduplication — that is the managing editor's semantic judgement — it only avoids re-reading material.
+deduplication — that is the managing editor's semantic judgement — it only avoids re-reading
+material.
 
 | `kind` | What you file | What the desk does |
 |---|---|---|
@@ -89,7 +87,7 @@ mis-trimming:
 ```
 
 Text before the first dated line is a preamble and is never dropped. If **no** dates are recognised
-the whole submission is considered and the Wire says so — loud, rather than silently dropping the
+the whole filing is considered and the Wire says so — loud, rather than silently dropping the
 source.
 
 ---
@@ -103,7 +101,7 @@ the written report.
 Schedule (hourly)
   → GitHub node(s): commits / releases since the last run  [GitHub credential lives here]
   → MCP node: ask an LLM to write a report
-  → HTTP Request: POST /api/v1/submissions   { stringer_id: "github-appstore", kind: "report" }
+  → HTTP Request: POST /api/v1/filings   { stringer_id: "github-appstore", kind: "report" }
 ```
 
 The report-writing prompt, roughly:
@@ -123,7 +121,7 @@ request, an app's `x-casaos` metadata — and put it in the report. **Newsdesk n
 Schedule (every 30 min)
   → RSS Read node
   → Code node: format entries as "- <ISO date> <title>\n  <summary>\n  <link>"
-  → HTTP Request: POST /api/v1/submissions   { stringer_id: "korben", kind: "timeline" }
+  → HTTP Request: POST /api/v1/filings   { stringer_id: "korben", kind: "timeline" }
 ```
 
 Where the feed carries only a summary, fetch the article and include its text — the relevance
@@ -140,7 +138,7 @@ TOKEN=…   # Configuration screen
 BASE=http://localhost:8080
 
 # A report
-curl -s -X POST "$BASE/api/v1/submissions" \
+curl -s -X POST "$BASE/api/v1/filings" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{
     "stringer_id": "github-appstore",
@@ -149,7 +147,7 @@ curl -s -X POST "$BASE/api/v1/submissions" \
   }'
 
 # A timeline, filed as a batch — overlap with the previous run is fine
-curl -s -X POST "$BASE/api/v1/submissions" \
+curl -s -X POST "$BASE/api/v1/filings" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '[{
     "stringer_id": "korben",
@@ -158,7 +156,7 @@ curl -s -X POST "$BASE/api/v1/submissions" \
   }]'
 
 # A snapshot — only the diff against the previous one is considered
-curl -s -X POST "$BASE/api/v1/submissions" \
+curl -s -X POST "$BASE/api/v1/filings" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"stringer_id": "appstore-state", "kind": "snapshot", "text": "immich 1.141.0\njellyfin 10.11.11\nnextcloud 31.0.2"}'
 

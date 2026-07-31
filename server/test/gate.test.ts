@@ -141,7 +141,7 @@ describe('gate trust through the app', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('lets a request through the gate reach a protected route with no cookie', async () => {
+  it('lets a request through the gate reach a protected placement with no cookie', async () => {
     app = await build(async (peer) => peer === GATE_IP)
     const res = await app.inject({ method: 'GET', url: '/api/v1/config', remoteAddress: GATE_IP })
     expect(res.statusCode).toBe(200)
@@ -207,7 +207,7 @@ describe('gate trust through the app', () => {
 
     const forged = await app.inject({
       method: 'POST',
-      url: '/api/v1/submissions',
+      url: '/api/v1/filings',
       remoteAddress: GATE_IP,
       payload: { stringer_id: 'tip-line', text: 'no token presented' },
     })
@@ -215,7 +215,7 @@ describe('gate trust through the app', () => {
 
     const withToken = await app.inject({
       method: 'POST',
-      url: '/api/v1/submissions',
+      url: '/api/v1/filings',
       remoteAddress: OTHER_IP,
       headers: { authorization: `Bearer ${token}` },
       payload: { stringer_id: 'tip-line', text: 'filed by a stringer over the internal network' },

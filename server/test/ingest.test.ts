@@ -23,7 +23,7 @@ const CONFIG = {
     { id: 'appstore-state', name: 'AppStore state', kind: 'snapshot' },
     { id: 'sleeping', name: 'Disabled stringer', kind: 'report', enabled: false },
   ],
-  targets: [
+  outlets: [
     {
       id: 'discord-test',
       name: 'Discord test',
@@ -81,7 +81,7 @@ afterEach(async () => {
 const file = (payload: unknown) =>
   app.inject({
     method: 'POST',
-    url: '/api/v1/submissions',
+    url: '/api/v1/filings',
     headers: { authorization: `Bearer ${token}` },
     payload,
   })
@@ -90,7 +90,7 @@ describe('the ingest token', () => {
   it('is required', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/api/v1/submissions',
+      url: '/api/v1/filings',
       payload: { stringer_id: 'github', text: 'hello' },
     })
     expect(res.statusCode).toBe(401)
@@ -99,7 +99,7 @@ describe('the ingest token', () => {
   it('is not satisfied by a session — stringers never hold one', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/api/v1/submissions',
+      url: '/api/v1/filings',
       headers: { cookie },
       payload: { stringer_id: 'github', text: 'hello' },
     })
@@ -109,7 +109,7 @@ describe('the ingest token', () => {
   it('rejects a wrong token', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/api/v1/submissions',
+      url: '/api/v1/filings',
       headers: { authorization: 'Bearer nope' },
       payload: { stringer_id: 'github', text: 'hello' },
     })
@@ -118,13 +118,13 @@ describe('the ingest token', () => {
 })
 
 describe('filing a report', () => {
-  it('stores it whole and shows up in the inbox', async () => {
+  it('stores it whole and shows up on the wire', async () => {
     const res = await file({ stringer_id: 'github', text: 'settings-center gained a dark mode' })
     expect(res.statusCode).toBe(201)
     expect(res.json().results[0]).toMatchObject({ stringerId: 'github', considered: true })
 
-    const inbox = await app.inject({ method: 'GET', url: '/api/v1/submissions', headers: { cookie } })
-    const rows = inbox.json().submissions
+    const wire = await app.inject({ method: 'GET', url: '/api/v1/filings', headers: { cookie } })
+    const rows = wire.json().filings
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ stringerName: 'GitHub stringer', outcome: 'considered whole' })
     expect(rows[0].consideredChars).toBeGreaterThan(0)
@@ -144,8 +144,8 @@ describe('filing a report', () => {
       note: 'stringer disabled — stored but not processed',
     })
 
-    const detailList = await app.inject({ method: 'GET', url: '/api/v1/submissions', headers: { cookie } })
-    expect(detailList.json().submissions[0].outcome).toMatch(/disabled/)
+    const detailList = await app.inject({ method: 'GET', url: '/api/v1/filings', headers: { cookie } })
+    expect(detailList.json().filings[0].outcome).toMatch(/disabled/)
   })
 
   it('accepts a batch and keeps the good rows when one is bad', async () => {
@@ -158,11 +158,11 @@ describe('filing a report', () => {
     const results = res.json().results
     expect(results.map((r: { status: string }) => r.status)).toEqual(['PROCESSED', 'REJECTED', 'PROCESSED'])
 
-    const inbox = await app.inject({ method: 'GET', url: '/api/v1/submissions', headers: { cookie } })
-    expect(inbox.json().submissions).toHaveLength(2)
+    const wire = await app.inject({ method: 'GET', url: '/api/v1/filings', headers: { cookie } })
+    expect(wire.json().filings).toHaveLength(2)
   })
 
-  it('rejects an empty submission', async () => {
+  it('rejects an empty filing', async () => {
     expect((await file({ stringer_id: 'github', text: '' })).statusCode).toBe(400)
   })
 })
@@ -191,17 +191,17 @@ describe('a timeline source', () => {
     await file({ stringer_id: 'korben', text: window1 })
     await file({ stringer_id: 'korben', text: window2 })
 
-    const list = await app.inject({ method: 'GET', url: '/api/v1/submissions', headers: { cookie } })
-    const latest = list.json().submissions[0]
+    const list = await app.inject({ method: 'GET', url: '/api/v1/filings', headers: { cookie } })
+    const latest = list.json().filings[0]
     const detail = await app.inject({
       method: 'GET',
-      url: `/api/v1/submissions/${latest.id}`,
+      url: `/api/v1/filings/${latest.id}`,
       headers: { cookie },
     })
-    const submission = detail.json().submission
-    expect(submission.text).toContain('middle')
-    expect(submission.considered).toContain('newest')
-    expect(submission.considered).not.toContain('middle')
+    const filing = detail.json().filing
+    expect(filing.text).toContain('middle')
+    expect(filing.considered).toContain('newest')
+    expect(filing.considered).not.toContain('middle')
   })
 })
 
@@ -214,13 +214,13 @@ describe('a snapshot source', () => {
     const second = await file({ stringer_id: 'appstore-state', text: 'immich 1.1\njellyfin 2.0' })
     expect(second.json().results[0]).toMatchObject({ considered: true })
 
-    const list = await app.inject({ method: 'GET', url: '/api/v1/submissions', headers: { cookie } })
+    const list = await app.inject({ method: 'GET', url: '/api/v1/filings', headers: { cookie } })
     const detail = await app.inject({
       method: 'GET',
-      url: `/api/v1/submissions/${list.json().submissions[0].id}`,
+      url: `/api/v1/filings/${list.json().filings[0].id}`,
       headers: { cookie },
     })
-    expect(detail.json().submission.considered).toBe('- immich 1.0\n+ immich 1.1')
+    expect(detail.json().filing.considered).toBe('- immich 1.0\n+ immich 1.1')
   })
 })
 
@@ -234,16 +234,16 @@ describe('the tip line', () => {
     })
     expect(res.statusCode).toBe(201)
 
-    const list = await app.inject({ method: 'GET', url: '/api/v1/submissions', headers: { cookie } })
+    const list = await app.inject({ method: 'GET', url: '/api/v1/filings', headers: { cookie } })
     const detail = await app.inject({
       method: 'GET',
-      url: `/api/v1/submissions/${list.json().submissions[0].id}`,
+      url: `/api/v1/filings/${list.json().filings[0].id}`,
       headers: { cookie },
     })
-    const submission = detail.json().submission
-    expect(submission.kind).toBe('tip')
-    expect(submission.text).toContain('https://example.com/post')
-    expect(submission.refs).toEqual({ url: 'https://example.com/post' })
+    const filing = detail.json().filing
+    expect(filing.kind).toBe('tip')
+    expect(filing.text).toContain('https://example.com/post')
+    expect(filing.refs).toEqual({ url: 'https://example.com/post' })
   })
 
   it('accepts the ingest token instead of a session', async () => {
@@ -262,53 +262,18 @@ describe('the tip line', () => {
   })
 })
 
-/**
- * The vocabulary rename must not reach the filers. n8n workflows and any
- * bookmarklet installed before it keep filing in the old words.
- */
-describe('the pre-rename ingest spelling', () => {
-  it('accepts source_id where stringer_id is now expected', async () => {
-    const res = await file({ source_id: 'github', text: 'filed by an un-redeployed workflow' })
-    expect(res.statusCode).toBe(201)
-    expect(res.json().results[0]).toMatchObject({ stringerId: 'github', considered: true })
-  })
-
-  it('files kind "idea" as a tip', async () => {
-    const res = await file({ source_id: 'tip-line', kind: 'idea', text: 'an old-style idea' })
-    expect(res.statusCode).toBe(201)
-
-    const list = await app.inject({ method: 'GET', url: '/api/v1/submissions', headers: { cookie } })
-    expect(list.json().submissions[0].kind).toBe('tip')
-  })
-
-  it('rejects a filing that names no stringer at all', async () => {
-    const res = await file({ text: 'nobody filed this' })
-    expect(res.statusCode).toBe(400)
-  })
-
-  it('still serves the tip line at /api/v1/ideas', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/v1/ideas',
-      headers: { cookie },
-      payload: { text: 'from an old share-sheet entry' },
-    })
-    expect(res.statusCode).toBe(201)
-  })
-})
-
 describe('the event log', () => {
   it('records every filing, so silence and nothing-happened never look alike', async () => {
     await file({ stringer_id: 'github', text: 'a report' })
     const res = await app.inject({ method: 'GET', url: '/api/v1/events', headers: { cookie } })
     const events = res.json().events
-    expect(events[0]).toMatchObject({ code: 'SUBMISSION_RECEIVED', level: 'info' })
+    expect(events[0]).toMatchObject({ code: 'FILING_RECEIVED', level: 'info' })
     expect(events[0].message).toContain('github')
   })
 
   it('is readable when filtered by level', async () => {
     await file({ stringer_id: 'sleeping', text: 'filed while asleep' })
     const res = await app.inject({ method: 'GET', url: '/api/v1/events?level=warn', headers: { cookie } })
-    expect(res.json().events[0].code).toBe('SUBMISSION_STRINGER_DISABLED')
+    expect(res.json().events[0].code).toBe('FILING_STRINGER_DISABLED')
   })
 })

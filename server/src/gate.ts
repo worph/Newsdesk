@@ -15,7 +15,7 @@ import { promises as dns } from 'node:dns'
  *
  * What we must NOT do is believe a header. The backend sits on the shared
  * `pcs` network and every other container can reach it directly — that is
- * deliberate, it is how stringers file submissions — so any of them could send
+ * deliberate, it is how stringers file filings — so any of them could send
  * `X-Forwarded-User: admin`. `request.ip` is no better: the app runs with
  * `trustProxy: true`, which makes it the left-most `X-Forwarded-For` entry and
  * therefore attacker-controlled.

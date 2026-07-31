@@ -21,7 +21,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-async function seedTarget() {
+async function seedOutlet() {
   const { db } = handle
   await db.insert(schema.voices).values({
     id: 'alicia',
@@ -29,7 +29,7 @@ async function seedTarget() {
     tone: 'concise',
     audience: 'self-hosters',
   })
-  await db.insert(schema.targets).values({
+  await db.insert(schema.outlets).values({
     id: 'discord-test',
     name: 'Discord #news-test',
     description: 'test channel',
@@ -41,7 +41,7 @@ async function seedTarget() {
     id: 'story-1',
     title: 'A release',
     summary: 'something shipped',
-    status: 'ROUTED',
+    status: 'PLACED',
     dedupVerdict: 'NEW',
   })
 }
@@ -66,9 +66,9 @@ describe('migrations', () => {
       'settings',
       'stringers',
       'stories',
-      'story_submissions',
-      'submissions',
-      'targets',
+      'story_filings',
+      'filings',
+      'outlets',
     ]) {
       expect(names).toContain(expected)
     }
@@ -80,14 +80,14 @@ describe('migrations', () => {
   })
 })
 
-describe('the story x target ledger', () => {
-  it('is unique per (story, target)', async () => {
+describe('the story x outlet ledger', () => {
+  it('is unique per (story, outlet)', async () => {
     const { db } = handle
-    await seedTarget()
+    await seedOutlet()
     await db.insert(schema.publications).values({
       id: 'pub-1',
       storyId: 'story-1',
-      targetId: 'discord-test',
+      outletId: 'discord-test',
       status: 'PROPOSED',
       origin: 'managing-editor',
     })
@@ -95,21 +95,21 @@ describe('the story x target ledger', () => {
       db.insert(schema.publications).values({
         id: 'pub-2',
         storyId: 'story-1',
-        targetId: 'discord-test',
+        outletId: 'discord-test',
         status: 'PROPOSED',
         origin: 'human',
       }),
     ).rejects.toThrow(/UNIQUE/i)
   })
 
-  it('rejects a publication pointing at a target that does not exist', async () => {
+  it('rejects a publication pointing at an outlet that does not exist', async () => {
     const { db } = handle
-    await seedTarget()
+    await seedOutlet()
     await expect(
       db.insert(schema.publications).values({
         id: 'pub-3',
         storyId: 'story-1',
-        targetId: 'nowhere',
+        outletId: 'nowhere',
         status: 'PROPOSED',
         origin: 'managing-editor',
       }),
@@ -117,19 +117,19 @@ describe('the story x target ledger', () => {
   })
 })
 
-describe('submissions', () => {
-  it('accepts two submissions carrying the same content — dedup is not a key lookup', async () => {
+describe('filings', () => {
+  it('accepts two filings carrying the same content — dedup is not a key lookup', async () => {
     const { db } = handle
     await db.insert(schema.stringers).values([
       { id: 'github', name: 'GitHub stringer', kind: 'report' },
       { id: 'korben', name: 'korben', kind: 'timeline' },
     ])
     const text = 'WireGuard Easy Host v15.3.0 shipped'
-    await db.insert(schema.submissions).values([
+    await db.insert(schema.filings).values([
       { id: 'sub-1', stringerId: 'github', kind: 'report', text, status: 'RECEIVED' },
       { id: 'sub-2', stringerId: 'korben', kind: 'timeline', text, status: 'RECEIVED' },
     ])
-    const rows = await db.select().from(schema.submissions)
+    const rows = await db.select().from(schema.filings)
     expect(rows).toHaveLength(2)
   })
 })

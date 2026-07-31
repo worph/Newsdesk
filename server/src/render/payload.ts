@@ -19,15 +19,31 @@ export interface StoryFacts {
   url?: string | null
 }
 
-export interface MergeContext {
-  story: StoryFacts
-  slots: Record<string, unknown>
+/**
+ * What a `{{ ... }}` expression may read.
+ *
+ * Everything is optional here because two different callers render templates
+ * against two disjoint worlds: a publication has a story and a draft, and a
+ * reporting call has neither — only the single value the desk is asking for.
+ * A root that is absent resolves to nothing, which is why `reporting.*` args
+ * are validated against `call` alone (shared/src/config.ts).
+ */
+export interface TemplateContext {
+  story?: StoryFacts
+  slots?: Record<string, unknown>
+  /** A reporting call: `{ query }` for search, `{ url }` for fetch. */
+  call?: Record<string, string>
   /** Injectable so a frozen payload is reproducible in tests. */
   now?: Date
 }
 
+export interface MergeContext extends TemplateContext {
+  story: StoryFacts
+  slots: Record<string, unknown>
+}
+
 /** Resolve one `{{ ... }}` expression against the allowed roots. */
-function resolveExpression(expr: string, context: MergeContext): string | undefined {
+function resolveExpression(expr: string, context: TemplateContext): string | undefined {
   const path = expr.trim().split('.')
   const root = path[0]
 
@@ -35,10 +51,12 @@ function resolveExpression(expr: string, context: MergeContext): string | undefi
 
   const source =
     root === 'story'
-      ? (context.story as unknown as Record<string, unknown>)
+      ? (context.story as unknown as Record<string, unknown> | undefined)
       : root === 'slots'
         ? context.slots
-        : undefined
+        : root === 'call'
+          ? context.call
+          : undefined
 
   if (!source) return undefined
 
@@ -58,7 +76,7 @@ function resolveExpression(expr: string, context: MergeContext): string | undefi
  * `{{story.url}}` — leaking template syntax into a published message is worse
  * than an absent value.
  */
-export function renderTemplate(template: string, context: MergeContext): string {
+export function renderTemplate(template: string, context: TemplateContext): string {
   let out = template
   for (const expr of templateExpressions(template)) {
     const value = resolveExpression(expr, context) ?? ''

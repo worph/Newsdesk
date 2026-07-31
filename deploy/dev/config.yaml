@@ -42,10 +42,10 @@ stringers:
     kind: report
     hint: user-facing releases only
 
-targets:
+outlets:
   # The local Beacon aggregates claude-code and chrome-devtools only — there is
-  # no discord-mcp on it — so this target is configured but cannot actually
-  # deliver in dev. It exists so the managing editor has somewhere to route stories and
+  # no discord-mcp on it — so this outlet is configured but cannot actually
+  # deliver in dev. It exists so the managing editor has somewhere to placement stories and
   # the writer has a voice and slots to fill. Publishing is Phase 3.
   - id: discord-test
     name: Discord #news-test
@@ -74,12 +74,12 @@ targets:
   # The local sink. Nothing leaves the machine: the delivery port records the
   # payload and reports success, so approval, the payload freeze, the ledger and
   # the event log can all be exercised end to end without a real destination.
-  # A dev Beacon has no discord-mcp, and a target that silently did nothing
+  # A dev Beacon has no discord-mcp, and an outlet that silently did nothing
   # would be indistinguishable from one that worked.
   - id: local-sink
     name: Local sink
     description: |
-      Development sink. Route a story here to watch the whole path — draft,
+      Development sink. Placement a story here to watch the whole path — draft,
       review, approve, publish — without sending anything anywhere.
     role: publish
     driver: builtin

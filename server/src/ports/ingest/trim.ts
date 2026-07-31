@@ -75,7 +75,7 @@ export function trimTimeline(text: string, watermark: string | null): TrimResult
   if (entries.length === 0) {
     // Better to hand over everything than to silently drop a stringer whose date
     // format we do not recognise. Said out loud so it is visible in the Wire.
-    return { considered: text, note: 'no dated entries recognised — considered the whole submission' }
+    return { considered: text, note: 'no dated entries recognised — considered the whole filing' }
   }
 
   const newest = entries.reduce<string | null>(

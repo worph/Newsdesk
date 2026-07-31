@@ -73,7 +73,7 @@ describe('mergePayload', () => {
   })
 
   it('keeps the destination exactly as configured', () => {
-    // Invariant 3: no authored value can reach a routing key. Even a slot
+    // Invariant 3: no authored value can reach a placement key. Even a slot
     // named channelId in the draft must not displace the literal.
     const payload = mergePayload(
       discordArgs,

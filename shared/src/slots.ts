@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 /**
- * A target's `args` mirror the arguments of the MCP tool it calls. Each key is
+ * An outlet's `args` mirror the arguments of the MCP tool it calls. Each key is
  * one of three things:
  *
  *   literal   a scalar pinned in configuration      "1516814412244193380"
@@ -24,7 +24,7 @@ export const slotDefSchema = z.object({
   label: z.string().min(1, 'a slot needs a label — it is what the editor sees'),
   max: z.number().int().positive().optional(),
   optional: z.boolean().default(false),
-  /** At most one per target: the slot that gets the full editor and the copy desk. */
+  /** At most one per outlet: the slot that gets the full editor and the copy desk. */
   primary: z.boolean().default(false),
   /** Guidance passed through to the writer prompt. */
   hint: z.string().optional(),
@@ -61,6 +61,16 @@ export function isDerived(value: ArgValue): boolean {
 
 /** Roots a derived expression may read from. */
 export const TEMPLATE_ROOTS = ['story', 'slots', 'now'] as const
+
+/**
+ * Roots a reporting tool's arguments may read from.
+ *
+ * Deliberately disjoint from TEMPLATE_ROOTS: a reporting call knows nothing
+ * about a story or a draft, only the one value the desk is asking for — a
+ * query or a url. Sharing the set would let a search tool interpolate
+ * `{{story.url}}` and quietly succeed as an empty string.
+ */
+export const CALL_TEMPLATE_ROOTS = ['call'] as const
 
 export function templateExpressions(value: string): string[] {
   const found: string[] = []

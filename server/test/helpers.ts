@@ -27,7 +27,7 @@ export function openTestDb(): { db: Db; sqlite: ReturnType<typeof openDb>['sqlit
   return handle
 }
 
-/** The minimum configuration the managing editor needs: a charter, a voice, a target, a source. */
+/** The minimum configuration the managing editor needs: a charter, a voice, an outlet, a source. */
 export function seedDesk(db: Db, overrides: { charter?: string } = {}): void {
   db.insert(schema.charter)
     .values({
@@ -53,7 +53,7 @@ export function seedDesk(db: Db, overrides: { charter?: string } = {}): void {
     .values({ id: 'korben', name: 'korben.info', kind: 'timeline', enabled: true, hint: 'self-hosting only' })
     .run()
 
-  db.insert(schema.targets)
+  db.insert(schema.outlets)
     .values({
       id: 'discord-test',
       name: 'Discord',

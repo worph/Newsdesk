@@ -66,7 +66,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
-export interface SubmissionRow {
+export interface FilingRow {
   id: string
   stringerId: string
   stringerName: string | null
@@ -79,7 +79,7 @@ export interface SubmissionRow {
   consideredChars: number
 }
 
-export interface SubmissionDetail extends Omit<SubmissionRow, 'textLength' | 'consideredChars'> {
+export interface FilingDetail extends Omit<FilingRow, 'textLength' | 'consideredChars'> {
   text: string
   considered: string | null
   refs: Record<string, unknown> | null
@@ -95,13 +95,13 @@ export interface EventRow {
   detail: unknown
 }
 
-export interface StoryRoute {
+export interface StoryPlacement {
   id: string
-  targetId: string
-  targetName: string | null
+  outletId: string
+  outletName: string | null
   status: string
   origin: string
-  routeReason: string | null
+  placementReason: string | null
   angle: string | null
 }
 
@@ -119,12 +119,12 @@ export interface StoryRow {
   dropReason: string | null
   createdAt: string
   sourceCount: number
-  routes: StoryRoute[]
+  placements: StoryPlacement[]
 }
 
 export interface StoryDetail {
-  story: StoryRow & { comparedIds: string[]; proposedRoutes: unknown[]; body: string | null }
-  submissions: Array<{
+  story: StoryRow & { comparedIds: string[]; proposedPlacements: unknown[]; body: string | null }
+  filings: Array<{
     id: string
     stringerId: string
     stringerName: string | null
@@ -132,7 +132,7 @@ export interface StoryDetail {
     receivedAt: string
     considered: string | null
   }>
-  routes: StoryRoute[]
+  placements: StoryPlacement[]
   related: { id: string; title: string; summary: string } | null
 }
 
@@ -167,10 +167,10 @@ export interface PublicationDetail {
   publication: {
     id: string
     storyId: string
-    targetId: string
+    outletId: string
     status: string
     origin: string
-    routeReason: string | null
+    placementReason: string | null
     angle: string | null
     slots: Record<string, string>
     payload: string | null
@@ -179,10 +179,10 @@ export interface PublicationDetail {
     publishedAt: string | null
   }
   story: { id: string; title: string; summary: string; url: string | null; dedupVerdict: string }
-  target: { id: string; name: string; description: string; role: string; driver: string; tool: string | null }
+  outlet: { id: string; name: string; description: string; role: string; driver: string; tool: string | null }
   slotSpec: Record<string, SlotDef>
   preview: PayloadPreview
-  siblings: Array<{ id: string; targetId: string; status: string }>
+  siblings: Array<{ id: string; outletId: string; status: string }>
 }
 
 export interface DraftVersion {
@@ -234,14 +234,14 @@ export const api = {
       { method: 'POST' },
     ),
 
-  listSubmissions: (params: { stringer?: string; limit?: number } = {}) => {
+  listFilings: (params: { stringer?: string; limit?: number } = {}) => {
     const search = new URLSearchParams()
     if (params.stringer) search.set('stringer', params.stringer)
     if (params.limit) search.set('limit', String(params.limit))
     const qs = search.toString()
-    return request<{ submissions: SubmissionRow[] }>(`/api/v1/submissions${qs ? `?${qs}` : ''}`)
+    return request<{ filings: FilingRow[] }>(`/api/v1/filings${qs ? `?${qs}` : ''}`)
   },
-  getSubmission: (id: string) => request<{ submission: SubmissionDetail }>(`/api/v1/submissions/${id}`),
+  getFiling: (id: string) => request<{ filing: FilingDetail }>(`/api/v1/filings/${id}`),
   postTip: (body: { text: string; url?: string }) =>
     request<{ result: { id: string; note: string } }>('/api/v1/tips', {
       method: 'POST',
@@ -256,8 +256,8 @@ export const api = {
     return request<{ stories: StoryRow[] }>(`/api/v1/stories${qs ? `?${qs}` : ''}`)
   },
   getStory: (id: string) => request<StoryDetail>(`/api/v1/stories/${id}`),
-  addRoute: (id: string, body: { target_id: string; reason?: string }) =>
-    request<{ id: string }>(`/api/v1/stories/${id}/routes`, {
+  addPlacement: (id: string, body: { outlet_id: string; reason?: string }) =>
+    request<{ id: string }>(`/api/v1/stories/${id}/placements`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

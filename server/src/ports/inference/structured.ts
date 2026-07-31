@@ -107,11 +107,19 @@ function logCall(
 }
 
 export interface StructuredRequest<T> {
-  purpose: 'managing-editor' | 'writer' | 'copy-desk'
+  purpose: 'managing-editor' | 'writer' | 'copy-desk' | 'reporter' | 'tip-desk'
   refId?: string
   prompt: string
-  /** Validates and types the result. Its failure message is fed back on retry. */
-  schema: z.ZodType<T>
+  /**
+   * Validates and types the result. Its failure message is fed back on retry.
+   *
+   * The input side is `unknown` because that is what it really is — parsed JSON
+   * from a model. Writing `z.ZodType<T>` would pin input and output to the same
+   * type, and any schema using `.default()` would then infer T as the shape
+   * with everything optional, quietly handing callers a type the parser never
+   * returns.
+   */
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>
   /** Shown to the model so it knows the shape expected of it. */
   shapeHint: string
   timeoutMs?: number

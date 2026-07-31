@@ -27,7 +27,7 @@ stringers:
   - id: tip-line
     name: Tip line
     kind: tip
-targets:
+outlets:
   - id: discord-test
     name: Discord #news-test
     description: test channel for a general audience
@@ -135,12 +135,12 @@ describe('config round trip', () => {
     const get = await app.inject({ method: 'GET', url: '/api/v1/config', headers: { cookie } })
     const body = get.json()
     expect(body.issues).toEqual([])
-    expect(body.config.targets[0].id).toBe('discord-test')
-    expect(body.config.targets[0].args.channelId).toBe('1514993197082742814')
+    expect(body.config.outlets[0].id).toBe('discord-test')
+    expect(body.config.outlets[0].args.channelId).toBe('1514993197082742814')
     expect(body.ingestToken).toBeTypeOf('string')
   })
 
-  it('refuses a config whose publish target does not pin its destination', async () => {
+  it('refuses a config whose publish outlet does not pin its destination', async () => {
     const cookie = await login()
     const res = await app.inject({
       method: 'PUT',
@@ -150,7 +150,7 @@ describe('config round trip', () => {
     })
     expect(res.statusCode).toBe(422)
     expect(res.json().issues).toContainEqual({
-      path: 'targets.discord-test.args.channelId',
+      path: 'outlets.discord-test.args.channelId',
       message: expect.stringContaining('must pin its destination'),
     })
   })
@@ -194,18 +194,18 @@ describe('config round trip', () => {
     expect(afterChange.n).toBe(2)
   })
 
-  it('refuses to remove a target that publications reference', async () => {
+  it('refuses to remove an outlet that publications reference', async () => {
     const cookie = await login()
     await app.inject({ method: 'PUT', url: '/api/v1/config', headers: { cookie }, payload: { yaml: VALID_YAML } })
 
     handle.sqlite
       .prepare(
-        "insert into stories (id,title,summary,status,dedup_verdict) values ('s1','t','s','ROUTED','NEW')",
+        "insert into stories (id,title,summary,status,dedup_verdict) values ('s1','t','s','PLACED','NEW')",
       )
       .run()
     handle.sqlite
       .prepare(
-        "insert into publications (id,story_id,target_id,status,origin) values ('p1','s1','discord-test','PUBLISHED','managing-editor')",
+        "insert into publications (id,story_id,outlet_id,status,origin) values ('p1','s1','discord-test','PUBLISHED','managing-editor')",
       )
       .run()
 
@@ -213,12 +213,12 @@ describe('config round trip', () => {
       method: 'PUT',
       url: '/api/v1/config',
       headers: { cookie },
-      payload: { yaml: VALID_YAML.replace(/targets:[\s\S]*$/, 'targets: []\n') },
+      payload: { yaml: VALID_YAML.replace(/outlets:[\s\S]*$/, 'outlets: []\n') },
     })
     expect(res.statusCode).toBe(422)
     expect(res.json().issues).toContainEqual({
-      path: 'targets',
-      message: expect.stringContaining('cannot remove target'),
+      path: 'outlets',
+      message: expect.stringContaining('cannot remove outlet'),
     })
   })
 })
@@ -229,13 +229,13 @@ describe('first-boot config import', () => {
     writeFileSync(file, VALID_YAML)
 
     expect(importConfigFileOnFirstBoot(handle.db, file).imported).toBe(true)
-    expect(readConfig(handle.db).targets).toHaveLength(1)
+    expect(readConfig(handle.db).outlets).toHaveLength(1)
 
     // Second call is a no-op: the database is the source of truth now, so a
-    // stale file can never compete with a target edited in the UI.
+    // stale file can never compete with an outlet edited in the UI.
     writeFileSync(file, VALID_YAML.replace('discord-test', 'something-else'))
     expect(importConfigFileOnFirstBoot(handle.db, file).imported).toBe(false)
-    expect(readConfig(handle.db).targets[0]?.id).toBe('discord-test')
+    expect(readConfig(handle.db).outlets[0]?.id).toBe('discord-test')
   })
 
   it('does not seed a config that fails validation', () => {
@@ -244,7 +244,7 @@ describe('first-boot config import', () => {
     const result = importConfigFileOnFirstBoot(handle.db, file)
     expect(result.imported).toBe(false)
     expect(result.issues).toContainEqual({
-      path: 'targets.discord-test.args.channelId',
+      path: 'outlets.discord-test.args.channelId',
       message: expect.stringContaining('must pin its destination'),
     })
   })

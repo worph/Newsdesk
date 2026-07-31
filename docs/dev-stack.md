@@ -21,7 +21,7 @@ Two things to know about that URL:
   redirect entirely.
 - **Check what your Beacon actually aggregates.** A local Beacon typically carries `claude-code` and
   `chrome-devtools`, which is enough for the **inference** port. It usually has no `discord-mcp` or
-  `telegram-mcp`, so there is **no real publish target in dev** — see [Limits](#limits) below.
+  `telegram-mcp`, so there is **no real publish outlet in dev** — see [Limits](#limits) below.
 
 Verify it before starting anything:
 
@@ -45,11 +45,11 @@ docker compose -f deploy/dev/docker-compose.dev.yml up --build
 |---|---|---|
 | `web` | http://localhost:5173 | Vite dev server, hot reload, proxies `/api` to `api` |
 | `api` | http://localhost:8080 | Fastify under `tsx watch`, hot reload |
-| `korben` | — | files korben.info as a `timeline` submission every 15 minutes |
+| `korben` | — | files korben.info as a `timeline` filing every 15 minutes |
 
-Filed material flows straight through: ingest trims it, the managing editor opens stories and proposes
-routes, the writer drafts one piece per route, and each draft waits for you at **Review**. Nothing
-reaches a destination without an explicit approval of that exact payload.
+Filed material flows straight through: ingest trims it, the managing editor opens stories and
+proposes placements, the writer drafts one piece per placement, and each draft waits for you at
+**Review**. Nothing reaches a destination without an explicit approval of that exact payload.
 
 Sign in with **`newsdesk`** (override with `NEWSDESK_ADMIN_PASSWORD`). The ingest token is fixed to
 `dev-ingest-token` (override with `NEWSDESK_INGEST_TOKEN`) so the stringer can be configured from
@@ -78,7 +78,7 @@ docker compose -f deploy/dev/docker-compose.dev.yml down -v   # drops the databa
 ```
 
 `deploy/dev/config.yaml` is seeded on **first boot only**. After that the database is the source of
-truth and the file is ignored, so a stale file can never compete with a target you edited in the UI.
+truth and the file is ignored, so a stale file can never compete with a change you made in the UI.
 Change the seed and want it applied? `down -v` and start again.
 
 ### After changing a dependency
@@ -99,14 +99,14 @@ docker compose -f deploy/dev/docker-compose.dev.yml up -d --build --renew-anon-v
 ## Watching it work
 
 Open **Wire** (http://localhost:5173/wire). Within a minute of first start you should see one
-korben submission with an outcome like *"baseline: considered the most recent entry, skipped 14
+korben filing with an outcome like *"baseline: considered the most recent entry, skipped 14
 older"*. Fifteen minutes later, a second one saying *"nothing newer than …"* — the watermark doing
 its job, and proof that a stringer re-sending its whole window costs nothing.
 
 Filing something by hand, without waiting for the poller:
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/submissions \
+curl -s -X POST http://localhost:8080/api/v1/filings \
   -H 'Authorization: Bearer dev-ingest-token' -H 'Content-Type: application/json' \
   -d '{"stringer_id":"github-appstore","kind":"report","text":"WireGuardEasyHost v15.3.0 shipped. Adds one-click client QR export."}'
 ```
@@ -127,7 +127,7 @@ Then at http://localhost:5678:
 
 1. **Import from File** → `deploy/dev/n8n/korben-stringer.json` (mounted at `/workflows` in the
    container).
-2. Check the HTTP Request node: it posts to `http://api:8080/api/v1/submissions` with
+2. Check the HTTP Request node: it posts to `http://api:8080/api/v1/filings` with
    `Authorization: Bearer dev-ingest-token`. Both are reachable from inside the compose network.
 3. **Execute Workflow** once to see it land in the Wire, then activate it if you want it on a
    schedule.
@@ -145,9 +145,9 @@ point of the exercise: prove the production path, then go back to the fast one.
 ## Inference
 
 The desk's thinking runs through `claude-code__query_claude` on your Beacon. **That instance has to
-be logged in.** If it is not, every managing editor, writer and assistant call comes back with the string
-`Not logged in · Please run /login` — which parses as "no JSON found" and fails the job rather than
-saying anything about auth.
+be logged in.** If it is not, every managing editor, writer and copy desk call comes back with the
+string `Not logged in · Please run /login` — which parses as "no JSON found" and fails the job
+rather than saying anything about auth.
 
 Check it before blaming the desk:
 
@@ -167,9 +167,9 @@ Log in as the user the MCP server runs as — for the `claude-code-container` st
 
 Honest account of what this stack cannot do yet:
 
-- **No real publish target — but a local sink stands in.** A local Beacon has no `discord-mcp`, so
-  the `discord-test` target cannot actually send. `deploy/dev/config.yaml` therefore also configures
-  a `local-sink` target on the `builtin` driver: approval, payload freeze, the ledger and the event
+- **No real publish outlet — but a local sink stands in.** A local Beacon has no `discord-mcp`, so
+  the `discord-test` outlet cannot actually send. `deploy/dev/config.yaml` therefore also configures
+  a `local-sink` outlet on the `builtin` driver: approval, payload freeze, the ledger and the event
   log all behave exactly as they would against Discord, and the payload is recorded in the
   `PUBLISHED` event for inspection. It is the whole path minus the press.
 - **No real Android install or push.** Both need HTTPS. Everything up to that works on `localhost`

@@ -30,7 +30,7 @@ function slotJsonSchema(def: SlotDef): Record<string, unknown> {
   }
 }
 
-/** JSON Schema for `submit_draft`, generated from the target's authoring slots. */
+/** JSON Schema for `submit_draft`, generated from the outlet's authoring slots. */
 export function slotsJsonSchema(args: ArgsSpec): Record<string, unknown> {
   const slots = slotsOf(args)
   const properties: Record<string, unknown> = {}

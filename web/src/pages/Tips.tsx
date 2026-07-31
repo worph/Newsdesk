@@ -49,8 +49,8 @@ export function Tips() {
       <header className="space-y-1">
         <h1 className="text-xl font-semibold tracking-tight">Tip line</h1>
         <p className="text-sm text-desk-500">
-          Anything worth writing about. It is filed as a submission and read by the managing editor
-          like any other stringer — treated as data, never as an instruction.
+          Anything worth writing about. It files like any other stringer and is read by the managing
+          editor the same way — treated as data, never as an instruction.
         </p>
       </header>
 

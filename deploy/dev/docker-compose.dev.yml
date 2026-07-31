@@ -9,7 +9,7 @@
 # Services:
 #   api      Fastify with tsx watch, on :8080
 #   web      Vite dev server, on :5173, proxying /api to api
-#   korben   a stringer polling korben.info and filing timeline submissions
+#   korben   a stringer polling korben.info and filing timeline reports
 #   n8n      optional (--profile n8n), to validate the production stringer path
 
 name: newsdesk-dev
@@ -80,7 +80,7 @@ services:
     environment:
       NEWSDESK_URL: http://api:8080
       NEWSDESK_INGEST_TOKEN: "${NEWSDESK_INGEST_TOKEN:-dev-ingest-token}"
-      SOURCE_ID: korben
+      STRINGER_ID: korben
       FEED_URL: https://korben.info/feed
       # Poll often in dev; the watermark makes re-filing an overlapping window
       # free, so a short interval costs nothing.

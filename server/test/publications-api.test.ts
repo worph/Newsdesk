@@ -31,7 +31,7 @@ beforeEach(async () => {
       title: 'Immich v1.142.0',
       summary: 'A point release.',
       url: 'https://example.dev/immich',
-      status: 'ROUTED',
+      status: 'PLACED',
       dedupVerdict: 'NEW',
     })
     .run()
@@ -39,10 +39,10 @@ beforeEach(async () => {
     .values({
       id: publicationId,
       storyId,
-      targetId: 'discord-test',
+      outletId: 'discord-test',
       status: 'AWAITING_APPROVAL',
       origin: 'managing-editor',
-      routeReason: 'self-hosters run it',
+      placementReason: 'self-hosters run it',
       angle: 'lead on the upgrade',
       slots: JSON.stringify({ title: 'Immich 1.142.0', description: 'Adds Intel QSV transcoding.' }),
     })
@@ -87,7 +87,7 @@ describe('reviewing', () => {
     expect(body.preview.fixed).toContain('channelId')
   })
 
-  it('lists sibling routes, so approving one is never mistaken for shipping all', async () => {
+  it('lists sibling placements, so approving one is never mistaken for shipping all', async () => {
     const body = (await get(`/api/v1/publications/${publicationId}`)).json()
     expect(body.siblings).toHaveLength(1)
   })
@@ -171,8 +171,8 @@ describe('approval — the gate', () => {
     expect((await post(`/api/v1/publications/${publicationId}/approve`)).statusCode).toBe(409)
   })
 
-  it('refuses a disabled target', async () => {
-    db.update(schema.targets).set({ enabled: false }).where(eq(schema.targets.id, 'discord-test')).run()
+  it('refuses a disabled outlet', async () => {
+    db.update(schema.outlets).set({ enabled: false }).where(eq(schema.outlets.id, 'discord-test')).run()
     expect((await post(`/api/v1/publications/${publicationId}/approve`)).statusCode).toBe(422)
   })
 
@@ -219,7 +219,7 @@ describe('delivery', () => {
   it('sends the frozen payload byte for byte through the sink driver', async () => {
     // Invariants 1 and 2 as an assertion: what is delivered equals what was
     // approved, exactly.
-    db.update(schema.targets).set({ driver: 'builtin' }).where(eq(schema.targets.id, 'discord-test')).run()
+    db.update(schema.outlets).set({ driver: 'builtin' }).where(eq(schema.outlets.id, 'discord-test')).run()
     await post(`/api/v1/publications/${publicationId}/approve`)
     const approved = JSON.parse(row().payload!)
 
@@ -239,7 +239,7 @@ describe('delivery', () => {
   })
 
   it('does not double-post an already published row', async () => {
-    db.update(schema.targets).set({ driver: 'builtin' }).where(eq(schema.targets.id, 'discord-test')).run()
+    db.update(schema.outlets).set({ driver: 'builtin' }).where(eq(schema.outlets.id, 'discord-test')).run()
     await post(`/api/v1/publications/${publicationId}/approve`)
     await deliverPublication(db, publicationId)
     const firstPublishedAt = row().publishedAt
@@ -249,7 +249,7 @@ describe('delivery', () => {
   })
 
   it('records a delivery failure on the row and in the log', async () => {
-    // An mcp target pointing at an endpoint that does not resolve.
+    // An mcp outlet pointing at an endpoint that does not resolve.
     db.update(schema.mcpEndpoints)
       .set({ url: 'http://127.0.0.1:9/mcp/' })
       .where(eq(schema.mcpEndpoints.id, 'beacon'))
@@ -265,7 +265,7 @@ describe('delivery', () => {
   })
 
   it('retry re-sends the frozen payload without rebuilding it', async () => {
-    db.update(schema.targets).set({ driver: 'builtin' }).where(eq(schema.targets.id, 'discord-test')).run()
+    db.update(schema.outlets).set({ driver: 'builtin' }).where(eq(schema.outlets.id, 'discord-test')).run()
     await post(`/api/v1/publications/${publicationId}/approve`)
     db.update(schema.publications)
       .set({ status: 'FAILED', error: 'upstream was down' })

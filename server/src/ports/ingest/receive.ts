@@ -7,41 +7,25 @@ import { logEvent } from '../../events.js'
 import { trim } from './trim.js'
 
 /**
- * A submission is free text filed by a stringer, at whatever depth that stringer
+ * A filing is free text filed by a stringer, at whatever depth that stringer
  * works in. It is explicitly NOT a normalized news item and carries no
  * required identifier — there is nothing to key on, and deduplication is the
  * managing editor's judgement rather than a constraint.
  */
-/**
- * `source_id` and `kind: idea` are the pre-rename spelling. They stay accepted
- * because the filers are n8n workflows nobody wants to redeploy for a word —
- * the ingest contract is the one place the vocabulary change must not break.
- */
-export const submissionInputSchema = z
-  .object({
-    stringer_id: z.string().min(1).optional(),
-    source_id: z.string().min(1).optional(),
-    kind: z.enum(['report', 'timeline', 'snapshot', 'tip', 'idea']).optional(),
-    text: z.string().min(1, 'a submission needs text'),
-    refs: z.record(z.string(), z.unknown()).optional(),
-    filed_at: z.string().optional(),
-  })
-  .refine((v) => v.stringer_id !== undefined || v.source_id !== undefined, {
-    message: 'stringer_id is required',
-    path: ['stringer_id'],
-  })
-  .transform(({ source_id, kind, ...rest }) => ({
-    ...rest,
-    stringer_id: rest.stringer_id ?? source_id!,
-    ...(kind ? { kind: kind === 'idea' ? ('tip' as const) : kind } : {}),
-  }))
+export const filingInputSchema = z.object({
+  stringer_id: z.string().min(1),
+  kind: z.enum(['report', 'timeline', 'snapshot', 'tip']).optional(),
+  text: z.string().min(1, 'a filing needs text'),
+  refs: z.record(z.string(), z.unknown()).optional(),
+  filed_at: z.string().optional(),
+})
 
-export const submissionsBodySchema = z.union([
-  submissionInputSchema,
-  z.array(submissionInputSchema).min(1),
+export const filingsBodySchema = z.union([
+  filingInputSchema,
+  z.array(filingInputSchema).min(1),
 ])
 
-export type SubmissionInput = z.infer<typeof submissionInputSchema>
+export type FilingInput = z.infer<typeof filingInputSchema>
 
 export interface ReceiveResult {
   id: string | null
@@ -53,15 +37,26 @@ export interface ReceiveResult {
 
 export interface ReceiveOptions {
   /**
-   * Called for a submission that carries something new, inside the same
+   * Called for a filing that carries something new, inside the same
    * transaction that stores it — so a queued job can never reference a
-   * submission that was rolled back.
+   * filing that was rolled back.
    *
    * Absent means no managing editor is wired (tests, or a desk configured without
-   * inference); the submission then finishes as PROCESSED, exactly as it did
+   * inference); the filing then finishes as PROCESSED, exactly as it did
    * before Phase 2.
    */
-  enqueueManagingEditor?: (submissionId: string) => void
+  enqueueManagingEditor?: (filingId: string) => void
+  /**
+   * Called instead of the managing editor for a kind the reporting phase
+   * covers. The reporter hands the filing on itself once it has gone and
+   * looked, so this replaces the managing-editor call rather than adding to it.
+   *
+   * Absent means the phase is not configured and everything goes straight to
+   * the managing editor, exactly as before.
+   */
+  enqueueReporter?: (filingId: string) => void
+  /** Which kinds get reported. Empty or absent means none do. */
+  reportedKinds?: readonly string[]
 }
 
 /**
@@ -69,9 +64,9 @@ export interface ReceiveOptions {
  * state of their own: re-filing an overlapping window is expected and safe,
  * which is what lets them stay dumb.
  */
-export function receiveSubmission(
+export function receiveFiling(
   db: Db,
-  input: SubmissionInput,
+  input: FilingInput,
   options: ReceiveOptions = {},
 ): ReceiveResult {
   const stringer = db.select().from(schema.stringers).where(eq(schema.stringers.id, input.stringer_id)).get()
@@ -92,7 +87,7 @@ export function receiveSubmission(
   // A disabled stringer is stored rather than refused: losing a filed report is
   // worse than storing one nobody asked for, and the Wire shows why it slept.
   if (!stringer.enabled) {
-    db.insert(schema.submissions)
+    db.insert(schema.filings)
       .values({
         id,
         stringerId: stringer.id,
@@ -107,7 +102,7 @@ export function receiveSubmission(
       .run()
     logEvent(db, {
       level: 'warn',
-      code: 'SUBMISSION_STRINGER_DISABLED',
+      code: 'FILING_STRINGER_DISABLED',
       message: `filed to disabled stringer "${stringer.id}"`,
     })
     return {
@@ -126,13 +121,24 @@ export function receiveSubmission(
     lastSnapshot: stringer.lastSnapshot,
   })
 
-  // Nothing new is a finished submission, not a pending one: only material
+  // Nothing new is a finished filing, not a pending one: only material
   // the managing editor has not seen is worth an inference call.
   const hasNewMaterial = result.considered.length > 0
-  const willAssign = hasNewMaterial && options.enqueueManagingEditor !== undefined
+  const willReport =
+    hasNewMaterial &&
+    options.enqueueReporter !== undefined &&
+    (options.reportedKinds ?? []).includes(kind)
+  const willAssign = hasNewMaterial && !willReport && options.enqueueManagingEditor !== undefined
+
+  const queued = willReport ? 'PROCESSING' : willAssign ? 'PROCESSING' : 'PROCESSED'
+  const note = willReport
+    ? `${result.note} — queued for the reporter`
+    : willAssign
+      ? `${result.note} — queued for the managing editor`
+      : result.note
 
   db.transaction((tx) => {
-    tx.insert(schema.submissions)
+    tx.insert(schema.filings)
       .values({
         id,
         stringerId: stringer.id,
@@ -141,12 +147,13 @@ export function receiveSubmission(
         considered: result.considered || null,
         refs: input.refs ? JSON.stringify(input.refs) : null,
         filedAt: input.filed_at ?? null,
-        status: willAssign ? 'PROCESSING' : 'PROCESSED',
-        outcome: willAssign ? `${result.note} — queued for the managing editor` : result.note,
+        status: queued,
+        outcome: note,
       })
       .run()
 
-    if (willAssign) options.enqueueManagingEditor?.(id)
+    if (willReport) options.enqueueReporter?.(id)
+    else if (willAssign) options.enqueueManagingEditor?.(id)
 
     if (result.watermark !== undefined || result.snapshot !== undefined) {
       tx.update(schema.stringers)
@@ -161,24 +168,24 @@ export function receiveSubmission(
 
   logEvent(db, {
     level: 'info',
-    code: 'SUBMISSION_RECEIVED',
+    code: 'FILING_RECEIVED',
     message: `${stringer.id}: ${result.note}`,
-    detail: { submissionId: id, kind, consideredChars: result.considered.length },
+    detail: { filingId: id, kind, consideredChars: result.considered.length },
   })
 
   return {
     id,
     stringerId: stringer.id,
-    status: willAssign ? 'PROCESSING' : 'PROCESSED',
+    status: queued,
     considered: result.considered.length > 0,
     note: result.note,
   }
 }
 
-export function receiveSubmissions(
+export function receiveFilings(
   db: Db,
-  inputs: SubmissionInput[],
+  inputs: FilingInput[],
   options: ReceiveOptions = {},
 ): ReceiveResult[] {
-  return inputs.map((input) => receiveSubmission(db, input, options))
+  return inputs.map((input) => receiveFiling(db, input, options))
 }

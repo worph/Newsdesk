@@ -11,7 +11,7 @@ runs here and why. You are not deciding whether it should run; you are writing i
 
 ## The destination
 
-{{TARGET}}
+{{OUTLET}}
 
 ---
 
@@ -27,7 +27,7 @@ This is the factual basis, established by the desk. Everything you write must be
 
 ## The angle
 
-What to lead with for this audience. It comes from the editor who routed the story.
+What to lead with for this audience. It comes from the editor who placed the story.
 
 {{ANGLE}}
 
@@ -57,7 +57,7 @@ Rules:
 - **Never invent.** No version number, date, link, quote, benchmark or feature that is not in the
   story or the material above. If something would strengthen the piece but is not established, leave
   it out. An absent detail is fine; a wrong one is not.
-- **Respect the length limits exactly.** A field with a maximum is a hard limit, not a target.
+- **Respect the length limits exactly.** A field with a maximum is a hard limit, not a suggestion.
 - **Write in the voice above, for the audience above.** No marketing superlatives, no hype, no
   "game-changing". Say who should care and why.
 - **Lead with the angle.** It is the reason this story was sent to this destination.

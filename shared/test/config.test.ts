@@ -11,7 +11,7 @@ function baseConfig(): unknown {
       { id: 'alicia', name: 'Alicia', tone: 'concise, technical, anti-hype', audience: 'self-hosters' },
     ],
     stringers: [{ id: 'tip-line', name: 'Tip line', kind: 'tip' }],
-    targets: [
+    outlets: [
       {
         id: 'discord-test',
         name: 'Discord #news-test',
@@ -44,7 +44,7 @@ describe('config shape', () => {
   it('accepts a well-formed config with no issues', () => {
     const { config, issues } = parseConfig(baseConfig())
     expect(issues).toEqual([])
-    expect(config.targets[0]?.id).toBe('discord-test')
+    expect(config.outlets[0]?.id).toBe('discord-test')
   })
 
   it('rejects an empty charter', () => {
@@ -54,7 +54,7 @@ describe('config shape', () => {
   it('rejects an id that is not a slug', () => {
     expect(() =>
       issuesFor((c) => {
-        c.targets[0].id = 'Discord Test'
+        c.outlets[0].id = 'Discord Test'
       }),
     ).toThrow()
   })
@@ -64,54 +64,54 @@ describe('destination pinning', () => {
   // The trap: channelId and chatId are OPTIONAL in the live MCP schemas, so an
   // omitted destination posts to the bridge default instead of erroring.
 
-  it('rejects a publish target with no destination pinned', () => {
+  it('rejects a publish outlet with no destination pinned', () => {
     const issues = issuesFor((c) => {
-      delete c.targets[0].args.channelId
+      delete c.outlets[0].args.channelId
     })
     expect(issues).toContainEqual(expect.stringContaining('must pin its destination "channelId"'))
   })
 
   it('rejects a destination authored by a slot', () => {
     const issues = issuesFor((c) => {
-      c.targets[0].args.channelId = { slot: 'text', label: 'Channel' }
+      c.outlets[0].args.channelId = { slot: 'text', label: 'Channel' }
     })
     expect(issues).toContainEqual(expect.stringContaining('a model must never write an address'))
   })
 
   it('rejects a destination built from a template', () => {
     const issues = issuesFor((c) => {
-      c.targets[0].args.channelId = '{{story.url}}'
+      c.outlets[0].args.channelId = '{{story.url}}'
     })
     expect(issues).toContainEqual(expect.stringContaining('not a derived template'))
   })
 
   it('rejects an empty destination', () => {
     const issues = issuesFor((c) => {
-      c.targets[0].args.channelId = '   '
+      c.outlets[0].args.channelId = '   '
     })
     expect(issues).toContainEqual(expect.stringContaining('non-empty string'))
   })
 
   it('demands an explicit destination_key for an unknown tool', () => {
     const issues = issuesFor((c) => {
-      c.targets[0].tool = 'some-new-mcp__post'
+      c.outlets[0].tool = 'some-new-mcp__post'
     })
     expect(issues).toContainEqual(expect.stringContaining('declare `destination_key` explicitly'))
   })
 
   it('accepts an unknown tool once destination_key is declared and pinned', () => {
     const issues = issuesFor((c) => {
-      c.targets[0].tool = 'some-new-mcp__post'
-      c.targets[0].destination_key = 'roomId'
-      c.targets[0].args.roomId = 'room-42'
+      c.outlets[0].tool = 'some-new-mcp__post'
+      c.outlets[0].destination_key = 'roomId'
+      c.outlets[0].args.roomId = 'room-42'
     })
     expect(issues).toEqual([])
   })
 
-  it('does not demand a destination for a notify target', () => {
+  it('does not demand a destination for a notify outlet', () => {
     const issues = issuesFor((c) => {
-      c.targets[0].role = 'notify'
-      delete c.targets[0].args.channelId
+      c.outlets[0].role = 'notify'
+      delete c.outlets[0].args.channelId
     })
     expect(issues).toEqual([])
   })
@@ -120,26 +120,26 @@ describe('destination pinning', () => {
 describe('slots', () => {
   it('requires exactly one primary slot', () => {
     const none = issuesFor((c) => {
-      c.targets[0].args.description.primary = false
+      c.outlets[0].args.description.primary = false
     })
     expect(none).toContainEqual(expect.stringContaining('exactly one slot must be primary'))
 
     const two = issuesFor((c) => {
-      c.targets[0].args.title.primary = true
+      c.outlets[0].args.title.primary = true
     })
     expect(two).toContainEqual(expect.stringContaining('at most one slot may be primary'))
   })
 
-  it('requires a publish target to have something to write', () => {
+  it('requires a publish outlet to have something to write', () => {
     const issues = issuesFor((c) => {
-      c.targets[0].args = { channelId: '1514993197082742814' }
+      c.outlets[0].args = { channelId: '1514993197082742814' }
     })
     expect(issues).toContainEqual(expect.stringContaining('at least one authoring slot'))
   })
 
   it('classifies literal, derived and slot values', () => {
     const { config } = parseConfig(baseConfig())
-    const args = config.targets[0]!.args
+    const args = config.outlets[0]!.args
     expect(isSlot(args.description!)).toBe(true)
     expect(isDerived(args.footer!)).toBe(true)
     expect(isDerived(args.channelId!)).toBe(false)
@@ -152,35 +152,35 @@ describe('slots', () => {
 describe('references and templates', () => {
   it('rejects an unknown voice', () => {
     const issues = issuesFor((c) => {
-      c.targets[0].voice = 'nobody'
+      c.outlets[0].voice = 'nobody'
     })
     expect(issues).toContainEqual(expect.stringContaining('unknown voice "nobody"'))
   })
 
-  it('requires a voice on a publish target', () => {
+  it('requires a voice on a publish outlet', () => {
     const issues = issuesFor((c) => {
-      delete c.targets[0].voice
+      delete c.outlets[0].voice
     })
     expect(issues).toContainEqual(expect.stringContaining('needs a voice'))
   })
 
   it('rejects an unknown endpoint', () => {
     const issues = issuesFor((c) => {
-      c.targets[0].endpoint = 'elsewhere'
+      c.outlets[0].endpoint = 'elsewhere'
     })
     expect(issues).toContainEqual(expect.stringContaining('unknown endpoint "elsewhere"'))
   })
 
   it('rejects a template reading from an unknown root', () => {
     const issues = issuesFor((c) => {
-      c.targets[0].args.footer = '{{ secrets.token }}'
+      c.outlets[0].args.footer = '{{ secrets.token }}'
     })
     expect(issues).toContainEqual(expect.stringContaining('unknown template root "secrets"'))
   })
 
   it('rejects duplicate ids', () => {
     const issues = issuesFor((c) => {
-      c.targets.push({ ...c.targets[0] })
+      c.outlets.push({ ...c.outlets[0] })
     })
     expect(issues).toContainEqual(expect.stringContaining('duplicate id "discord-test"'))
   })

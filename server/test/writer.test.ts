@@ -24,14 +24,14 @@ interface Seeded {
   storyId: string
 }
 
-function seedRoutedStory(db: Db, over: { angle?: string; verdict?: string; relatedId?: string } = {}): Seeded {
+function seedPlacedStory(db: Db, over: { angle?: string; verdict?: string; relatedId?: string } = {}): Seeded {
   const storyId = randomUUID()
-  const submissionId = randomUUID()
+  const filingId = randomUUID()
   const publicationId = randomUUID()
 
-  db.insert(schema.submissions)
+  db.insert(schema.filings)
     .values({
-      id: submissionId,
+      id: filingId,
       stringerId: 'korben',
       kind: 'report',
       text: 'Immich 1.142.0 out. Adds Intel QSV transcoding.',
@@ -46,22 +46,22 @@ function seedRoutedStory(db: Db, over: { angle?: string; verdict?: string; relat
       title: 'Immich v1.142.0',
       summary: 'A point release adding Intel QSV hardware transcoding.',
       url: 'https://example.dev/immich',
-      status: 'ROUTED',
+      status: 'PLACED',
       dedupVerdict: over.verdict ?? 'NEW',
       relatedStoryId: over.relatedId ?? null,
     })
     .run()
 
-  db.insert(schema.storySubmissions).values({ storyId, submissionId }).run()
+  db.insert(schema.storyFilings).values({ storyId, filingId }).run()
 
   db.insert(schema.publications)
     .values({
       id: publicationId,
       storyId,
-      targetId: 'discord-test',
+      outletId: 'discord-test',
       status: 'PROPOSED',
       origin: 'managing-editor',
-      routeReason: 'self-hosters run it',
+      placementReason: 'self-hosters run it',
       angle: over.angle ?? 'Lead on what changes for someone already running it.',
     })
     .run()
@@ -73,13 +73,13 @@ describe('the writer prompt', () => {
   it('carries the voice, the destination, the story and the angle', () => {
     const { db } = openTestDb()
     seedDesk(db)
-    const { publicationId } = seedRoutedStory(db)
+    const { publicationId } = seedPlacedStory(db)
 
     const { prompt } = buildDraftContext(db, publicationId)
 
     expect(prompt).toContain('concise, technical, anti-hype') // voice voice
     expect(prompt).toContain('self-hosters running a personal cloud') // audience
-    expect(prompt).toContain('Test channel for self-hosters') // target description
+    expect(prompt).toContain('Test channel for self-hosters') // outlet description
     expect(prompt).toContain('Immich v1.142.0') // story
     expect(prompt).toContain('Lead on what changes') // angle
   })
@@ -88,7 +88,7 @@ describe('the writer prompt', () => {
     // The writer must not be able to see, let alone set, channelId.
     const { db } = openTestDb()
     seedDesk(db)
-    const { publicationId } = seedRoutedStory(db)
+    const { publicationId } = seedPlacedStory(db)
 
     const { prompt } = buildDraftContext(db, publicationId)
 
@@ -101,7 +101,7 @@ describe('the writer prompt', () => {
   it('delimits the source material and labels it untrusted', () => {
     const { db } = openTestDb()
     seedDesk(db)
-    const { publicationId } = seedRoutedStory(db)
+    const { publicationId } = seedPlacedStory(db)
 
     const { prompt } = buildDraftContext(db, publicationId)
 
@@ -117,11 +117,11 @@ describe('the writer prompt', () => {
         id: 'earlier',
         title: 'Immich v1.141.0',
         summary: 'The feature launch.',
-        status: 'ROUTED',
+        status: 'PLACED',
         dedupVerdict: 'NEW',
       })
       .run()
-    const { publicationId } = seedRoutedStory(db, { verdict: 'UPDATE', relatedId: 'earlier' })
+    const { publicationId } = seedPlacedStory(db, { verdict: 'UPDATE', relatedId: 'earlier' })
 
     const { prompt } = buildDraftContext(db, publicationId)
 
@@ -135,13 +135,13 @@ describe('the writer prompt', () => {
     const storyId = randomUUID()
     const publicationId = randomUUID()
     db.insert(schema.stories)
-      .values({ id: storyId, title: 'T', summary: 'S', status: 'ROUTED', dedupVerdict: 'NEW' })
+      .values({ id: storyId, title: 'T', summary: 'S', status: 'PLACED', dedupVerdict: 'NEW' })
       .run()
     db.insert(schema.publications)
       .values({
         id: publicationId,
         storyId,
-        targetId: 'discord-test',
+        outletId: 'discord-test',
         status: 'PROPOSED',
         origin: 'managing-editor',
         angle: null,
@@ -156,7 +156,7 @@ describe('drafting', () => {
   it('stores the draft and moves the publication to awaiting approval', async () => {
     const { db } = openTestDb()
     seedDesk(db)
-    const { publicationId } = seedRoutedStory(db)
+    const { publicationId } = seedPlacedStory(db)
 
     const result = await draftPublication(
       db,
@@ -178,7 +178,7 @@ describe('drafting', () => {
   it('records the draft as a version, so every edit has something to revert to', async () => {
     const { db } = openTestDb()
     seedDesk(db)
-    const { publicationId } = seedRoutedStory(db)
+    const { publicationId } = seedPlacedStory(db)
 
     await draftPublication(
       db,
@@ -196,7 +196,7 @@ describe('drafting', () => {
     // rather than merely validated once it is already in the database.
     const { db } = openTestDb()
     seedDesk(db)
-    const { publicationId } = seedRoutedStory(db)
+    const { publicationId } = seedPlacedStory(db)
 
     const driver = scripted(
       JSON.stringify({ title: 'x'.repeat(300), description: 'B' }),
@@ -214,7 +214,7 @@ describe('drafting', () => {
   it('refuses a draft that tries to set a key it was not offered', async () => {
     const { db } = openTestDb()
     seedDesk(db)
-    const { publicationId } = seedRoutedStory(db)
+    const { publicationId } = seedPlacedStory(db)
 
     const driver = scripted(
       JSON.stringify({ title: 'T', description: 'B', channelId: 'attacker-channel' }),
@@ -230,7 +230,7 @@ describe('drafting', () => {
   it('marks the publication FAILED when the writer cannot produce a usable draft', async () => {
     const { db } = openTestDb()
     seedDesk(db)
-    const { publicationId } = seedRoutedStory(db)
+    const { publicationId } = seedPlacedStory(db)
 
     await expect(draftPublication(db, scripted('nonsense', 'more nonsense'), publicationId)).rejects.toThrow()
 

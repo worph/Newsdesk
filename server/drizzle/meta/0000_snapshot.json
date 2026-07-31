@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e77ecd64-9064-4a2b-b89d-3a4aeb5e7cb7",
+  "id": "f990c8c8-eb17-4f26-b015-0b9f19ee6045",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "charter": {
@@ -119,6 +119,102 @@
           "tableTo": "draft_versions",
           "columnsFrom": [
             "version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "dossier_sources": {
+      "name": "dossier_sources",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "filing_id": {
+          "name": "filing_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "via": {
+          "name": "via",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "query": {
+          "name": "query",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ok": {
+          "name": "ok",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "chars": {
+          "name": "chars",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+        }
+      },
+      "indexes": {
+        "dossier_sources_filing_idx": {
+          "name": "dossier_sources_filing_idx",
+          "columns": [
+            "filing_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "dossier_sources_filing_id_filings_id_fk": {
+          "name": "dossier_sources_filing_id_filings_id_fk",
+          "tableFrom": "dossier_sources",
+          "tableTo": "filings",
+          "columnsFrom": [
+            "filing_id"
           ],
           "columnsTo": [
             "id"
@@ -284,6 +380,130 @@
         }
       },
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "filings": {
+      "name": "filings",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stringer_id": {
+          "name": "stringer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "considered": {
+          "name": "considered",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dossier": {
+          "name": "dossier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reported_at": {
+          "name": "reported_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "refs": {
+          "name": "refs",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "filed_at": {
+          "name": "filed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "filings_status_idx": {
+          "name": "filings_status_idx",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        },
+        "filings_stringer_idx": {
+          "name": "filings_stringer_idx",
+          "columns": [
+            "stringer_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "filings_stringer_id_stringers_id_fk": {
+          "name": "filings_stringer_id_stringers_id_fk",
+          "tableFrom": "filings",
+          "tableTo": "stringers",
+          "columnsFrom": [
+            "stringer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -485,8 +705,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "personas": {
-      "name": "personas",
+    "outlets": {
+      "name": "outlets",
       "columns": {
         "id": {
           "name": "id",
@@ -502,37 +722,102 @@
           "notNull": true,
           "autoincrement": false
         },
-        "voice": {
-          "name": "voice",
+        "description": {
+          "name": "description",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "audience": {
-          "name": "audience",
+        "role": {
+          "name": "role",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "'publish'"
         },
-        "rules": {
-          "name": "rules",
+        "driver": {
+          "name": "driver",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'mcp'"
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "voice_id": {
+          "name": "voice_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "examples": {
-          "name": "examples",
+        "endpoint_id": {
+          "name": "endpoint_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        },
+        "tool": {
+          "name": "tool",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "destination_key": {
+          "name": "destination_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "args_spec": {
+          "name": "args_spec",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "outlets_voice_id_voices_id_fk": {
+          "name": "outlets_voice_id_voices_id_fk",
+          "tableFrom": "outlets",
+          "tableTo": "voices",
+          "columnsFrom": [
+            "voice_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outlets_endpoint_id_mcp_endpoints_id_fk": {
+          "name": "outlets_endpoint_id_mcp_endpoints_id_fk",
+          "tableFrom": "outlets",
+          "tableTo": "mcp_endpoints",
+          "columnsFrom": [
+            "endpoint_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -554,8 +839,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "target_id": {
-          "name": "target_id",
+        "outlet_id": {
+          "name": "outlet_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -575,8 +860,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "route_reason": {
-          "name": "route_reason",
+        "placement_reason": {
+          "name": "placement_reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -640,11 +925,11 @@
         }
       },
       "indexes": {
-        "publications_story_target_idx": {
-          "name": "publications_story_target_idx",
+        "publications_story_outlet_idx": {
+          "name": "publications_story_outlet_idx",
           "columns": [
             "story_id",
-            "target_id"
+            "outlet_id"
           ],
           "isUnique": true
         },
@@ -670,12 +955,12 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "publications_target_id_targets_id_fk": {
-          "name": "publications_target_id_targets_id_fk",
+        "publications_outlet_id_outlets_id_fk": {
+          "name": "publications_outlet_id_outlets_id_fk",
           "tableFrom": "publications",
-          "tableTo": "targets",
+          "tableTo": "outlets",
           "columnsFrom": [
-            "target_id"
+            "outlet_id"
           ],
           "columnsTo": [
             "id"
@@ -758,74 +1043,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "sources": {
-      "name": "sources",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "enabled": {
-          "name": "enabled",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": true
-        },
-        "hint": {
-          "name": "hint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "watermark": {
-          "name": "watermark",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "last_snapshot": {
-          "name": "last_snapshot",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
         }
       },
       "indexes": {},
@@ -921,8 +1138,8 @@
           "notNull": false,
           "autoincrement": false
         },
-        "proposed_routes": {
-          "name": "proposed_routes",
+        "proposed_placements": {
+          "name": "proposed_placements",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -958,8 +1175,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "story_submissions": {
-      "name": "story_submissions",
+    "story_filings": {
+      "name": "story_filings",
       "columns": {
         "story_id": {
           "name": "story_id",
@@ -968,8 +1185,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "submission_id": {
-          "name": "submission_id",
+        "filing_id": {
+          "name": "filing_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -978,9 +1195,9 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "story_submissions_story_id_stories_id_fk": {
-          "name": "story_submissions_story_id_stories_id_fk",
-          "tableFrom": "story_submissions",
+        "story_filings_story_id_stories_id_fk": {
+          "name": "story_filings_story_id_stories_id_fk",
+          "tableFrom": "story_filings",
           "tableTo": "stories",
           "columnsFrom": [
             "story_id"
@@ -991,12 +1208,12 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "story_submissions_submission_id_submissions_id_fk": {
-          "name": "story_submissions_submission_id_submissions_id_fk",
-          "tableFrom": "story_submissions",
-          "tableTo": "submissions",
+        "story_filings_filing_id_filings_id_fk": {
+          "name": "story_filings_filing_id_filings_id_fk",
+          "tableFrom": "story_filings",
+          "tableTo": "filings",
           "columnsFrom": [
-            "submission_id"
+            "filing_id"
           ],
           "columnsTo": [
             "id"
@@ -1006,129 +1223,19 @@
         }
       },
       "compositePrimaryKeys": {
-        "story_submissions_story_id_submission_id_pk": {
+        "story_filings_story_id_filing_id_pk": {
           "columns": [
             "story_id",
-            "submission_id"
+            "filing_id"
           ],
-          "name": "story_submissions_story_id_submission_id_pk"
+          "name": "story_filings_story_id_filing_id_pk"
         }
       },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "submissions": {
-      "name": "submissions",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source_id": {
-          "name": "source_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "considered": {
-          "name": "considered",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "refs": {
-          "name": "refs",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "filed_at": {
-          "name": "filed_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "received_at": {
-          "name": "received_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "submissions_status_idx": {
-          "name": "submissions_status_idx",
-          "columns": [
-            "status"
-          ],
-          "isUnique": false
-        },
-        "submissions_source_idx": {
-          "name": "submissions_source_idx",
-          "columns": [
-            "source_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "submissions_source_id_sources_id_fk": {
-          "name": "submissions_source_id_sources_id_fk",
-          "tableFrom": "submissions",
-          "tableTo": "sources",
-          "columnsFrom": [
-            "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "targets": {
-      "name": "targets",
+    "stringers": {
+      "name": "stringers",
       "columns": {
         "id": {
           "name": "id",
@@ -1144,28 +1251,12 @@
           "notNull": true,
           "autoincrement": false
         },
-        "description": {
-          "name": "description",
+        "kind": {
+          "name": "kind",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'publish'"
-        },
-        "driver": {
-          "name": "driver",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'mcp'"
         },
         "enabled": {
           "name": "enabled",
@@ -1175,71 +1266,90 @@
           "autoincrement": false,
           "default": true
         },
-        "persona_id": {
-          "name": "persona_id",
+        "hint": {
+          "name": "hint",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "endpoint_id": {
-          "name": "endpoint_id",
+        "watermark": {
+          "name": "watermark",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "tool": {
-          "name": "tool",
+        "last_snapshot": {
+          "name": "last_snapshot",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "destination_key": {
-          "name": "destination_key",
+        "created_at": {
+          "name": "created_at",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "voices": {
+      "name": "voices",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
           "autoincrement": false
         },
-        "args_spec": {
-          "name": "args_spec",
+        "name": {
+          "name": "name",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "tone": {
+          "name": "tone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "audience": {
+          "name": "audience",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rules": {
+          "name": "rules",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "examples": {
+          "name": "examples",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},
-      "foreignKeys": {
-        "targets_persona_id_personas_id_fk": {
-          "name": "targets_persona_id_personas_id_fk",
-          "tableFrom": "targets",
-          "tableTo": "personas",
-          "columnsFrom": [
-            "persona_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "targets_endpoint_id_mcp_endpoints_id_fk": {
-          "name": "targets_endpoint_id_mcp_endpoints_id_fk",
-          "tableFrom": "targets",
-          "tableTo": "mcp_endpoints",
-          "columnsFrom": [
-            "endpoint_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}

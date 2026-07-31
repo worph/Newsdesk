@@ -20,8 +20,8 @@ const listQuery = z.object({
   limit: z.coerce.number().int().positive().max(200).optional(),
 })
 
-const routeBody = z.object({
-  target_id: z.string().min(1),
+const placementBody = z.object({
+  outlet_id: z.string().min(1),
   reason: z.string().min(1).optional(),
 })
 
@@ -39,34 +39,34 @@ export interface StoryRow {
   dropReason: string | null
   createdAt: string
   sourceCount: number
-  routes: Array<{
+  placements: Array<{
     id: string
-    targetId: string
-    targetName: string | null
+    outletId: string
+    outletName: string | null
     status: string
     origin: string
-    routeReason: string | null
+    placementReason: string | null
     angle: string | null
   }>
 }
 
-function routesFor(db: Db, storyIds: string[]): Map<string, StoryRow['routes']> {
-  const byStory = new Map<string, StoryRow['routes']>()
+function placementsFor(db: Db, storyIds: string[]): Map<string, StoryRow['placements']> {
+  const byStory = new Map<string, StoryRow['placements']>()
   if (storyIds.length === 0) return byStory
 
   const rows = db
     .select({
       id: schema.publications.id,
       storyId: schema.publications.storyId,
-      targetId: schema.publications.targetId,
-      targetName: schema.targets.name,
+      outletId: schema.publications.outletId,
+      outletName: schema.outlets.name,
       status: schema.publications.status,
       origin: schema.publications.origin,
-      routeReason: schema.publications.routeReason,
+      placementReason: schema.publications.placementReason,
       angle: schema.publications.angle,
     })
     .from(schema.publications)
-    .leftJoin(schema.targets, eq(schema.publications.targetId, schema.targets.id))
+    .leftJoin(schema.outlets, eq(schema.publications.outletId, schema.outlets.id))
     .where(inArray(schema.publications.storyId, storyIds))
     .all()
 
@@ -74,11 +74,11 @@ function routesFor(db: Db, storyIds: string[]): Map<string, StoryRow['routes']> 
     const list = byStory.get(row.storyId) ?? []
     list.push({
       id: row.id,
-      targetId: row.targetId,
-      targetName: row.targetName,
+      outletId: row.outletId,
+      outletName: row.outletName,
       status: row.status,
       origin: row.origin,
-      routeReason: row.routeReason,
+      placementReason: row.placementReason,
       angle: row.angle,
     })
     byStory.set(row.storyId, list)
@@ -91,8 +91,8 @@ function sourceCounts(db: Db, storyIds: string[]): Map<string, number> {
   if (storyIds.length === 0) return counts
   for (const row of db
     .select()
-    .from(schema.storySubmissions)
-    .where(inArray(schema.storySubmissions.storyId, storyIds))
+    .from(schema.storyFilings)
+    .where(inArray(schema.storyFilings.storyId, storyIds))
     .all()) {
     counts.set(row.storyId, (counts.get(row.storyId) ?? 0) + 1)
   }
@@ -112,7 +112,7 @@ function relatedTitles(db: Db, ids: string[]): Map<string, string> {
 export function registerStoryRoutes(
   app: FastifyInstance,
   db: Db,
-  enqueueManagingEditor?: (submissionId: string) => void,
+  enqueueManagingEditor?: (filingId: string) => void,
   enqueueWriter?: (publicationId: string) => void,
 ): void {
   app.get('/api/v1/stories', { preHandler: requireSession }, async (request, reply) => {
@@ -137,7 +137,7 @@ export function registerStoryRoutes(
       .all()
 
     const ids = rows.map((r) => r.id)
-    const routes = routesFor(db, ids)
+    const placements = placementsFor(db, ids)
     const counts = sourceCounts(db, ids)
     const titles = relatedTitles(db, rows.map((r) => r.relatedStoryId).filter((v): v is string => Boolean(v)))
 
@@ -155,7 +155,7 @@ export function registerStoryRoutes(
       dropReason: row.dropReason,
       createdAt: row.createdAt,
       sourceCount: counts.get(row.id) ?? 0,
-      routes: routes.get(row.id) ?? [],
+      placements: placements.get(row.id) ?? [],
     }))
 
     return { stories }
@@ -168,24 +168,24 @@ export function registerStoryRoutes(
 
     const links = db
       .select()
-      .from(schema.storySubmissions)
-      .where(eq(schema.storySubmissions.storyId, id))
+      .from(schema.storyFilings)
+      .where(eq(schema.storyFilings.storyId, id))
       .all()
 
-    const submissions =
+    const filings =
       links.length > 0
         ? db
             .select({
-              id: schema.submissions.id,
-              stringerId: schema.submissions.stringerId,
+              id: schema.filings.id,
+              stringerId: schema.filings.stringerId,
               stringerName: schema.stringers.name,
-              kind: schema.submissions.kind,
-              receivedAt: schema.submissions.receivedAt,
-              considered: schema.submissions.considered,
+              kind: schema.filings.kind,
+              receivedAt: schema.filings.receivedAt,
+              considered: schema.filings.considered,
             })
-            .from(schema.submissions)
-            .leftJoin(schema.stringers, eq(schema.submissions.stringerId, schema.stringers.id))
-            .where(inArray(schema.submissions.id, links.map((l) => l.submissionId)))
+            .from(schema.filings)
+            .leftJoin(schema.stringers, eq(schema.filings.stringerId, schema.stringers.id))
+            .where(inArray(schema.filings.id, links.map((l) => l.filingId)))
             .all()
         : []
 
@@ -197,63 +197,63 @@ export function registerStoryRoutes(
       story: {
         ...story,
         comparedIds: story.comparedIds ? JSON.parse(story.comparedIds) : [],
-        proposedRoutes: story.proposedRoutes ? JSON.parse(story.proposedRoutes) : [],
+        proposedPlacements: story.proposedPlacements ? JSON.parse(story.proposedPlacements) : [],
       },
-      submissions,
-      routes: routesFor(db, [id]).get(id) ?? [],
+      filings,
+      placements: placementsFor(db, [id]).get(id) ?? [],
       related: related ? { id: related.id, title: related.title, summary: related.summary } : null,
     }
   })
 
   /**
-   * Add a route the managing editor did not propose. `origin: 'human'` is what makes
-   * the override diff readable later — a route you added must never look like
+   * Add a placement the managing editor did not propose. `origin: 'human'` is what makes
+   * the override diff readable later — a placement you added must never look like
    * one the managing editor suggested.
    */
-  app.post('/api/v1/stories/:id/routes', { preHandler: requireSession }, async (request, reply) => {
+  app.post('/api/v1/stories/:id/placements', { preHandler: requireSession }, async (request, reply) => {
     const { id } = request.params as { id: string }
-    const parsed = routeBody.safeParse(request.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'target_id required' })
+    const parsed = placementBody.safeParse(request.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'outlet_id required' })
 
     const story = db.select().from(schema.stories).where(eq(schema.stories.id, id)).get()
     if (!story) return reply.code(404).send({ error: 'no such story' })
 
-    const target = db.select().from(schema.targets).where(eq(schema.targets.id, parsed.data.target_id)).get()
-    if (!target) return reply.code(422).send({ error: `unknown target "${parsed.data.target_id}"` })
+    const outlet = db.select().from(schema.outlets).where(eq(schema.outlets.id, parsed.data.outlet_id)).get()
+    if (!outlet) return reply.code(422).send({ error: `unknown outlet "${parsed.data.outlet_id}"` })
 
     const existing = db
       .select()
       .from(schema.publications)
       .where(
-        and(eq(schema.publications.storyId, id), eq(schema.publications.targetId, parsed.data.target_id)),
+        and(eq(schema.publications.storyId, id), eq(schema.publications.outletId, parsed.data.outlet_id)),
       )
       .get()
-    if (existing) return reply.code(409).send({ error: 'this story already has a route to that destination' })
+    if (existing) return reply.code(409).send({ error: 'this story already has a placement to that destination' })
 
     const publicationId = randomUUID()
     db.insert(schema.publications)
       .values({
         id: publicationId,
         storyId: id,
-        targetId: parsed.data.target_id,
+        outletId: parsed.data.outlet_id,
         status: 'PROPOSED',
         origin: 'human',
-        routeReason: parsed.data.reason ?? 'added by the editor',
+        placementReason: parsed.data.reason ?? 'added by the editor',
         angle: null,
         slots: null,
         payload: null,
       })
       .run()
 
-    // A story spiked for having no routes is no longer spiked once you add one.
+    // A story spiked for having no placements is no longer spiked once you add one.
     if (story.status === 'DROPPED' && story.dedupVerdict !== 'DUPLICATE') {
       db.update(schema.stories)
-        .set({ status: 'ROUTED', dropReason: null })
+        .set({ status: 'PLACED', dropReason: null })
         .where(eq(schema.stories.id, id))
         .run()
     }
 
-    // A route you added still needs something written for it, exactly like one
+    // A placement you added still needs something written for it, exactly like one
     // the managing editor proposed — otherwise it sits at PROPOSED with no draft and
     // no way to reach the gate.
     enqueueWriter?.(publicationId)
@@ -264,13 +264,13 @@ export function registerStoryRoutes(
       code: 'ROUTE_ADDED',
       storyId: id,
       publicationId,
-      message: `editor added a route to ${parsed.data.target_id}`,
+      message: `editor added a placement to ${parsed.data.outlet_id}`,
     })
 
     return reply.code(201).send({ id: publicationId, drafting: Boolean(enqueueWriter) })
   })
 
-  /** Re-run the managing editor over the submissions that produced this story. */
+  /** Re-run the managing editor over the filings that produced this story. */
   app.post('/api/v1/stories/:id/rerun', { preHandler: requireSession }, async (request, reply) => {
     if (!enqueueManagingEditor) {
       return reply.code(503).send({ error: 'no managing editor is wired on this instance' })
@@ -279,18 +279,18 @@ export function registerStoryRoutes(
     const { id } = request.params as { id: string }
     const links = db
       .select()
-      .from(schema.storySubmissions)
-      .where(eq(schema.storySubmissions.storyId, id))
+      .from(schema.storyFilings)
+      .where(eq(schema.storyFilings.storyId, id))
       .all()
 
-    if (links.length === 0) return reply.code(404).send({ error: 'no submissions behind this story' })
+    if (links.length === 0) return reply.code(404).send({ error: 'no filings behind this story' })
 
     for (const link of links) {
-      db.update(schema.submissions)
+      db.update(schema.filings)
         .set({ status: 'PROCESSING', outcome: 're-queued by the editor' })
-        .where(eq(schema.submissions.id, link.submissionId))
+        .where(eq(schema.filings.id, link.filingId))
         .run()
-      enqueueManagingEditor(link.submissionId)
+      enqueueManagingEditor(link.filingId)
     }
 
     logEvent(db, {
@@ -298,7 +298,7 @@ export function registerStoryRoutes(
       actor: 'human',
       code: 'STORY_RERUN',
       storyId: id,
-      message: `editor re-queued ${links.length} submission(s)`,
+      message: `editor re-queued ${links.length} filing(s)`,
     })
 
     return reply.code(202).send({ queued: links.length })

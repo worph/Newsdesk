@@ -124,18 +124,18 @@ describe('notifying', () => {
   })
 
   it('counts what is standing at the gate', () => {
-    // One publication per story: (story_id, target_id) is unique, which is the
+    // One publication per story: (story_id, outlet_id) is unique, which is the
     // ledger refusing to hold two rows for the same story in the same place.
     for (const status of ['AWAITING_APPROVAL', 'AWAITING_APPROVAL', 'PUBLISHED']) {
       const storyId = randomUUID()
       db.insert(schema.stories)
-        .values({ id: storyId, title: 'T', summary: 'S', status: 'ROUTED', dedupVerdict: 'NEW' })
+        .values({ id: storyId, title: 'T', summary: 'S', status: 'PLACED', dedupVerdict: 'NEW' })
         .run()
       db.insert(schema.publications)
         .values({
           id: randomUUID(),
           storyId,
-          targetId: 'discord-test',
+          outletId: 'discord-test',
           status,
           origin: 'managing-editor',
         })

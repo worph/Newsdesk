@@ -3,11 +3,11 @@
 # Copy this to your data volume as `config.yaml` BEFORE first boot and it will
 # be imported once. After that the database is the source of truth and this
 # file is ignored — edit the live configuration from the Configuration screen,
-# so a stale file can never compete with a target you edited in the app.
+# so a stale file can never compete with a change you made in the app.
 
 # ── The charter ─────────────────────────────────────────────────────────────
-# Routing policy as prose: the standing brief a section editor would give. The
-# managing editor reads this together with the target list and proposes where each
+# Placement policy as prose: the standing brief a section editor would give. The
+# managing editor reads this together with the outlet list and proposes where each
 # story runs. Write it the way you would tell a colleague, not as configuration.
 charter: |
   GitHub commits and dev-facing changes go to #dev: developers, technical
@@ -28,7 +28,7 @@ mcp_endpoints:
     url: http://beacon-backend:9300/mcp
 
 # ── Voices ──────────────────────────────────────────────────────────────────
-# A voice is tone, audience and rules, stored once and shared by targets.
+# A voice is tone, audience and rules, stored once and shared by outlets.
 voices:
   - id: alicia
     name: Alicia
@@ -45,9 +45,9 @@ voices:
     rules: Assume the reader knows the codebase. Lead with the change itself.
 
 # ── Who files ───────────────────────────────────────────────────────────────
-# Sources describe what arrives, not how to fetch it — fetching lives in your
-# stringers (n8n workflows and the like), which POST free text to
-# /api/v1/submissions with the ingest token.
+# A stringer row describes what arrives, not how to fetch it — fetching lives in
+# the workflow itself (n8n and the like), which POSTs free text to
+# /api/v1/filings with the ingest token.
 #
 #   report    a written report, any depth ("what changed this week, with evidence")
 #   timeline  dated entries; a watermark stops old ones being re-examined
@@ -76,14 +76,14 @@ stringers:
 #   slot      written by the writer,        title: { slot: text, label: Headline }
 #             edited and approved by you
 #
-# A publish target MUST pin its destination as a literal. Destination arguments
+# A publish outlet MUST pin its destination as a literal. Destination arguments
 # are optional in the live MCP schemas, so an unpinned one does not error — it
 # silently posts to whatever default the bridge is configured with. Newsdesk
-# refuses to save such a target.
+# refuses to save such an outlet.
 #
 # Exactly one slot is `primary: true` — the document that gets the full editor
 # and the assistant.
-targets:
+outlets:
   - id: discord-test
     name: Discord #news-test
     description: test channel, general public audience, announcements of app releases

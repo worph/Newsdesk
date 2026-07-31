@@ -14,7 +14,7 @@ import { attachAuth } from '../mcp/oauth.js'
  * the approval would not mean anything.
  */
 
-export interface DeliveryTarget {
+export interface DeliveryOutlet {
   id: string
   name: string
   driver: string
@@ -30,7 +30,7 @@ export interface DeliveryResult {
 
 export interface DeliveryDriver {
   readonly name: string
-  send(target: DeliveryTarget, payload: Record<string, unknown>): Promise<DeliveryResult>
+  send(outlet: DeliveryOutlet, payload: Record<string, unknown>): Promise<DeliveryResult>
 }
 
 /**
@@ -45,20 +45,20 @@ export interface DeliveryDriver {
 export function createMcpDriver(db: Db): DeliveryDriver {
   return {
     name: 'mcp',
-    async send(target, payload) {
-      if (!target.tool) throw new McpError(`target "${target.id}" has no tool configured`, false)
-      if (!target.endpointId) throw new McpError(`target "${target.id}" has no endpoint configured`, false)
+    async send(outlet, payload) {
+      if (!outlet.tool) throw new McpError(`outlet "${outlet.id}" has no tool configured`, false)
+      if (!outlet.endpointId) throw new McpError(`outlet "${outlet.id}" has no endpoint configured`, false)
 
       const endpoint = db
         .select()
         .from(schema.mcpEndpoints)
-        .where(eq(schema.mcpEndpoints.id, target.endpointId))
+        .where(eq(schema.mcpEndpoints.id, outlet.endpointId))
         .get()
       if (!endpoint) {
-        throw new McpError(`endpoint "${target.endpointId}" no longer exists`, false)
+        throw new McpError(`endpoint "${outlet.endpointId}" no longer exists`, false)
       }
 
-      const result = await callTool(attachAuth(db, endpoint), target.tool, payload, {
+      const result = await callTool(attachAuth(db, endpoint), outlet.tool, payload, {
         timeoutMs: 280_000,
       })
       return { detail: result.text.slice(0, 2000) }
@@ -70,9 +70,9 @@ export function createMcpDriver(db: Db): DeliveryDriver {
 export function createWebhookDriver(): DeliveryDriver {
   return {
     name: 'webhook',
-    async send(target, payload) {
+    async send(outlet, payload) {
       const url = typeof payload.url === 'string' ? payload.url : undefined
-      if (!url) throw new McpError(`webhook target "${target.id}" has no url in its payload`, false)
+      if (!url) throw new McpError(`webhook outlet "${outlet.id}" has no url in its payload`, false)
 
       const { url: _omit, ...body } = payload
       const response = await fetch(url, {
@@ -96,16 +96,16 @@ export function createWebhookDriver(): DeliveryDriver {
  * This is what makes the whole path testable end to end without a real
  * destination — the approval, the freeze and the ledger all behave exactly as
  * they would against Discord, and the payload is kept for inspection. A dev
- * stack has no `discord-mcp`, and a target that silently did nothing would be
+ * stack has no `discord-mcp`, and an outlet that silently did nothing would be
  * indistinguishable from one that worked.
  */
 export function createSinkDriver(): DeliveryDriver {
   return {
     name: 'builtin',
-    async send(target, payload) {
+    async send(outlet, payload) {
       return {
-        externalId: `sink:${target.id}:${Date.now()}`,
-        detail: `not sent — this is a local sink target. Payload:\n${JSON.stringify(payload, null, 2)}`,
+        externalId: `sink:${outlet.id}:${Date.now()}`,
+        detail: `not sent — this is a local sink outlet. Payload:\n${JSON.stringify(payload, null, 2)}`,
       }
     },
   }
@@ -151,20 +151,20 @@ export async function deliverPublication(db: Db, publicationId: string): Promise
     throw new McpError(`publication ${publicationId} has no frozen payload`, false)
   }
 
-  const target = db.select().from(schema.targets).where(eq(schema.targets.id, publication.targetId)).get()
-  if (!target) throw new McpError(`target "${publication.targetId}" no longer exists`, false)
+  const outlet = db.select().from(schema.outlets).where(eq(schema.outlets.id, publication.outletId)).get()
+  if (!outlet) throw new McpError(`outlet "${publication.outletId}" no longer exists`, false)
 
   const payload = JSON.parse(publication.payload) as Record<string, unknown>
-  const driver = createDeliveryDriver(db, target.driver)
+  const driver = createDeliveryDriver(db, outlet.driver)
 
   try {
     const result = await driver.send(
       {
-        id: target.id,
-        name: target.name,
-        driver: target.driver,
-        tool: target.tool,
-        endpointId: target.endpointId,
+        id: outlet.id,
+        name: outlet.name,
+        driver: outlet.driver,
+        tool: outlet.tool,
+        endpointId: outlet.endpointId,
       },
       payload,
     )
@@ -185,8 +185,8 @@ export async function deliverPublication(db: Db, publicationId: string): Promise
       code: 'PUBLISHED',
       storyId: publication.storyId,
       publicationId,
-      message: `sent to ${target.name}`,
-      detail: { driver: target.driver, result: result.detail },
+      message: `sent to ${outlet.name}`,
+      detail: { driver: outlet.driver, result: result.detail },
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -200,7 +200,7 @@ export async function deliverPublication(db: Db, publicationId: string): Promise
       code: 'PUBLISH_FAILED',
       storyId: publication.storyId,
       publicationId,
-      message: `could not send to ${target.name}: ${message}`,
+      message: `could not send to ${outlet.name}: ${message}`,
     })
     throw err
   }

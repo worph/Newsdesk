@@ -13,7 +13,7 @@ export function Queue() {
 
   const { data, isPending } = useQuery({
     queryKey: ['stories', 'queue'],
-    queryFn: () => api.listStories({ status: 'ROUTED,NEEDS_CONTEXT', limit: 100 }),
+    queryFn: () => api.listStories({ status: 'PLACED,NEEDS_CONTEXT', limit: 100 }),
     refetchInterval: 30_000,
   })
 
@@ -38,7 +38,7 @@ export function Queue() {
         </p>
         {working > 0 && (
           <p className="text-xs text-desk-500">
-            {working} submission{working === 1 ? '' : 's'} still with the managing editor…
+            {working} filing{working === 1 ? '' : 's'} still with the managing editor…
           </p>
         )}
       </header>
@@ -47,7 +47,7 @@ export function Queue() {
         <div className="rounded-lg border border-dashed border-desk-300 px-4 py-10 text-center dark:border-desk-700">
           <p className="text-sm text-desk-500">Nothing waiting.</p>
           <p className="mt-1 text-xs text-desk-500">
-            Stories the managing editor routed appear here. Spiked ones are under Stories.
+            Stories the managing editor placed appear here. Spiked ones are under Stories.
           </p>
         </div>
       ) : (

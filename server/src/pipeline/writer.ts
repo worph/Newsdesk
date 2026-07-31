@@ -11,7 +11,7 @@ import { notifyDraftReady } from '../push.js'
 import { slotsShapeHint, slotsZodSchema } from '../schema/slots.js'
 
 /**
- * One draft per publication — per story AND per target, because a story
+ * One draft per publication — per story AND per outlet, because a story
  * running in two places is two pieces of writing, two chat threads and two
  * independent decisions.
  *
@@ -42,20 +42,20 @@ function renderVoice(db: Db, voiceId: string | null): string {
 function renderMaterial(db: Db, storyId: string): string {
   const links = db
     .select()
-    .from(schema.storySubmissions)
-    .where(eq(schema.storySubmissions.storyId, storyId))
+    .from(schema.storyFilings)
+    .where(eq(schema.storyFilings.storyId, storyId))
     .all()
 
   if (links.length === 0) return '(no source material was kept for this story)'
 
-  const submissions = db
+  const filings = db
     .select()
-    .from(schema.submissions)
-    .where(inArray(schema.submissions.id, links.map((l) => l.submissionId)))
+    .from(schema.filings)
+    .where(inArray(schema.filings.id, links.map((l) => l.filingId)))
     .all()
 
-  return submissions
-    .map((submission) => `--- filed by ${submission.stringerId} ---\n${submission.considered ?? submission.text}`)
+  return filings
+    .map((filing) => `--- filed by ${filing.stringerId} ---\n${filing.considered ?? filing.text}`)
     .join('\n\n')
 }
 
@@ -70,18 +70,18 @@ export function buildDraftContext(db: Db, publicationId: string): DraftContext {
   const story = db.select().from(schema.stories).where(eq(schema.stories.id, publication.storyId)).get()
   if (!story) throw new Error(`story "${publication.storyId}" not found`)
 
-  const target = db.select().from(schema.targets).where(eq(schema.targets.id, publication.targetId)).get()
-  if (!target) throw new Error(`target "${publication.targetId}" not found`)
+  const outlet = db.select().from(schema.outlets).where(eq(schema.outlets.id, publication.outletId)).get()
+  if (!outlet) throw new Error(`outlet "${publication.outletId}" not found`)
 
-  const args = JSON.parse(target.argsSpec) as ArgsSpec
+  const args = JSON.parse(outlet.argsSpec) as ArgsSpec
 
   const related = story.relatedStoryId
     ? db.select().from(schema.stories).where(eq(schema.stories.id, story.relatedStoryId)).get()
     : undefined
 
   const prompt = fillPrompt(loadPrompt('writer'), {
-    VOICE: renderVoice(db, target.voiceId),
-    TARGET: [`name: ${target.name}`, '', target.description.trim()].join('\n'),
+    VOICE: renderVoice(db, outlet.voiceId),
+    OUTLET: [`name: ${outlet.name}`, '', outlet.description.trim()].join('\n'),
     STORY: [
       `title: ${story.title}`,
       ...(story.url ? [`url: ${story.url}`] : []),

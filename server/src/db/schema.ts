@@ -47,7 +47,7 @@ export const stringers = sqliteTable('stringers', {
   createdAt: text('created_at').notNull().default(now),
 })
 
-export const targets = sqliteTable('targets', {
+export const outlets = sqliteTable('outlets', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   /** The managing editor reads this to decide what belongs here. */
@@ -73,8 +73,8 @@ export const charter = sqliteTable('charter', {
 
 // ── content ─────────────────────────────────────────────────────────────────
 
-export const submissions = sqliteTable(
-  'submissions',
+export const filings = sqliteTable(
+  'filings',
   {
     id: text('id').primaryKey(),
     stringerId: text('stringer_id')
@@ -84,13 +84,52 @@ export const submissions = sqliteTable(
     text: text('text').notNull(),
     /** The slice actually sent to the managing editor, after watermark or snapshot diff. */
     considered: text('considered'),
+    /**
+     * JSON: the story file the reporter produced, for filings that were
+     * reported. A third column rather than a rewrite of the two above, because
+     * they answer different questions: `text` is what a human wrote,
+     * `considered` is the deterministic slice of it, and this is what the desk
+     * went and found. Conflating them would make "what you filed" and "what we
+     * produced" indistinguishable.
+     */
+    dossier: text('dossier'),
+    reportedAt: text('reported_at'),
     refs: text('refs'),
     filedAt: text('filed_at'),
     receivedAt: text('received_at').notNull().default(now),
-    status: text('status').notNull(), // RECEIVED|PROCESSING|PROCESSED|FAILED
+    status: text('status').notNull(), // RECEIVED|REPORTING|PROCESSING|PROCESSED|FAILED
     outcome: text('outcome'),
   },
-  (t) => [index('submissions_status_idx').on(t.status), index('submissions_stringer_idx').on(t.stringerId)],
+  (t) => [index('filings_status_idx').on(t.status), index('filings_stringer_idx').on(t.stringerId)],
+)
+
+/**
+ * Every page the desk actually retrieved while reporting a filing.
+ *
+ * This is the records half of reporting, and it is what makes a citation
+ * verifiable: a row exists because we fetched it, so a url the model invented
+ * has nowhere to appear. The reporter validates its sourced claims against
+ * this table before storing a dossier.
+ */
+export const dossierSources = sqliteTable(
+  'dossier_sources',
+  {
+    id: text('id').primaryKey(),
+    filingId: text('filing_id')
+      .notNull()
+      .references(() => filings.id),
+    url: text('url').notNull(),
+    title: text('title'),
+    /** How we came to it: carried by the tip, or surfaced by a search. */
+    via: text('via').notNull(), // tip | search
+    /** The query that surfaced it, when via = search. */
+    query: text('query'),
+    /** Whether the retrieval actually succeeded — a dead link is still a record. */
+    ok: integer('ok', { mode: 'boolean' }).notNull(),
+    chars: integer('chars'),
+    fetchedAt: text('fetched_at').notNull().default(now),
+  },
+  (t) => [index('dossier_sources_filing_idx').on(t.filingId)],
 )
 
 export const stories = sqliteTable(
@@ -102,7 +141,7 @@ export const stories = sqliteTable(
     summary: text('summary').notNull(),
     body: text('body'),
     url: text('url'),
-    status: text('status').notNull(), // PROPOSED|ROUTED|DROPPED|NEEDS_CONTEXT|CLOSED
+    status: text('status').notNull(), // PROPOSED|PLACED|DROPPED|NEEDS_CONTEXT|CLOSED
     dedupVerdict: text('dedup_verdict').notNull(), // NEW | DUPLICATE | UPDATE
     dedupReason: text('dedup_reason'),
     relatedStoryId: text('related_story_id'),
@@ -112,27 +151,27 @@ export const stories = sqliteTable(
     label: text('label'),
     dropReason: text('drop_reason'),
     /** JSON snapshot of the managing editor's calls, kept for the override diff. */
-    proposedRoutes: text('proposed_routes'),
+    proposedPlacements: text('proposed_placements'),
     createdAt: text('created_at').notNull().default(now),
   },
   (t) => [index('stories_status_idx').on(t.status), index('stories_created_idx').on(t.createdAt)],
 )
 
 /** Many-to-many: redundancy across sources is a feature, not waste. */
-export const storySubmissions = sqliteTable(
-  'story_submissions',
+export const storyFilings = sqliteTable(
+  'story_filings',
   {
     storyId: text('story_id')
       .notNull()
       .references(() => stories.id),
-    submissionId: text('submission_id')
+    filingId: text('filing_id')
       .notNull()
-      .references(() => submissions.id),
+      .references(() => filings.id),
   },
-  (t) => [primaryKey({ columns: [t.storyId, t.submissionId] })],
+  (t) => [primaryKey({ columns: [t.storyId, t.filingId] })],
 )
 
-/** The story x target ledger. */
+/** The story x outlet ledger. */
 export const publications = sqliteTable(
   'publications',
   {
@@ -140,13 +179,13 @@ export const publications = sqliteTable(
     storyId: text('story_id')
       .notNull()
       .references(() => stories.id),
-    targetId: text('target_id')
+    outletId: text('outlet_id')
       .notNull()
-      .references(() => targets.id),
+      .references(() => outlets.id),
     status: text('status').notNull(),
-    /** 'managing-editor' | 'human' — was this route proposed, or added by the editor? */
+    /** 'managing-editor' | 'human' — was this placement proposed, or added by the editor? */
     origin: text('origin').notNull(),
-    routeReason: text('route_reason'),
+    placementReason: text('placement_reason'),
     /** The managing editor's note to the writer. */
     angle: text('angle'),
     /** JSON: current authored slot values. */
@@ -160,7 +199,7 @@ export const publications = sqliteTable(
     publishedAt: text('published_at'),
   },
   (t) => [
-    uniqueIndex('publications_story_target_idx').on(t.storyId, t.targetId),
+    uniqueIndex('publications_story_outlet_idx').on(t.storyId, t.outletId),
     index('publications_status_idx').on(t.status),
   ],
 )

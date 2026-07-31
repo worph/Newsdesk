@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   argsSpecSchema,
+  CALL_TEMPLATE_ROOTS,
   isDerived,
   isSlot,
   primarySlotKey,
@@ -16,8 +17,8 @@ const idSchema = z
   .regex(/^[a-z0-9][a-z0-9-]*$/, 'ids are lower-case, digits and hyphens')
 
 export const STRINGER_KINDS = ['report', 'timeline', 'snapshot', 'tip'] as const
-export const TARGET_ROLES = ['publish', 'notify'] as const
-export const TARGET_DRIVERS = ['mcp', 'webhook', 'builtin'] as const
+export const OUTLET_ROLES = ['publish', 'notify'] as const
+export const OUTLET_DRIVERS = ['mcp', 'webhook', 'builtin'] as const
 
 export const mcpEndpointSchema = z.object({
   id: idSchema,
@@ -43,13 +44,13 @@ export const stringerSchema = z.object({
   hint: z.string().optional(),
 })
 
-export const targetSchema = z.object({
+export const outletSchema = z.object({
   id: idSchema,
   name: z.string().min(1),
   /** The managing editor reads this to decide what belongs here. */
   description: z.string().min(1),
-  role: z.enum(TARGET_ROLES).default('publish'),
-  driver: z.enum(TARGET_DRIVERS).default('mcp'),
+  role: z.enum(OUTLET_ROLES).default('publish'),
+  driver: z.enum(OUTLET_DRIVERS).default('mcp'),
   enabled: z.boolean().default(true),
   voice: idSchema.optional(),
   endpoint: idSchema.optional(),
@@ -62,18 +63,59 @@ export const targetSchema = z.object({
   args: argsSpecSchema,
 })
 
+/**
+ * A tool the reporter may call, declared exactly like an outlet — because it is
+ * the same thing pointed inward. The desk calls it; the model only supplies the
+ * one value that fills `{{ call.query }}` or `{{ call.url }}`.
+ *
+ * The argument shape lives here rather than in code because the desk cannot
+ * know whether a given server wants `q`, `query` or `search_term`, and guessing
+ * would make the phase work only for the servers we happened to test.
+ */
+export const reportingToolSchema = z.object({
+  endpoint: idSchema,
+  tool: z.string().min(1),
+  args: argsSpecSchema,
+})
+
+/**
+ * The reporting phase. Absent means the phase does not run at all and tips go
+ * straight to the managing editor, exactly as they did before.
+ *
+ * Both lists are ordered and read as a fallback chain: the first candidate that
+ * answers wins, so a slow-but-reliable browser tool earns last place rather
+ * than no place. Listing a tool here IS the authorization to call it — the desk
+ * calls it unattended, which is safe precisely because the model never names a
+ * tool.
+ */
+export const reportingSchema = z.object({
+  enabled: z.boolean().default(true),
+  /** Which filing kinds get reported. Tips only, by default. */
+  kinds: z.array(z.enum(STRINGER_KINDS)).default(['tip']),
+  max_rounds: z.number().int().positive().max(10).default(3),
+  max_fetches: z.number().int().positive().max(50).default(8),
+  timeout_seconds: z.number().int().positive().max(600).default(60),
+  /** After this, the reporter files what it has rather than holding the queue. */
+  wall_clock_seconds: z.number().int().positive().max(3600).default(480),
+  search: z.array(reportingToolSchema).default([]),
+  fetch: z.array(reportingToolSchema).default([]),
+})
+
 export const configSchema = z.object({
-  charter: z.string().min(1, 'the charter is the routing policy — it cannot be empty'),
+  charter: z.string().min(1, 'the charter is the placement policy — it cannot be empty'),
   mcp_endpoints: z.array(mcpEndpointSchema).default([]),
   voices: z.array(voiceSchema).default([]),
   stringers: z.array(stringerSchema).default([]),
-  targets: z.array(targetSchema).default([]),
+  outlets: z.array(outletSchema).default([]),
+  reporting: reportingSchema.optional(),
 })
 
 export type McpEndpoint = z.infer<typeof mcpEndpointSchema>
 export type Voice = z.infer<typeof voiceSchema>
 export type Stringer = z.infer<typeof stringerSchema>
-export type Target = z.infer<typeof targetSchema>
+export type Outlet = z.infer<typeof outletSchema>
+export type ReportingTool = z.infer<typeof reportingToolSchema>
+export type Reporting = z.infer<typeof reportingSchema>
 export type Config = z.infer<typeof configSchema>
 
 /**
@@ -81,7 +123,7 @@ export type Config = z.infer<typeof configSchema>
  * `chatId` are absent from their `required` lists — so an omitted destination
  * does not error, it silently posts to whatever default the bridge is
  * configured with. That is the worst failure this system can produce and it
- * needs no model involvement to happen, so a publish target that does not pin
+ * needs no model involvement to happen, so a publish outlet that does not pin
  * its destination as a literal must fail validation at save time.
  *
  * Verified against the live Beacons 2026-07-28; see IMPLEMENTATION.md 5.2.1.
@@ -109,42 +151,106 @@ function duplicates(ids: string[]): string[] {
   return [...dupes]
 }
 
-function checkTemplates(args: ArgsSpec, path: string, issues: ConfigIssue[]): void {
+function checkTemplates(
+  args: ArgsSpec,
+  path: string,
+  issues: ConfigIssue[],
+  roots: readonly string[] = TEMPLATE_ROOTS,
+): void {
   for (const [key, value] of Object.entries(args)) {
     if (typeof value !== 'string' || !isDerived(value)) continue
     for (const expr of templateExpressions(value)) {
       const root = expr.split(/[.[]/, 1)[0]
-      if (!root || !(TEMPLATE_ROOTS as readonly string[]).includes(root)) {
+      if (!root || !roots.includes(root)) {
         issues.push({
           path: `${path}.args.${key}`,
-          message: `unknown template root "${root ?? ''}" — expected one of ${TEMPLATE_ROOTS.join(', ')}`,
+          message: `unknown template root "${root ?? ''}" — expected one of ${roots.join(', ')}`,
         })
       }
     }
   }
 }
 
-function checkDestination(target: Target, issues: ConfigIssue[]): void {
-  const path = `targets.${target.id}`
-  if (target.role !== 'publish' || target.driver !== 'mcp') return
+/**
+ * A reporting tool is checked more tightly than an outlet: no authoring slots (a
+ * model never fills a reporting argument), only the `call` root, and the role's
+ * own variable must actually appear — a search tool that never interpolates
+ * `{{ call.query }}` would run the same constant search forever and look like
+ * it was working.
+ */
+function checkReportingTool(
+  tool: ReportingTool,
+  role: 'search' | 'fetch',
+  index: number,
+  endpointIds: Set<string>,
+  issues: ConfigIssue[],
+): void {
+  const path = `reporting.${role}[${index}]`
 
-  const key = target.destination_key ?? (target.tool ? KNOWN_DESTINATION_KEYS[target.tool] : undefined)
+  if (!endpointIds.has(tool.endpoint)) {
+    issues.push({ path: `${path}.endpoint`, message: `unknown endpoint "${tool.endpoint}"` })
+  }
+
+  for (const { key } of slotsOf(tool.args)) {
+    issues.push({
+      path: `${path}.args.${key}`,
+      message:
+        'a reporting argument cannot be an authoring slot — the desk fills these, not a model',
+    })
+  }
+
+  checkTemplates(tool.args, path, issues, CALL_TEMPLATE_ROOTS)
+
+  const variable = role === 'search' ? 'call.query' : 'call.url'
+  const usesVariable = Object.values(tool.args).some(
+    (value) =>
+      typeof value === 'string' &&
+      templateExpressions(value).some((expr) => expr.trim() === variable),
+  )
+  if (!usesVariable) {
+    issues.push({
+      path: `${path}.args`,
+      message: `a ${role} tool must interpolate "{{ ${variable} }}" somewhere in its arguments — without it every call would be identical`,
+    })
+  }
+}
+
+function checkReporting(config: Config, endpointIds: Set<string>, issues: ConfigIssue[]): void {
+  const reporting = config.reporting
+  if (!reporting || !reporting.enabled) return
+
+  if (reporting.search.length === 0 && reporting.fetch.length === 0) {
+    issues.push({
+      path: 'reporting',
+      message: 'reporting is enabled but declares no search or fetch tools — it could do nothing',
+    })
+  }
+
+  reporting.search.forEach((tool, i) => checkReportingTool(tool, 'search', i, endpointIds, issues))
+  reporting.fetch.forEach((tool, i) => checkReportingTool(tool, 'fetch', i, endpointIds, issues))
+}
+
+function checkDestination(outlet: Outlet, issues: ConfigIssue[]): void {
+  const path = `outlets.${outlet.id}`
+  if (outlet.role !== 'publish' || outlet.driver !== 'mcp') return
+
+  const key = outlet.destination_key ?? (outlet.tool ? KNOWN_DESTINATION_KEYS[outlet.tool] : undefined)
   if (!key) {
     issues.push({
       path,
       message:
-        `tool "${target.tool ?? '(none)'}" is not a known destination-bearing tool — ` +
+        `tool "${outlet.tool ?? '(none)'}" is not a known destination-bearing tool — ` +
         'declare `destination_key` explicitly so the destination can be checked. ' +
         'An unpinned destination silently posts to the bridge default.',
     })
     return
   }
 
-  const value = target.args[key]
+  const value = outlet.args[key]
   if (value === undefined) {
     issues.push({
       path: `${path}.args.${key}`,
-      message: `publish target must pin its destination "${key}" as a literal — omitting it posts to the bridge default`,
+      message: `publish outlet must pin its destination "${key}" as a literal — omitting it posts to the bridge default`,
     })
     return
   }
@@ -181,7 +287,7 @@ export function validateConfig(config: Config): ConfigIssue[] {
     ['mcp_endpoints', config.mcp_endpoints.map((e) => e.id)],
     ['voices', config.voices.map((p) => p.id)],
     ['stringers', config.stringers.map((s) => s.id)],
-    ['targets', config.targets.map((t) => t.id)],
+    ['outlets', config.outlets.map((t) => t.id)],
   ] as const) {
     for (const dupe of duplicates([...ids])) {
       issues.push({ path: label, message: `duplicate id "${dupe}"` })
@@ -191,30 +297,30 @@ export function validateConfig(config: Config): ConfigIssue[] {
   const voiceIds = new Set(config.voices.map((p) => p.id))
   const endpointIds = new Set(config.mcp_endpoints.map((e) => e.id))
 
-  for (const target of config.targets) {
-    const path = `targets.${target.id}`
+  for (const outlet of config.outlets) {
+    const path = `outlets.${outlet.id}`
 
-    if (target.voice !== undefined && !voiceIds.has(target.voice)) {
-      issues.push({ path: `${path}.voice`, message: `unknown voice "${target.voice}"` })
+    if (outlet.voice !== undefined && !voiceIds.has(outlet.voice)) {
+      issues.push({ path: `${path}.voice`, message: `unknown voice "${outlet.voice}"` })
     }
-    if (target.role === 'publish' && target.voice === undefined) {
-      issues.push({ path: `${path}.voice`, message: 'a publish target needs a voice to write in' })
+    if (outlet.role === 'publish' && outlet.voice === undefined) {
+      issues.push({ path: `${path}.voice`, message: 'a publish outlet needs a voice to write in' })
     }
 
-    if (target.driver === 'mcp') {
-      if (!target.tool) {
-        issues.push({ path: `${path}.tool`, message: 'an mcp target needs a tool' })
+    if (outlet.driver === 'mcp') {
+      if (!outlet.tool) {
+        issues.push({ path: `${path}.tool`, message: 'an mcp outlet needs a tool' })
       }
-      if (!target.endpoint) {
-        issues.push({ path: `${path}.endpoint`, message: 'an mcp target needs an endpoint' })
-      } else if (!endpointIds.has(target.endpoint)) {
-        issues.push({ path: `${path}.endpoint`, message: `unknown endpoint "${target.endpoint}"` })
+      if (!outlet.endpoint) {
+        issues.push({ path: `${path}.endpoint`, message: 'an mcp outlet needs an endpoint' })
+      } else if (!endpointIds.has(outlet.endpoint)) {
+        issues.push({ path: `${path}.endpoint`, message: `unknown endpoint "${outlet.endpoint}"` })
       }
     }
 
-    const slots = slotsOf(target.args)
-    if (target.role === 'publish' && slots.length === 0) {
-      issues.push({ path: `${path}.args`, message: 'a publish target needs at least one authoring slot' })
+    const slots = slotsOf(outlet.args)
+    if (outlet.role === 'publish' && slots.length === 0) {
+      issues.push({ path: `${path}.args`, message: 'a publish outlet needs at least one authoring slot' })
     }
     const primaries = slots.filter(({ def }) => def.primary)
     if (primaries.length > 1) {
@@ -230,9 +336,11 @@ export function validateConfig(config: Config): ConfigIssue[] {
       })
     }
 
-    checkTemplates(target.args, path, issues)
-    checkDestination(target, issues)
+    checkTemplates(outlet.args, path, issues)
+    checkDestination(outlet, issues)
   }
+
+  checkReporting(config, endpointIds, issues)
 
   return issues
 }

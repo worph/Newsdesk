@@ -7,7 +7,16 @@ import { fileURLToPath } from 'node:url'
  */
 const cache = new Map<string, string>()
 
-export type PromptName = 'managing-editor' | 'writer' | 'copy-desk'
+export type PromptName =
+  | 'managing-editor'
+  | 'writer'
+  | 'copy-desk'
+  /** What to look up next, once per round of the reporting loop. */
+  | 'reporter-steer'
+  /** The dossier, written once from everything the desk retrieved. */
+  | 'reporter-file'
+  /** Helping an editor shape a tip before it is filed. */
+  | 'tip-desk'
 
 export function loadPrompt(name: PromptName): string {
   const cached = cache.get(name)

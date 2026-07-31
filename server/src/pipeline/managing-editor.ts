@@ -12,9 +12,10 @@ import {
   managingEditorShapeHint,
   type ManagingEditorResult,
 } from '../schema/managing-editor.js'
+import { renderDossier, type Dossier } from './reporter.js'
 
 /**
- * One inference call per submission: is there a story, have we told it, where
+ * One inference call per filing: is there a story, have we told it, where
  * does it run. The result becomes rows — never an action — and a human stands
  * between it and anything leaving the building.
  *
@@ -26,7 +27,7 @@ export const COMPARISON_WINDOW_DAYS = 30
 
 export interface ManagingEditorContext {
   prompt: string
-  targetIds: string[]
+  outletIds: string[]
   knownStoryIds: Set<string>
 }
 
@@ -37,28 +38,28 @@ function voiceSummary(db: Db, voiceId: string | null): string | undefined {
   return `${voice.tone}; for ${voice.audience}`
 }
 
-function renderTargets(db: Db): { text: string; ids: string[] } {
-  const targets = db.select().from(schema.targets).where(eq(schema.targets.enabled, true)).all()
+function renderOutlets(db: Db): { text: string; ids: string[] } {
+  const outlets = db.select().from(schema.outlets).where(eq(schema.outlets.enabled, true)).all()
 
-  if (targets.length === 0) {
-    return { text: '(no destinations are configured — propose no routes)', ids: [] }
+  if (outlets.length === 0) {
+    return { text: '(no destinations are configured — propose no placements)', ids: [] }
   }
 
-  const text = targets
-    .map((target) => {
-      const voice = voiceSummary(db, target.voiceId)
+  const text = outlets
+    .map((outlet) => {
+      const voice = voiceSummary(db, outlet.voiceId)
       return [
-        `### ${target.id}`,
-        `name: ${target.name}`,
-        `role: ${target.role}`,
+        `### ${outlet.id}`,
+        `name: ${outlet.name}`,
+        `role: ${outlet.role}`,
         ...(voice ? [`voice: ${voice}`] : []),
         '',
-        target.description.trim(),
+        outlet.description.trim(),
       ].join('\n')
     })
     .join('\n\n')
 
-  return { text, ids: targets.map((t) => t.id) }
+  return { text, ids: outlets.map((t) => t.id) }
 }
 
 function renderRecentStories(db: Db, windowDays: number): { text: string; ids: Set<string> } {
@@ -89,18 +90,44 @@ function renderRecentStories(db: Db, windowDays: number): { text: string; ids: S
   return { text, ids: new Set(recent.map((s) => s.id)) }
 }
 
+/**
+ * What the managing editor actually reads.
+ *
+ * A dossier that will not parse falls back to the filing as written, because a
+ * corrupt blob must not cost us the tip. The dossier is rendered rather than
+ * pasted as JSON so its sourced/recall split survives into the prompt — the
+ * managing editor has to be able to tell a reported claim from the desk's
+ * unverified memory before it decides there is a story.
+ */
+function renderFiling(filing: { considered: string | null; text: string; dossier?: string | null }): string {
+  if (filing.dossier) {
+    try {
+      return renderDossier(JSON.parse(filing.dossier) as Dossier)
+    } catch {
+      // Fall through to the filing as written.
+    }
+  }
+  return filing.considered ?? filing.text
+}
+
 export function buildManagingEditorContext(
   db: Db,
-  submission: { id: string; stringerId: string; considered: string | null; text: string },
+  filing: {
+    id: string
+    stringerId: string
+    considered: string | null
+    text: string
+    dossier?: string | null
+  },
   windowDays = COMPARISON_WINDOW_DAYS,
 ): ManagingEditorContext {
-  const stringer = db.select().from(schema.stringers).where(eq(schema.stringers.id, submission.stringerId)).get()
+  const stringer = db.select().from(schema.stringers).where(eq(schema.stringers.id, filing.stringerId)).get()
   const charterRow = db.select().from(schema.charter).orderBy(desc(schema.charter.id)).limit(1).get()
-  const targets = renderTargets(db)
+  const outlets = renderOutlets(db)
   const recent = renderRecentStories(db, windowDays)
 
   const stringerLines = [
-    `id: ${submission.stringerId}`,
+    `id: ${filing.stringerId}`,
     ...(stringer ? [`name: ${stringer.name}`, `kind: ${stringer.kind}`] : []),
     ...(stringer?.hint
       ? [
@@ -111,22 +138,24 @@ export function buildManagingEditorContext(
   ].join('\n')
 
   const prompt = fillPrompt(loadPrompt('managing-editor'), {
-    CHARTER: charterRow?.text.trim() ?? '(no charter written yet — do not route anything)',
-    TARGETS: targets.text,
+    CHARTER: charterRow?.text.trim() ?? '(no charter written yet — do not placement anything)',
+    OUTLETS: outlets.text,
     STRINGER: stringerLines,
     WINDOW_DAYS: String(windowDays),
     RECENT_STORIES: recent.text,
-    // The trimmed slice is what the managing editor sees. Falling back to the whole
-    // text would silently undo the watermark on a stringer we misread.
-    SUBMISSION: submission.considered ?? submission.text,
+    // A reported filing is read as its dossier, which is what the desk went and
+    // found rather than what arrived. Otherwise the trimmed slice: falling back
+    // to the whole text would silently undo the watermark on a stringer we
+    // misread.
+    FILING: renderFiling(filing),
   })
 
-  return { prompt, targetIds: targets.ids, knownStoryIds: recent.ids }
+  return { prompt, outletIds: outlets.ids, knownStoryIds: recent.ids }
 }
 
 export interface AppliedResult {
   storyIds: string[]
-  routed: number
+  placed: number
   dropped: number
   outcome: string
 }
@@ -147,12 +176,12 @@ export interface ApplyOptions {
 
 export function applyManagingEditorResult(
   db: Db,
-  submissionId: string,
+  filingId: string,
   result: ManagingEditorResult,
   options: ApplyOptions = {},
 ): AppliedResult {
   const storyIds: string[] = []
-  let routed = 0
+  let placed = 0
   let dropped = 0
 
   db.transaction((tx) => {
@@ -160,21 +189,21 @@ export function applyManagingEditorResult(
       const id = randomUUID()
       const isDuplicate = story.verdict === 'DUPLICATE'
       const needsContext = Boolean(story.needs_context)
-      const hasRoutes = story.routes.length > 0
+      const hasPlacements = story.placements.length > 0
 
-      // A duplicate is terminal. Otherwise a story with no routes is spiked —
+      // A duplicate is terminal. Otherwise a story with no placements is spiked —
       // that IS the newsworthiness gate, not a separate mechanism.
       const status = isDuplicate
         ? 'DROPPED'
         : needsContext
           ? 'NEEDS_CONTEXT'
-          : hasRoutes
-            ? 'ROUTED'
+          : hasPlacements
+            ? 'PLACED'
             : 'DROPPED'
 
       const dropReason = isDuplicate
         ? (story.dedup_reason ?? 'duplicate of an earlier story')
-        : !hasRoutes && !needsContext
+        : !hasPlacements && !needsContext
           ? 'no destination clears the bar for this story'
           : null
 
@@ -194,11 +223,11 @@ export function applyManagingEditorResult(
           dropReason,
           // Kept verbatim so the override diff — what was proposed versus what
           // the editor decided — survives any later edit to the publications.
-          proposedRoutes: JSON.stringify(story.routes),
+          proposedPlacements: JSON.stringify(story.placements),
         })
         .run()
 
-      tx.insert(schema.storySubmissions).values({ storyId: id, submissionId }).run()
+      tx.insert(schema.storyFilings).values({ storyId: id, filingId }).run()
       storyIds.push(id)
 
       // Redundancy across sources is the payoff for dropping key-based dedup:
@@ -206,8 +235,8 @@ export function applyManagingEditorResult(
       // cites two sources and is better founded than either alone. The dropped
       // row above still exists, so the match stays visible in the spiked view.
       if (isDuplicate && story.related_story_id) {
-        tx.insert(schema.storySubmissions)
-          .values({ storyId: story.related_story_id, submissionId })
+        tx.insert(schema.storyFilings)
+          .values({ storyId: story.related_story_id, filingId })
           .onConflictDoNothing()
           .run()
       }
@@ -217,26 +246,26 @@ export function applyManagingEditorResult(
       }
 
       // A duplicate proposes nothing: it is already told. A NEEDS_CONTEXT
-      // story keeps its routes so the editor can release it once answered.
+      // story keeps its placements so the editor can release it once answered.
       if (!isDuplicate) {
-        for (const route of story.routes) {
+        for (const placement of story.placements) {
           const publicationId = randomUUID()
           tx.insert(schema.publications)
             .values({
               id: publicationId,
               storyId: id,
-              targetId: route.target_id,
+              outletId: placement.outlet_id,
               status: 'PROPOSED',
               origin: 'managing-editor',
-              routeReason: route.reason,
-              angle: route.angle ?? null,
+              placementReason: placement.reason,
+              angle: placement.angle ?? null,
               slots: null,
               payload: null,
             })
             .run()
           // A story held for context is not ready to be written yet.
           if (!needsContext) options.enqueueWriter?.(publicationId)
-          routed++
+          placed++
         }
       }
     }
@@ -256,12 +285,12 @@ export function applyManagingEditorResult(
         message: `"${story.title}" duplicates ${story.related_story_id ?? 'an earlier story'}`,
         detail: { reason: story.dedup_reason, relatedStoryId: story.related_story_id },
       })
-    } else if (story.routes.length === 0 && !story.needs_context) {
+    } else if (story.placements.length === 0 && !story.needs_context) {
       logEvent(db, {
         level: 'info',
         code: 'STORY_SPIKED',
         storyId: id,
-        message: `"${story.title}" was opened but routed nowhere`,
+        message: `"${story.title}" was opened but placed nowhere`,
         detail: { summary: story.summary },
       })
     } else {
@@ -269,8 +298,8 @@ export function applyManagingEditorResult(
         level: 'info',
         code: 'STORY_OPENED',
         storyId: id,
-        message: `"${story.title}" → ${story.routes.map((r) => r.target_id).join(', ') || 'held for context'}`,
-        detail: { verdict: story.verdict, routes: story.routes },
+        message: `"${story.title}" → ${story.placements.map((r) => r.outlet_id).join(', ') || 'held for context'}`,
+        detail: { verdict: story.verdict, placements: story.placements },
       })
     }
   }
@@ -278,42 +307,42 @@ export function applyManagingEditorResult(
   const outcome =
     result.stories.length === 0
       ? `no story — ${result.no_story_reason ?? 'nothing in this filing'}`
-      : `${result.stories.length} story/stories: ${routed} route(s) proposed, ${dropped} spiked`
+      : `${result.stories.length} story/stories: ${placed} placement(s) proposed, ${dropped} spiked`
 
-  return { storyIds, routed, dropped, outcome }
+  return { storyIds, placed, dropped, outcome }
 }
 
-/** Run the managing editor over one submission and record the outcome. */
-export async function assignSubmission(
+/** Run the managing editor over one filing and record the outcome. */
+export async function assignFiling(
   db: Db,
   driver: InferenceDriver,
-  submissionId: string,
+  filingId: string,
   options: ApplyOptions & { windowDays?: number } = {},
 ): Promise<AppliedResult> {
   const windowDays = options.windowDays ?? COMPARISON_WINDOW_DAYS
-  const submission = db
+  const filing = db
     .select()
-    .from(schema.submissions)
-    .where(eq(schema.submissions.id, submissionId))
+    .from(schema.filings)
+    .where(eq(schema.filings.id, filingId))
     .get()
 
-  if (!submission) throw new Error(`submission "${submissionId}" not found`)
+  if (!filing) throw new Error(`filing "${filingId}" not found`)
 
-  const context = buildManagingEditorContext(db, submission, windowDays)
+  const context = buildManagingEditorContext(db, filing, windowDays)
 
   let result: ManagingEditorResult
   try {
     result = await runStructured(db, driver, {
       purpose: 'managing-editor',
-      refId: submissionId,
+      refId: filingId,
       prompt: context.prompt,
-      schema: managingEditorResultSchema(context.targetIds),
-      shapeHint: managingEditorShapeHint(context.targetIds),
+      schema: managingEditorResultSchema(context.outletIds),
+      shapeHint: managingEditorShapeHint(context.outletIds),
     })
   } catch (err) {
-    db.update(schema.submissions)
+    db.update(schema.filings)
       .set({ status: 'FAILED', outcome: err instanceof Error ? err.message : String(err) })
-      .where(eq(schema.submissions.id, submissionId))
+      .where(eq(schema.filings.id, filingId))
       .run()
     throw err
   }
@@ -326,7 +355,7 @@ export async function assignSubmission(
       level: 'warn',
       code: 'MANAGING_EDITOR_VERDICT_UNLINKED',
       message: `downgraded ${problems.length} unverifiable verdict(s) to NEW`,
-      detail: { submissionId, problems },
+      detail: { filingId, problems },
     })
     result = {
       ...result,
@@ -344,11 +373,11 @@ export async function assignSubmission(
     }
   }
 
-  const applied = applyManagingEditorResult(db, submissionId, result, options)
+  const applied = applyManagingEditorResult(db, filingId, result, options)
 
-  db.update(schema.submissions)
+  db.update(schema.filings)
     .set({ status: 'PROCESSED', outcome: applied.outcome })
-    .where(eq(schema.submissions.id, submissionId))
+    .where(eq(schema.filings.id, filingId))
     .run()
 
   return applied
@@ -357,7 +386,7 @@ export async function assignSubmission(
 /** Registered against the queue's `direct` kind. */
 export function managingEditorHandler(driver: () => InferenceDriver, options: ApplyOptions = {}) {
   return async (db: Db, refId: string): Promise<void> => {
-    await assignSubmission(db, driver(), refId, options)
+    await assignFiling(db, driver(), refId, options)
   }
 }
 

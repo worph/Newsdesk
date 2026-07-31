@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api, type SubmissionRow } from '../api'
+import { api, type FilingRow } from '../api'
 
 /**
- * Raw submissions as filed, including the ones that yielded nothing. This is
+ * Raw filings as filed, including the ones that yielded nothing. This is
  * the screen that answers "did the stringer even file?" — the question the
  * previous pipeline could never answer, because silence and nothing-happened
  * looked identical.
@@ -28,12 +28,12 @@ function KindBadge({ kind }: { kind: string }) {
 
 function Detail({ id }: { id: string }) {
   const { data, isPending } = useQuery({
-    queryKey: ['submission', id],
-    queryFn: () => api.getSubmission(id),
+    queryKey: ['filing', id],
+    queryFn: () => api.getFiling(id),
   })
 
   if (isPending) return <p className="px-4 py-3 text-sm text-desk-500">Loading…</p>
-  const submission = data!.submission
+  const filing = data!.filing
 
   return (
     <div className="space-y-4 border-t border-desk-200 px-4 py-4 dark:border-desk-800">
@@ -42,13 +42,13 @@ function Detail({ id }: { id: string }) {
         <p className="text-xs text-desk-500">
           The slice actually handed to the managing editor, after the watermark or snapshot diff.
         </p>
-        {submission.considered ? (
+        {filing.considered ? (
           <pre className="max-h-72 overflow-auto rounded-md bg-desk-100 p-3 font-mono text-xs whitespace-pre-wrap dark:bg-desk-900">
-            {submission.considered}
+            {filing.considered}
           </pre>
         ) : (
           <p className="rounded-md bg-desk-100 px-3 py-2 text-sm text-desk-500 dark:bg-desk-900">
-            Nothing — {submission.outcome}
+            Nothing — {filing.outcome}
           </p>
         )}
       </section>
@@ -56,15 +56,15 @@ function Detail({ id }: { id: string }) {
       <section className="space-y-1.5">
         <h3 className="text-xs font-medium tracking-wide text-desk-500 uppercase">As filed</h3>
         <pre className="max-h-72 overflow-auto rounded-md bg-desk-100 p-3 font-mono text-xs whitespace-pre-wrap dark:bg-desk-900">
-          {submission.text}
+          {filing.text}
         </pre>
       </section>
 
-      {submission.refs && (
+      {filing.refs && (
         <section className="space-y-1.5">
           <h3 className="text-xs font-medium tracking-wide text-desk-500 uppercase">Refs</h3>
           <pre className="overflow-auto rounded-md bg-desk-100 p-3 font-mono text-xs dark:bg-desk-900">
-            {JSON.stringify(submission.refs, null, 2)}
+            {JSON.stringify(filing.refs, null, 2)}
           </pre>
         </section>
       )}
@@ -72,7 +72,7 @@ function Detail({ id }: { id: string }) {
   )
 }
 
-function Row({ row }: { row: SubmissionRow }) {
+function Row({ row }: { row: FilingRow }) {
   const [open, setOpen] = useState(false)
   const yielded = row.consideredChars > 0
 
@@ -105,14 +105,14 @@ function Row({ row }: { row: SubmissionRow }) {
 
 export function Wire() {
   const { data, isPending } = useQuery({
-    queryKey: ['submissions'],
-    queryFn: () => api.listSubmissions({ limit: 100 }),
+    queryKey: ['filings'],
+    queryFn: () => api.listFilings({ limit: 100 }),
     refetchInterval: 30_000,
   })
 
   if (isPending) return <div className="px-6 pb-10 text-sm text-desk-500">Loading…</div>
 
-  const rows = data!.submissions
+  const rows = data!.filings
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 px-4 pb-16 md:px-6">
@@ -128,7 +128,7 @@ export function Wire() {
         <div className="rounded-lg border border-dashed border-desk-300 px-4 py-10 text-center dark:border-desk-700">
           <p className="text-sm text-desk-500">Nothing filed yet.</p>
           <p className="mt-1 text-xs text-desk-500">
-            Point a stringer at <code className="font-mono">POST /api/v1/submissions</code> with the ingest
+            Point a stringer at <code className="font-mono">POST /api/v1/filings</code> with the ingest
             token from Configuration.
           </p>
         </div>

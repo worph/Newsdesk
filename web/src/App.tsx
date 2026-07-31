@@ -39,10 +39,7 @@ export function App() {
         <Route path="/config" element={<Config />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/wire" element={<Wire />} />
-        <Route path="/inbox" element={<Navigate to="/wire" replace />} />
         <Route path="/tips" element={<Tips />} />
-        {/* the PWA share target and older bookmarks still point at /ideas */}
-        <Route path="/ideas" element={<Navigate to="/tips" replace />} />
         <Route path="*" element={<Navigate to="/queue" replace />} />
       </Routes>
     </Layout>

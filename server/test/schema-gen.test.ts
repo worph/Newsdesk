@@ -96,71 +96,71 @@ describe('slot spec as a validator', () => {
 })
 
 describe('managing editor vocabulary', () => {
-  const targets = ['discord-test', 'nextcloud-internal']
+  const outlets = ['discord-test', 'nextcloud-internal']
 
   it('accepts a well-formed result', () => {
-    const parsed = managingEditorResultSchema(targets).safeParse({
+    const parsed = managingEditorResultSchema(outlets).safeParse({
       stories: [
         {
           title: 'Immich 1.142.0',
           summary: 'Point release.',
           verdict: 'NEW',
-          routes: [{ target_id: 'discord-test', reason: 'self-hosters run it' }],
+          placements: [{ outlet_id: 'discord-test', reason: 'self-hosters run it' }],
         },
       ],
     })
     expect(parsed.success).toBe(true)
   })
 
-  it('refuses a route to a destination that does not exist', () => {
-    // The enum is generated from live targets, so an unknown destination is
+  it('refuses a placement to a destination that does not exist', () => {
+    // The enum is generated from live outlets, so an unknown destination is
     // impossible rather than merely validated later.
-    const parsed = managingEditorResultSchema(targets).safeParse({
+    const parsed = managingEditorResultSchema(outlets).safeParse({
       stories: [
         {
           title: 'T',
           summary: 'S',
           verdict: 'NEW',
-          routes: [{ target_id: 'telegram-invented', reason: 'why not' }],
+          placements: [{ outlet_id: 'telegram-invented', reason: 'why not' }],
         },
       ],
     })
     expect(parsed.success).toBe(false)
   })
 
-  it('treats zero routes as valid — that is the newsworthiness gate', () => {
-    const parsed = managingEditorResultSchema(targets).safeParse({
-      stories: [{ title: 'T', summary: 'S', verdict: 'NEW', routes: [] }],
+  it('treats zero placements as valid — that is the newsworthiness gate', () => {
+    const parsed = managingEditorResultSchema(outlets).safeParse({
+      stories: [{ title: 'T', summary: 'S', verdict: 'NEW', placements: [] }],
     })
     expect(parsed.success).toBe(true)
   })
 
   it('accepts an empty result with a reason', () => {
-    const parsed = managingEditorResultSchema(targets).safeParse({
+    const parsed = managingEditorResultSchema(outlets).safeParse({
       stories: [],
       no_story_reason: 'a sponsored deal post, excluded by the charter',
     })
     expect(parsed.success).toBe(true)
   })
 
-  it('requires a reason on every route', () => {
-    const parsed = managingEditorResultSchema(targets).safeParse({
-      stories: [{ title: 'T', summary: 'S', verdict: 'NEW', routes: [{ target_id: 'discord-test' }] }],
+  it('requires a reason on every placement', () => {
+    const parsed = managingEditorResultSchema(outlets).safeParse({
+      stories: [{ title: 'T', summary: 'S', verdict: 'NEW', placements: [{ outlet_id: 'discord-test' }] }],
     })
     expect(parsed.success).toBe(false)
   })
 
-  it('generates the tool vocabulary with target_id as a live enum', () => {
+  it('generates the tool vocabulary with outlet_id as a live enum', () => {
     const tools = managingEditorTools(
-      targets.map((id) => ({ id, name: id, description: 'd', role: 'publish' })),
+      outlets.map((id) => ({ id, name: id, description: 'd', role: 'publish' })),
     )
-    const route = tools.find((t) => t.name === 'propose_route')
-    const props = route?.parameters.properties as Record<string, { enum?: string[] }>
-    expect(props.target_id?.enum).toEqual(targets)
+    const placement = tools.find((t) => t.name === 'propose_placement')
+    const props = placement?.parameters.properties as Record<string, { enum?: string[] }>
+    expect(props.outlet_id?.enum).toEqual(outlets)
   })
 
-  it('names the live targets in the text-driver hint', () => {
-    expect(managingEditorShapeHint(targets)).toContain('"discord-test" | "nextcloud-internal"')
+  it('names the live outlets in the text-driver hint', () => {
+    expect(managingEditorShapeHint(outlets)).toContain('"discord-test" | "nextcloud-internal"')
   })
 })
 
@@ -168,7 +168,7 @@ describe('verdict links', () => {
   const known = new Set(['story-a', 'story-b'])
   const result = (over: Record<string, unknown>) =>
     managingEditorResultSchema(['discord-test']).parse({
-      stories: [{ title: 'T', summary: 'S', verdict: 'NEW', routes: [], ...over }],
+      stories: [{ title: 'T', summary: 'S', verdict: 'NEW', placements: [], ...over }],
     })
 
   it('passes a NEW story with no link', () => {

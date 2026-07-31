@@ -28,7 +28,7 @@ function issuesReply(issues: ConfigIssue[]) {
   return { error: 'configuration rejected', issues }
 }
 
-export interface RouteOptions extends ReceiveOptions {
+export interface PlacementOptions extends ReceiveOptions {
   enqueuePublish?: (publicationId: string) => void
   enqueueWriter?: (publicationId: string) => void
   driver?: () => InferenceDriver
@@ -40,7 +40,7 @@ export function registerRoutes(
   app: FastifyInstance,
   db: Db,
   version: string,
-  receiveOptions: RouteOptions = {},
+  receiveOptions: PlacementOptions = {},
 ): void {
   registerIngestRoutes(app, db, receiveOptions)
   registerStoryRoutes(app, db, receiveOptions.enqueueManagingEditor, receiveOptions.enqueueWriter)

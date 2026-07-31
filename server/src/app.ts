@@ -7,7 +7,7 @@ import { registerRoutes } from './api/routes.js'
 import { GATE_TRUSTED } from './auth.js'
 import { createGateCheck, type GateCheck } from './gate.js'
 import type { Db } from './db/index.js'
-import type { RouteOptions } from './api/routes.js'
+import type { PlacementOptions } from './api/routes.js'
 
 export const VERSION = '0.1.0'
 
@@ -17,7 +17,7 @@ export interface AppOptions {
   publicDir: string
   logLevel?: string
   /** Wires ingest and approval to the queue. Absent means nothing is enqueued. */
-  receiveOptions?: RouteOptions
+  receiveOptions?: PlacementOptions
   /**
    * Container name of the SSO gate in front of the desk. When set, a request
    * whose TCP peer is that container counts as authenticated and the desk's

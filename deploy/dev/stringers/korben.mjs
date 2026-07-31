@@ -16,7 +16,7 @@ import { parseFeed, toTimeline } from './rss.mjs'
 
 const NEWSDESK_URL = process.env.NEWSDESK_URL ?? 'http://localhost:8080'
 const TOKEN = process.env.NEWSDESK_INGEST_TOKEN ?? 'dev-ingest-token'
-const SOURCE_ID = process.env.SOURCE_ID ?? 'korben'
+const STRINGER_ID = process.env.STRINGER_ID ?? 'korben'
 const FEED_URL = process.env.FEED_URL ?? 'https://korben.info/feed'
 const INTERVAL_MS = Number(process.env.INTERVAL_SECONDS ?? 900) * 1000
 const MAX_ITEMS = Number(process.env.MAX_ITEMS ?? 15)
@@ -36,11 +36,11 @@ async function fileOnce() {
     return
   }
 
-  const filed = await fetch(`${NEWSDESK_URL}/api/v1/submissions`, {
+  const filed = await fetch(`${NEWSDESK_URL}/api/v1/filings`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
     body: JSON.stringify({
-      source_id: SOURCE_ID,
+      stringer_id: STRINGER_ID,
       kind: 'timeline',
       text: toTimeline(items, { maxItems: MAX_ITEMS }),
     }),
@@ -66,7 +66,7 @@ async function waitForDesk() {
   throw new Error(`newsdesk never became reachable at ${NEWSDESK_URL}`)
 }
 
-log(`starting — ${FEED_URL} → ${NEWSDESK_URL} as "${SOURCE_ID}" every ${INTERVAL_MS / 1000}s`)
+log(`starting — ${FEED_URL} → ${NEWSDESK_URL} as "${STRINGER_ID}" every ${INTERVAL_MS / 1000}s`)
 await waitForDesk()
 
 for (;;) {

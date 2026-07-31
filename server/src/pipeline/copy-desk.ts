@@ -61,14 +61,14 @@ export function buildCopyDeskPrompt(
   if (!publication) throw new Error(`publication "${publicationId}" not found`)
 
   const story = db.select().from(schema.stories).where(eq(schema.stories.id, publication.storyId)).get()
-  const target = db.select().from(schema.targets).where(eq(schema.targets.id, publication.targetId)).get()
-  if (!story || !target) throw new Error('story or target missing for this publication')
+  const outlet = db.select().from(schema.outlets).where(eq(schema.outlets.id, publication.outletId)).get()
+  if (!story || !outlet) throw new Error('story or outlet missing for this publication')
 
-  const args = JSON.parse(target.argsSpec) as ArgsSpec
+  const args = JSON.parse(outlet.argsSpec) as ArgsSpec
   const slots = publication.slots ? (JSON.parse(publication.slots) as Record<string, string>) : {}
 
-  const voice = target.voiceId
-    ? db.select().from(schema.voices).where(eq(schema.voices.id, target.voiceId)).get()
+  const voice = outlet.voiceId
+    ? db.select().from(schema.voices).where(eq(schema.voices.id, outlet.voiceId)).get()
     : undefined
 
   const history = db
@@ -82,7 +82,7 @@ export function buildCopyDeskPrompt(
     VOICE: voice
       ? [`tone: ${voice.tone}`, `audience: ${voice.audience}`, ...(voice.rules ? [voice.rules] : [])].join('\n')
       : '(no voice configured — keep the draft as it reads)',
-    TARGET: [`name: ${target.name}`, '', target.description.trim()].join('\n'),
+    OUTLET: [`name: ${outlet.name}`, '', outlet.description.trim()].join('\n'),
     STORY: [`title: ${story.title}`, ...(story.url ? [`url: ${story.url}`] : []), '', story.summary].join('\n'),
     SLOTS: renderSlots(args, slots),
     HISTORY: renderHistory(history.map((h) => ({ role: h.role as ChatTurn['role'], content: h.content }))),

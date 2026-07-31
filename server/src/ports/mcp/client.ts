@@ -4,7 +4,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 /**
  * One shared MCP client serves both the inference port and `mcp`-driver
- * targets. Endpoints are rows, so a deployment can point at a Beacon
+ * outlets. Endpoints are rows, so a deployment can point at a Beacon
  * aggregator, several Beacons, or a standalone server, with no code change.
  *
  * Connections are made per call and closed after. A pooled session would save
@@ -248,7 +248,7 @@ export interface Catalogue {
 }
 
 /**
- * Enumerate what an endpoint actually offers, in the shape the target editor
+ * Enumerate what an endpoint actually offers, in the shape the outlet editor
  * needs: endpoint → server → tool → argument schema.
  *
  * Discovery quality varies by endpoint. One Beacon returns full `inputSchema`

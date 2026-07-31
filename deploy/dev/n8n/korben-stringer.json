@@ -32,7 +32,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Fold every feed entry into ONE timeline submission.\n//\n// Each entry must begin with an ISO date: that is what lets Newsdesk trim the\n// window against this source's watermark. Everything in the window is filed —\n// a stringer does not judge newsworthiness, the charter does.\n\nconst stripTags = (html = '') =>\n  String(html).replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();\n\nconst entries = items\n  .map((item) => item.json)\n  .map((entry) => ({\n    title: stripTags(entry.title),\n    link: entry.link || entry.guid || '',\n    at: entry.isoDate || (entry.pubDate ? new Date(entry.pubDate).toISOString() : null),\n    summary: stripTags(entry.contentSnippet || entry.content || entry.description || ''),\n  }))\n  .filter((entry) => entry.title && entry.at)\n  .slice(0, 15);\n\nif (entries.length === 0) {\n  return [];\n}\n\nconst text = entries\n  .map((entry) => {\n    const summary = entry.summary ? `\\n  ${entry.summary.slice(0, 600)}` : '';\n    const link = entry.link ? `\\n  ${entry.link}` : '';\n    return `- ${entry.at} ${entry.title}${summary}${link}`;\n  })\n  .join('\\n');\n\nreturn [{ json: { source_id: 'korben', kind: 'timeline', text } }];"
+        "jsCode": "// Fold every feed entry into ONE timeline filing.\n//\n// Each entry must begin with an ISO date: that is what lets Newsdesk trim the\n// window against this stringer's watermark. Everything in the window is filed —\n// a stringer does not judge newsworthiness, the charter does.\n\nconst stripTags = (html = '') =>\n  String(html).replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();\n\nconst entries = items\n  .map((item) => item.json)\n  .map((entry) => ({\n    title: stripTags(entry.title),\n    link: entry.link || entry.guid || '',\n    at: entry.isoDate || (entry.pubDate ? new Date(entry.pubDate).toISOString() : null),\n    summary: stripTags(entry.contentSnippet || entry.content || entry.description || ''),\n  }))\n  .filter((entry) => entry.title && entry.at)\n  .slice(0, 15);\n\nif (entries.length === 0) {\n  return [];\n}\n\nconst text = entries\n  .map((entry) => {\n    const summary = entry.summary ? `\\n  ${entry.summary.slice(0, 600)}` : '';\n    const link = entry.link ? `\\n  ${entry.link}` : '';\n    return `- ${entry.at} ${entry.title}${summary}${link}`;\n  })\n  .join('\\n');\n\nreturn [{ json: { stringer_id: 'korben', kind: 'timeline', text } }];"
       },
       "id": "3a1f0f2e-0000-4000-8000-000000000003",
       "name": "Format as a timeline",
@@ -43,7 +43,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://api:8080/api/v1/submissions",
+        "url": "http://api:8080/api/v1/filings",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

@@ -14,7 +14,7 @@ import { StoryCard } from '../components/StoryCard'
 
 const FILTERS = [
   { key: 'all', label: 'All', status: undefined },
-  { key: 'awaiting', label: 'Awaiting', status: 'ROUTED' },
+  { key: 'awaiting', label: 'Awaiting', status: 'PLACED' },
   { key: 'spiked', label: 'Spiked', status: 'DROPPED' },
   { key: 'context', label: 'Needs context', status: 'NEEDS_CONTEXT' },
 ] as const

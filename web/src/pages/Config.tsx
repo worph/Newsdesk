@@ -80,8 +80,8 @@ export function Config() {
       <header className="space-y-1">
         <h1 className="text-xl font-semibold tracking-tight">Configuration</h1>
         <p className="text-sm text-desk-500">
-          The charter, voices, stringers and targets, as one document. Saving validates first — a publish
-          target that does not pin its destination is rejected, because an unpinned destination posts to
+          The charter, voices, stringers and outlets, as one document. Saving validates first — a publish
+          outlet that does not pin its destination is rejected, because an unpinned destination posts to
           the bridge default.
         </p>
       </header>
@@ -128,7 +128,7 @@ export function Config() {
         <h2 className="text-sm font-medium">Ingest token</h2>
         <p className="text-sm text-desk-500">
           Stringers present this as <code className="font-mono text-xs">Authorization: Bearer …</code> when
-          filing to <code className="font-mono text-xs">/api/v1/submissions</code>. It is separate from your
+          filing to <code className="font-mono text-xs">/api/v1/filings</code>. It is separate from your
           session and can be rotated.
         </p>
         <div className="flex flex-wrap items-center gap-2">

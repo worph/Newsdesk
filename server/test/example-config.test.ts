@@ -13,22 +13,22 @@ describe('the shipped example configuration', () => {
     const { config, issues } = parseConfig(yamlToConfig(readFileSync(examplePath, 'utf8')))
     expect(issues).toEqual([])
     expect(config.charter.length).toBeGreaterThan(0)
-    expect(config.targets.length).toBeGreaterThan(0)
+    expect(config.outlets.length).toBeGreaterThan(0)
     expect(config.voices.length).toBeGreaterThan(0)
     expect(config.stringers.length).toBeGreaterThan(0)
   })
 
-  it('pins a literal destination on every publish target', () => {
+  it('pins a literal destination on every publish outlet', () => {
     const { config } = parseConfig(yamlToConfig(readFileSync(examplePath, 'utf8')))
-    for (const target of config.targets.filter((t) => t.role === 'publish')) {
-      const key = target.destination_key ?? 'channelId'
-      expect(typeof target.args[key]).toBe('string')
+    for (const outlet of config.outlets.filter((t) => t.role === 'publish')) {
+      const key = outlet.destination_key ?? 'channelId'
+      expect(typeof outlet.args[key]).toBe('string')
     }
   })
 
   it('demonstrates all three argument forms, so the example teaches the model', () => {
     const { config } = parseConfig(yamlToConfig(readFileSync(examplePath, 'utf8')))
-    const args = config.targets[0]!.args
+    const args = config.outlets[0]!.args
     const kinds = Object.values(args).map((v) =>
       typeof v === 'object' && v !== null && 'slot' in v
         ? 'slot'

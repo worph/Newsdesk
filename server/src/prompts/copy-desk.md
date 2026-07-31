@@ -13,7 +13,7 @@ The draft is written in this voice. Keep it.
 
 ## The destination
 
-{{TARGET}}
+{{OUTLET}}
 
 ---
 

@@ -11,7 +11,7 @@ import { Badge, when } from '../components/StoryCard'
  * managing editor's reason and angle beside it, and exactly what will be sent.
  *
  * Approve is the only path to the wire, and it is per destination — a story
- * running in two places is two independent decisions, which the target strip
+ * running in two places is two independent decisions, which the outlet strip
  * at the top has to make unmistakable.
  */
 
@@ -120,7 +120,7 @@ export function Review() {
     return <div className="px-6 pb-10 text-sm text-desk-500">Loading…</div>
   }
 
-  const { publication, story, target, slotSpec, siblings } = data
+  const { publication, story, outlet, slotSpec, siblings } = data
   const settled = publication.status === 'PUBLISHED' || publication.status === 'REJECTED'
   const dirty = JSON.stringify(draft) !== JSON.stringify(publication.slots)
   const secondary = Object.entries(slotSpec).filter(([key]) => key !== primaryKey)
@@ -134,7 +134,7 @@ export function Review() {
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge>{publication.status.toLowerCase().replace(/_/g, ' ')}</Badge>
-          {publication.origin === 'human' && <Badge>route added by you</Badge>}
+          {publication.origin === 'human' && <Badge>placement added by you</Badge>}
           {publication.publishedAt && (
             <span className="text-xs text-desk-500">sent {when(publication.publishedAt)}</span>
           )}
@@ -143,7 +143,7 @@ export function Review() {
         <p className="text-sm text-desk-500">{story.summary}</p>
       </header>
 
-      {/* Several routes means several independent decisions. Say so. */}
+      {/* Several placements means several independent decisions. Say so. */}
       {siblings.length > 1 && (
         <div className="space-y-1.5 rounded-lg border border-desk-200 px-3 py-2.5 dark:border-desk-800">
           <p className="text-xs text-desk-500">
@@ -160,7 +160,7 @@ export function Review() {
                     : 'bg-desk-100 text-desk-600 dark:bg-desk-900 dark:text-desk-400'
                 }`}
               >
-                {sibling.targetId} · {sibling.status.toLowerCase()}
+                {sibling.outletId} · {sibling.status.toLowerCase()}
               </button>
             ))}
           </div>
@@ -169,9 +169,9 @@ export function Review() {
 
       <section className="space-y-1.5 rounded-lg bg-desk-100 px-3 py-2.5 dark:bg-desk-900">
         <h2 className="text-xs font-medium tracking-wide text-desk-500 uppercase">
-          Why here — {target.name}
+          Why here — {outlet.name}
         </h2>
-        {publication.routeReason && <p className="text-sm">{publication.routeReason}</p>}
+        {publication.placementReason && <p className="text-sm">{publication.placementReason}</p>}
         {publication.angle && (
           <p className="text-xs text-desk-600 dark:text-desk-400">
             <strong className="font-medium">Angle:</strong> {publication.angle}
@@ -267,7 +267,7 @@ export function Review() {
           title={dirty ? 'Save your edits first — approval freezes what is sent' : undefined}
           className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
         >
-          {approve.isPending ? 'Approving…' : `Approve for ${target.name}`}
+          {approve.isPending ? 'Approving…' : `Approve for ${outlet.name}`}
         </button>
 
         <button

@@ -28,7 +28,7 @@ function seedDraft(db: Db): string {
       id: storyId,
       title: 'Immich v1.142.0',
       summary: 'A point release adding Intel QSV transcoding.',
-      status: 'ROUTED',
+      status: 'PLACED',
       dedupVerdict: 'NEW',
     })
     .run()
@@ -37,7 +37,7 @@ function seedDraft(db: Db): string {
     .values({
       id: publicationId,
       storyId,
-      targetId: 'discord-test',
+      outletId: 'discord-test',
       status: 'AWAITING_APPROVAL',
       origin: 'managing-editor',
       slots: JSON.stringify({ title: 'Immich 1.142.0', description: 'Adds Intel QSV transcoding.' }),

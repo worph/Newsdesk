@@ -1,14 +1,16 @@
 import { randomBytes } from 'node:crypto'
 import { buildApp, VERSION } from './app.js'
 import { setPassword } from './auth.js'
-import { importConfigFileOnFirstBoot, isUnconfigured } from './config/store.js'
+import { importConfigFileOnFirstBoot, isUnconfigured, readReporting } from './config/store.js'
 import { openDb, runMigrations } from './db/index.js'
 import { loadEnv } from './env.js'
 import { managingEditorHandler } from './pipeline/managing-editor.js'
 import { enqueue, JobQueue } from './pipeline/queue.js'
+import { reporterHandler } from './pipeline/reporter.js'
 import { writerHandler } from './pipeline/writer.js'
 import { publishHandler } from './ports/delivery/index.js'
 import { createInferenceDriver } from './ports/inference/index.js'
+import { createMcpReportingTools } from './ports/reporting/tools.js'
 import { getOrCreateSecret, getSetting, SETTING, setSetting } from './settings.js'
 
 async function main(): Promise<void> {
@@ -34,6 +36,20 @@ async function main(): Promise<void> {
     enqueue(db, 'write', publicationId)
   }
 
+  const enqueueManagingEditor = (filingId: string) => {
+    enqueue(db, 'assign', filingId)
+  }
+
+  // Read per call rather than captured: the reporting block is edited from the
+  // Config screen, and a desk that had to be restarted to pick up a new search
+  // tool would be a desk nobody reconfigures.
+  const reporting = () => readReporting(db)
+  const reportingTools = () => {
+    const config = reporting()
+    return config?.enabled ? createMcpReportingTools(db, config) : undefined
+  }
+
+  queue.register('report', reporterHandler(driver, reportingTools, reporting, { enqueueManagingEditor }))
   queue.register('assign', managingEditorHandler(driver, { enqueueWriter }))
   queue.register('write', writerHandler(driver))
   queue.register('publish', publishHandler())
@@ -45,8 +61,15 @@ async function main(): Promise<void> {
     logLevel: env.logLevel,
     trustedGate: env.trustedGate,
     receiveOptions: {
-      enqueueManagingEditor: (submissionId) => {
-        enqueue(db, 'assign', submissionId)
+      enqueueManagingEditor,
+      enqueueReporter: (filingId) => {
+        enqueue(db, 'report', filingId)
+      },
+      get reportedKinds() {
+        // A getter so switching reporting on in the Config screen takes effect
+        // for the next filing rather than the next restart.
+        const config = reporting()
+        return config?.enabled ? config.kinds : []
       },
       enqueuePublish: (publicationId) => {
         enqueue(db, 'publish', publicationId)
@@ -79,7 +102,7 @@ async function main(): Promise<void> {
   }
 
   if (isUnconfigured(db)) {
-    app.log.warn('no configuration yet — open the Config screen and write a charter and at least one target')
+    app.log.warn('no configuration yet — open the Config screen and write a charter and at least one outlet')
   }
 
   setSetting(db, 'last_boot', new Date().toISOString())

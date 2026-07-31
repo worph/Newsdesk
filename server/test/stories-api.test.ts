@@ -19,7 +19,7 @@ async function seedStory(over: Partial<typeof schema.stories.$inferInsert> = {})
       id,
       title: 'Immich v1.142.0',
       summary: 'A point release.',
-      status: 'ROUTED',
+      status: 'PLACED',
       dedupVerdict: 'NEW',
       ...over,
     })
@@ -27,9 +27,9 @@ async function seedStory(over: Partial<typeof schema.stories.$inferInsert> = {})
   return id
 }
 
-function seedSubmission(): string {
+function seedFiling(): string {
   const id = randomUUID()
-  db.insert(schema.submissions)
+  db.insert(schema.filings)
     .values({ id, stringerId: 'korben', kind: 'report', text: 'filed', considered: 'filed', status: 'PROCESSED' })
     .run()
   return id
@@ -68,33 +68,33 @@ describe('GET /stories', () => {
     expect(response.statusCode).toBe(401)
   })
 
-  it('lists stories with their routes and source counts', async () => {
+  it('lists stories with their placements and source counts', async () => {
     const storyId = await seedStory()
-    const submissionId = seedSubmission()
-    db.insert(schema.storySubmissions).values({ storyId, submissionId }).run()
+    const filingId = seedFiling()
+    db.insert(schema.storyFilings).values({ storyId, filingId }).run()
     db.insert(schema.publications)
       .values({
         id: randomUUID(),
         storyId,
-        targetId: 'discord-test',
+        outletId: 'discord-test',
         status: 'PROPOSED',
         origin: 'managing-editor',
-        routeReason: 'self-hosters run it',
+        placementReason: 'self-hosters run it',
       })
       .run()
 
     const body = (await get('/api/v1/stories')).json()
     expect(body.stories).toHaveLength(1)
     expect(body.stories[0]).toMatchObject({ sourceCount: 1 })
-    expect(body.stories[0].routes[0]).toMatchObject({
-      targetId: 'discord-test',
-      targetName: 'Discord',
-      routeReason: 'self-hosters run it',
+    expect(body.stories[0].placements[0]).toMatchObject({
+      outletId: 'discord-test',
+      outletName: 'Discord',
+      placementReason: 'self-hosters run it',
     })
   })
 
   it('filters by status, which is what the spiked view is', async () => {
-    await seedStory({ status: 'ROUTED' })
+    await seedStory({ status: 'PLACED' })
     await seedStory({ status: 'DROPPED', dropReason: 'nothing clears the bar' })
 
     const spiked = (await get('/api/v1/stories?status=DROPPED')).json()
@@ -125,16 +125,16 @@ describe('GET /stories', () => {
 })
 
 describe('GET /stories/:id', () => {
-  it('returns the story, its submissions and the related story', async () => {
+  it('returns the story, its filings and the related story', async () => {
     const earlier = await seedStory({ title: 'The original' })
     const storyId = await seedStory({ title: 'Follow-up', dedupVerdict: 'UPDATE', relatedStoryId: earlier })
-    const submissionId = seedSubmission()
-    db.insert(schema.storySubmissions).values({ storyId, submissionId }).run()
+    const filingId = seedFiling()
+    db.insert(schema.storyFilings).values({ storyId, filingId }).run()
 
     const body = (await get(`/api/v1/stories/${storyId}`)).json()
     expect(body.story.title).toBe('Follow-up')
     expect(body.related.title).toBe('The original')
-    expect(body.submissions[0]).toMatchObject({ stringerId: 'korben', stringerName: 'korben.info' })
+    expect(body.filings[0]).toMatchObject({ stringerId: 'korben', stringerName: 'korben.info' })
   })
 
   it('404s on an unknown story', async () => {
@@ -142,28 +142,28 @@ describe('GET /stories/:id', () => {
   })
 })
 
-describe('POST /stories/:id/routes', () => {
-  it('adds a route the managing editor did not propose, marked as yours', async () => {
+describe('POST /stories/:id/placements', () => {
+  it('adds a placement the managing editor did not propose, marked as yours', async () => {
     // The override diff is the highest-value data the desk produces, so a
-    // route you added must never look like one the managing editor suggested.
+    // placement you added must never look like one the managing editor suggested.
     const storyId = await seedStory()
-    const response = await post(`/api/v1/stories/${storyId}/routes`, { target_id: 'discord-test' })
+    const response = await post(`/api/v1/stories/${storyId}/placements`, { outlet_id: 'discord-test' })
     expect(response.statusCode).toBe(201)
 
     const publication = db.select().from(schema.publications).get()!
     expect(publication.origin).toBe('human')
   })
 
-  it('un-spikes a story that was dropped only for having no routes', async () => {
+  it('un-spikes a story that was dropped only for having no placements', async () => {
     const storyId = await seedStory({ status: 'DROPPED', dropReason: 'no destination clears the bar' })
-    await post(`/api/v1/stories/${storyId}/routes`, { target_id: 'discord-test' })
+    await post(`/api/v1/stories/${storyId}/placements`, { outlet_id: 'discord-test' })
 
     const story = db.select().from(schema.stories).get()!
-    expect(story.status).toBe('ROUTED')
+    expect(story.status).toBe('PLACED')
     expect(story.dropReason).toBeNull()
   })
 
-  it('leaves a duplicate spiked — adding a route does not make it not a duplicate', async () => {
+  it('leaves a duplicate spiked — adding a placement does not make it not a duplicate', async () => {
     const earlier = await seedStory()
     const storyId = await seedStory({
       status: 'DROPPED',
@@ -171,36 +171,36 @@ describe('POST /stories/:id/routes', () => {
       relatedStoryId: earlier,
       dropReason: 'already told',
     })
-    await post(`/api/v1/stories/${storyId}/routes`, { target_id: 'discord-test' })
+    await post(`/api/v1/stories/${storyId}/placements`, { outlet_id: 'discord-test' })
 
     const story = db.select().from(schema.stories).where(eq(schema.stories.id, storyId)).get()!
     expect(story.status).toBe('DROPPED')
   })
 
-  it('refuses an unknown target', async () => {
+  it('refuses an unknown outlet', async () => {
     const storyId = await seedStory()
-    const response = await post(`/api/v1/stories/${storyId}/routes`, { target_id: 'invented' })
+    const response = await post(`/api/v1/stories/${storyId}/placements`, { outlet_id: 'invented' })
     expect(response.statusCode).toBe(422)
   })
 
-  it('refuses a duplicate route to the same destination', async () => {
+  it('refuses a duplicate placement to the same destination', async () => {
     const storyId = await seedStory()
-    await post(`/api/v1/stories/${storyId}/routes`, { target_id: 'discord-test' })
-    const second = await post(`/api/v1/stories/${storyId}/routes`, { target_id: 'discord-test' })
+    await post(`/api/v1/stories/${storyId}/placements`, { outlet_id: 'discord-test' })
+    const second = await post(`/api/v1/stories/${storyId}/placements`, { outlet_id: 'discord-test' })
     expect(second.statusCode).toBe(409)
   })
 })
 
 describe('POST /stories/:id/rerun', () => {
-  it('re-queues every submission behind the story', async () => {
+  it('re-queues every filing behind the story', async () => {
     const storyId = await seedStory()
-    const submissionId = seedSubmission()
-    db.insert(schema.storySubmissions).values({ storyId, submissionId }).run()
+    const filingId = seedFiling()
+    db.insert(schema.storyFilings).values({ storyId, filingId }).run()
 
     const response = await post(`/api/v1/stories/${storyId}/rerun`)
     expect(response.statusCode).toBe(202)
-    expect(queued).toEqual([submissionId])
-    expect(db.select().from(schema.submissions).get()?.status).toBe('PROCESSING')
+    expect(queued).toEqual([filingId])
+    expect(db.select().from(schema.filings).get()?.status).toBe('PROCESSING')
   })
 
   it('404s when nothing produced the story', async () => {

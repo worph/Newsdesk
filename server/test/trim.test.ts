@@ -70,7 +70,7 @@ describe('trimTimeline', () => {
     expect(second.considered).toBe('')
   })
 
-  it('falls back to the whole submission when no date is recognised, and says so', () => {
+  it('falls back to the whole filing when no date is recognised, and says so', () => {
     // Silently dropping a source whose date format we cannot read would be the
     // worst outcome, so it is loud instead.
     const result = trimTimeline('just some prose with no dates at all', '2026-07-22T00:00:00.000Z')

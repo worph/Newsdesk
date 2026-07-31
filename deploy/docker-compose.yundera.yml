@@ -50,7 +50,7 @@ services:
 
   # ── Newsdesk (protected) ────────────────────────────────────────────
   # On the pcs network so it can reach the Beacon aggregator by service name
-  # for both the inference port and mcp-driver delivery targets.
+  # for both the inference port and mcp-driver delivery outlets.
   newsdesk-backend:
     image: ghcr.io/worph/newsdesk:0.1.0
     container_name: newsdesk-backend
@@ -130,18 +130,18 @@ x-casaos:
       **Sources push in, an LLM proposes what is worth saying and where, you edit
       and approve, and only then does anything get published.**
 
-      Newsdesk is the spine of a news pipeline: a source registry, semantic
-      deduplication, routing against a written editorial charter, per-destination
+      Newsdesk is the spine of a news pipeline: a stringer registry, semantic
+      deduplication, placement against a written editorial charter, per-destination
       drafting, and a full audit trail. Every integration stays outside the app —
       stringers file free text over HTTP, inference runs through a pluggable port,
-      and delivery goes out through MCP targets — so Newsdesk holds **no
+      and delivery goes out through MCP outlets — so Newsdesk holds **no
       third-party credentials at all**.
 
       **What it does:**
-      - Reads free-text reports from any source that can POST
+      - Reads free-text reports from any stringer that can POST
       - Finds the stories in them and kills duplicates *semantically* — the same
-        release arriving from three sources becomes one story with three sources
-      - Routes each story by a charter you write in prose, not configuration
+        release arriving from three stringers becomes one story with three sources
+      - Placements each story by a charter you write in prose, not configuration
       - Drafts once per destination, in that destination's voice
       - Puts a human approval between every draft and every channel
 
@@ -166,20 +166,20 @@ x-casaos:
         - Set `NEWSDESK_ADMIN_PASSWORD` before installing, or read the generated
           password from the container logs on first start.
         - Open **Configuration** and write your charter, at least one voice, and
-          at least one target. A publish target must pin its destination (channel
+          at least one outlet. A publish outlet must pin its destination (channel
           id, chat id) as a literal — Newsdesk refuses to save otherwise, because
           an unpinned destination silently posts to the bridge default.
 
         **Wiring it up**
         - Point your stringers (n8n workflows, scripts, anything that can POST) at
-          `/api/v1/submissions` with the ingest token shown on the Configuration
+          `/api/v1/filings` with the ingest token shown on the Configuration
           screen.
         - **Use the internal address for stringers:**
-          `http://newsdesk-backend:8080/api/v1/submissions`. The public URL is
+          `http://newsdesk-backend:8080/api/v1/filings`. The public URL is
           behind your Yundera single sign-on, which answers a token-authenticated
           POST with a login redirect, not an ingest. Anything on the `pcs`
           network — n8n included — can reach the backend directly.
-        - Delivery targets call MCP tools through your Beacon aggregator on the
+        - Delivery outlets call MCP tools through your Beacon aggregator on the
           internal `pcs` network — Newsdesk never stores Discord or Telegram
           credentials.
 
