@@ -61,11 +61,15 @@ It is a newsroom, and the roles are the design:
 4. **Writers draft per destination.** Each proposed placement gets its own draft in that
    destination's voice. The same change can run on a public Discord channel in a public voice *and*
    in an internal Nextcloud Talk room in a dry technical one.
-5. **You edit.** A live markdown document with the copy desk beside it — "shorter", "lead with the
-   security fix", "three headline options" — updating the document in place, every revision
-   versioned and revertible.
-6. **You approve, per destination.** Each placement is approved or spiked independently.
-7. **The press prints** exactly the bytes you approved. No inference runs after approval.
+5. **You edit.** A live markdown document, read as it will publish until you ask to edit it, with the
+   copy desk a click away — "shorter", "lead with the security fix", "three headline options" —
+   updating the document in place, every revision versioned and revertible.
+6. **You approve, per destination, and say when.** Each placement is approved or spiked
+   independently, and approval commits to a send time — the desk proposes the next slot that fits
+   that destination's posting hours and what it already owes the calendar, and you overrule it or
+   send immediately.
+7. **The press prints** exactly the bytes you approved, at the moment you approved them for. No
+   inference runs after approval.
 
 The whole pipeline in one line: **config generates the tool schemas · tools enforce the shape · the
 human edits the slots · publish merges and sends.**
@@ -89,7 +93,8 @@ The market is full of tools that publish. Newsdesk's value is upstream of publis
 ## What it is not
 
 - Not an integration platform. It speaks no protocol other than HTTP and MCP.
-- Not a scheduler for other systems. It owns its own clock and nothing else's.
+- Not a scheduler for other systems. It owns its own clock — including when its own posts go out —
+  and nothing else's.
 - Not multi-tenant. One desk, one team.
 - Not a publisher for the big social platforms. Platform OAuth and API churn are exactly the
   maintenance tax this design refuses to carry — add an outlet through MCP instead.
@@ -106,6 +111,7 @@ The market is full of tools that publish. Newsdesk's value is upstream of publis
 | **M5** | PWA: install, Android web push, share target, tip line |
 | **M6** | error log, run log, override review |
 | **M7** | migration off the existing Docmost/Telegram/n8n pipeline |
+| **M8** | posting schedule: approve to a time, per-outlet cadence, withdraw, calendar |
 
 See [`IMPLEMENTATION.md`](./IMPLEMENTATION.md) for the detail.
 

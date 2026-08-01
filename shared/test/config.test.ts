@@ -325,3 +325,65 @@ describe('an http reporting tool', () => {
     expect(withReporting({ enabled: true, search: [httpSearch], fetch: [] })).toEqual([])
   })
 })
+
+/**
+ * A cadence that cannot be satisfied is worse than no cadence: the proposer
+ * walks its whole horizon and hands back a slot weeks out, which reads as a bug
+ * rather than as the configuration doing what it was told.
+ */
+describe('an outlet cadence', () => {
+  const withCadence = (cadence: unknown) =>
+    issuesFor((c) => {
+      c.outlets[0].cadence = cadence
+    })
+
+  it('accepts a complete, satisfiable rhythm', () => {
+    expect(
+      withCadence({
+        timezone: 'Europe/Paris',
+        days: [1, 2, 3, 4, 5],
+        window: { from: '09:00', to: '18:00' },
+        min_gap_minutes: 90,
+        max_per_day: 3,
+      }),
+    ).toEqual([])
+  })
+
+  it('is entirely optional', () => {
+    expect(issuesFor(() => {})).toEqual([])
+  })
+
+  it('rejects a timezone the runtime does not know', () => {
+    expect(withCadence({ timezone: 'Europe/Atlantis' }).join()).toMatch(/not a timezone/)
+  })
+
+  it('rejects a window that never opens', () => {
+    expect(withCadence({ window: { from: '18:00', to: '09:00' } }).join()).toMatch(/wraps midnight/)
+  })
+
+  it('rejects an empty day list, which could never post', () => {
+    expect(withCadence({ days: [] }).join()).toMatch(/could never post/)
+  })
+
+  it('rejects a day listed twice', () => {
+    expect(withCadence({ days: [1, 1, 2] }).join()).toMatch(/listed twice/)
+  })
+
+  it('rejects a gap that cannot fit twice in its own window', () => {
+    expect(
+      withCadence({ window: { from: '09:00', to: '12:00' }, min_gap_minutes: 240 }).join(),
+    ).toMatch(/does not fit twice/)
+  })
+
+  it('allows a gap wider than the window when only one post a day is meant', () => {
+    expect(
+      withCadence({ window: { from: '09:00', to: '12:00' }, min_gap_minutes: 240, max_per_day: 1 }),
+    ).toEqual([])
+  })
+
+  it('refuses a malformed time outright, at the shape check', () => {
+    expect(() => parseConfig({ ...(baseConfig() as any), outlets: [
+      { ...(baseConfig() as any).outlets[0], cadence: { window: { from: '9am', to: '18:00' } } },
+    ] })).toThrow()
+  })
+})

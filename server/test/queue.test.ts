@@ -56,6 +56,17 @@ describe('claiming', () => {
     const { db } = openTestDb()
     expect(claimNext(db, new Date())).toBeUndefined()
   })
+
+  it('holds a scheduled send until its time, then claims it', () => {
+    // This is the whole of scheduled publishing: a job dated forward is simply
+    // one the queue does not claim yet.
+    const { db } = openTestDb()
+    const at = new Date(Date.now() + 6 * 60 * 60_000)
+    enqueue(db, 'publish', 'pub-1', at)
+
+    expect(claimNext(db, new Date())).toBeUndefined()
+    expect(claimNext(db, new Date(at.getTime() + 1_000))?.refId).toBe('pub-1')
+  })
 })
 
 describe('restart', () => {
@@ -66,6 +77,18 @@ describe('restart', () => {
 
     expect(reclaimRunning(db)).toBe(1)
     expect(db.select().from(schema.jobs).get()?.status).toBe('PENDING')
+  })
+
+  it('leaves a scheduled send at its own time rather than dragging it to now', () => {
+    // reclaimRunning resets `run_after` to now, which is right for work that was
+    // interrupted — and would be catastrophic for a post due next Tuesday. It
+    // only touches RUNNING rows, and a waiting job is PENDING.
+    const { db } = openTestDb()
+    const at = new Date(Date.now() + 48 * 60 * 60_000)
+    enqueue(db, 'publish', 'pub-1', at)
+
+    expect(reclaimRunning(db)).toBe(0)
+    expect(db.select().from(schema.jobs).get()?.runAfter).toBe(at.toISOString())
   })
 
   it('leaves a finished queue alone', () => {

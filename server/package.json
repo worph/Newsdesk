@@ -9,6 +9,7 @@
     "build": "tsc --build && node scripts/copy-assets.mjs",
     "start": "node dist/index.js",
     "db:generate": "drizzle-kit generate",
+    "db:lock": "node scripts/write-migrations-lock.mjs",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {

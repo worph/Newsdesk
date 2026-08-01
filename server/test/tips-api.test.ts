@@ -142,6 +142,27 @@ describe('where a tip goes next', () => {
     expect(queued.map((j) => j.kind)).toEqual(['assign'])
   })
 
+  /**
+   * More than one tip stringer is the normal shape once the Telegram ideas
+   * group files here too, so an unnamed tip has to be refused rather than sent
+   * to whichever row happened to be first.
+   */
+  it('refuses to guess between two tip stringers, and takes the one it is given', async () => {
+    const twoTips = {
+      ...CONFIG,
+      stringers: [...CONFIG.stringers, { id: 'telegram-news-idea', name: 'Telegram ideas', kind: 'tip' }],
+    }
+    await boot(twoTips)
+
+    const ambiguous = await postTip({ text: 'worth writing about' })
+    expect(ambiguous.statusCode).toBe(422)
+    expect(ambiguous.json().error).toMatch(/several tip stringers/)
+
+    const named = await postTip({ text: 'worth writing about', stringer_id: 'telegram-news-idea' })
+    expect(named.statusCode).toBe(201)
+    expect(handle.db.select().from(schema.filings).all()[0]?.stringerId).toBe('telegram-news-idea')
+  })
+
   it('still folds a posted url into the text, for bookmarklets', async () => {
     await boot()
 

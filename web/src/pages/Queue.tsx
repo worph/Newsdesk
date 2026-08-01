@@ -1,21 +1,135 @@
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
-import { api } from '../api'
-import { StoryCard } from '../components/StoryCard'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { api, type PublicationRow } from '../api'
+import { Badge, StoryCard, when } from '../components/StoryCard'
+import { useArticleQueue, usePlacementQueue } from '../queue'
 
 /**
  * The gate: everything awaiting a decision, oldest first. This screen is just
  * the list of things standing at the gate — the gate itself is enforced at
  * review, where approve is the only path to the wire.
+ *
+ * The desk asks for two decisions and they are not the same question, so they
+ * are two tabs rather than one stacked list: reading a draft and deciding where
+ * a story runs are different sittings, and the counts stay visible on both so
+ * nothing hides behind the tab you are not on. The choice lives in the URL, so
+ * a reload — or a link to someone else — lands on the same half.
  */
+
+type Tab = 'article' | 'placement'
+
+function Tabs({
+  tab,
+  onTab,
+  counts,
+}: {
+  tab: Tab
+  onTab: (next: Tab) => void
+  counts: Record<Tab, number>
+}) {
+  const tabs: { key: Tab; label: string }[] = [
+    { key: 'article', label: 'Article approval' },
+    { key: 'placement', label: 'Placement approval' },
+  ]
+
+  return (
+    <div className="flex gap-1 border-b border-desk-200 dark:border-desk-800" role="tablist">
+      {tabs.map(({ key, label }) => {
+        const active = key === tab
+        return (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={active}
+            onClick={() => onTab(key)}
+            className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
+              active
+                ? 'border-desk-900 font-medium dark:border-desk-100'
+                : 'border-transparent text-desk-500 hover:text-desk-700 dark:hover:text-desk-300'
+            }`}
+          >
+            {label}
+            <span
+              className={`rounded-full px-2 py-0.5 font-mono text-[11px] ${
+                active
+                  ? 'bg-desk-900 text-white dark:bg-desk-100 dark:text-desk-900'
+                  : 'bg-desk-200 text-desk-600 dark:bg-desk-800 dark:text-desk-300'
+              }`}
+            >
+              {counts[key]}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-dashed border-desk-300 px-4 py-6 text-center text-xs text-desk-500 dark:border-desk-700">
+      {children}
+    </div>
+  )
+}
+
+/**
+ * One draft awaiting approval, as a row. It carries the opening of what was
+ * written, because "which of these three do I read first" is a question the
+ * title alone cannot answer.
+ */
+function ArticleCard({ publication, onOpen }: { publication: PublicationRow; onOpen: () => void }) {
+  const failed = publication.status === 'FAILED'
+
+  return (
+    <li className="rounded-lg border border-desk-200 dark:border-desk-800">
+      <button onClick={onOpen} className="flex w-full items-start gap-3 px-4 py-3 text-left">
+        <span
+          aria-hidden
+          className={`mt-1.5 size-2 shrink-0 rounded-full ${failed ? 'bg-red-500' : 'bg-amber-500'}`}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{publication.storyTitle ?? publication.storyId}</span>
+            <Badge tone="bg-desk-900 text-white dark:bg-desk-100 dark:text-desk-900">
+              {publication.outletName ?? publication.outletId}
+            </Badge>
+            {failed && (
+              <Badge tone="bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300">
+                send failed
+              </Badge>
+            )}
+            {publication.origin === 'human' && <Badge>added by you</Badge>}
+            {publication.storyCreatedAt && (
+              <span className="text-xs text-desk-500">{when(publication.storyCreatedAt)}</span>
+            )}
+          </span>
+
+          {publication.preview && (
+            <span className="mt-1 block text-sm text-desk-600 dark:text-desk-400">
+              {publication.preview}
+            </span>
+          )}
+
+          {/* A failed send is the one row here that is not simply waiting on you. */}
+          {failed && publication.error && (
+            <span className="mt-2 block rounded-md bg-desk-100 px-3 py-2 text-xs text-desk-600 dark:bg-desk-900 dark:text-desk-400">
+              {publication.error}
+            </span>
+          )}
+        </span>
+      </button>
+    </li>
+  )
+}
+
 export function Queue() {
   const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
+  const chosen = params.get('tab')
 
-  const { data, isPending } = useQuery({
-    queryKey: ['stories', 'queue'],
-    queryFn: () => api.listStories({ status: 'PLACED,HELD', limit: 100 }),
-    refetchInterval: 30_000,
-  })
+  const stories = usePlacementQueue()
+  const articles = useArticleQueue()
 
   const { data: jobs } = useQuery({
     queryKey: ['jobs'],
@@ -23,39 +137,91 @@ export function Queue() {
     refetchInterval: 10_000,
   })
 
-  if (isPending) return <div className="px-6 pb-10 text-sm text-desk-500">Loading…</div>
+  if (stories.isPending || articles.isPending) {
+    return <div className="px-6 pb-10 text-sm text-desk-500">Loading…</div>
+  }
 
-  const stories = [...data!.stories].reverse() // oldest first: the queue is a backlog
+  // Oldest first: a queue is a backlog. The stories endpoint answers newest
+  // first because the archive wants it that way; the publications endpoint
+  // already sorts by when the story arrived.
+  const placements = [...(stories.data?.stories ?? [])].reverse()
+  const drafts = articles.data?.publications ?? []
   const working = (jobs?.stats.pending ?? 0) + (jobs?.stats.running ?? 0)
 
+  // Drafts are the day's work, so that is where an unqualified /queue lands —
+  // unless there are none and placements are waiting, which would open the
+  // screen on an empty tab while the sidebar badge insists there is something
+  // to do. A tab you clicked is in the URL and is never second-guessed.
+  const tab: Tab =
+    chosen === 'placement' || chosen === 'article'
+      ? chosen
+      : drafts.length === 0 && placements.length > 0
+        ? 'placement'
+        : 'article'
+
   return (
-    <div className="mx-auto max-w-4xl space-y-5 px-4 pb-16 md:px-6">
+    <div className="mx-auto max-w-4xl space-y-7 px-4 pb-16 md:px-6">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold tracking-tight">Queue</h1>
         <p className="text-sm text-desk-500">
-          Stories awaiting a decision, oldest first. Each chip is one destination the managing editor proposed —
-          approving one never ships the others.
+          Everything awaiting a decision, oldest first — where a story runs, then what it says.
         </p>
         {working > 0 && (
           <p className="text-xs text-desk-500">
-            {working} filing{working === 1 ? '' : 's'} still with the managing editor…
+            {working} filing{working === 1 ? '' : 's'} still with the desk…
           </p>
         )}
       </header>
 
-      {stories.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-desk-300 px-4 py-10 text-center dark:border-desk-700">
-          <p className="text-sm text-desk-500">Nothing waiting.</p>
-          <p className="mt-1 text-xs text-desk-500">
-            Stories the managing editor placed appear here. Spiked ones are under Stories.
+      <Tabs
+        tab={tab}
+        onTab={(next) => setParams({ tab: next }, { replace: true })}
+        counts={{ article: drafts.length, placement: placements.length }}
+      />
+
+      {tab === 'article' ? (
+        <section className="space-y-2">
+          <p className="text-xs text-desk-500">
+            Drafts the writer has finished, one per destination. Approve is the only path to the
+            wire.
           </p>
-        </div>
+          {drafts.length === 0 ? (
+            <Empty>No draft is waiting. One appears here as soon as the writer finishes a piece.</Empty>
+          ) : (
+            <ul className="space-y-2">
+              {drafts.map((publication) => (
+                <ArticleCard
+                  key={publication.id}
+                  publication={publication}
+                  onOpen={() => navigate(`/review/${publication.id}`)}
+                />
+              ))}
+            </ul>
+          )}
+        </section>
       ) : (
-        <ul className="space-y-2">
-          {stories.map((story) => (
-            <StoryCard key={story.id} story={story} onOpen={() => navigate(`/stories/${story.id}`)} />
-          ))}
-        </ul>
+        <section className="space-y-2">
+          <p className="text-xs text-desk-500">
+            Where the managing editor proposed each story should run, and why. Each chip is one
+            destination — approving one never ships the others.
+          </p>
+          {placements.length === 0 ? (
+            <Empty>
+              Nothing placed. Stories the managing editor spiked are under Stories, with their
+              reasons.
+            </Empty>
+          ) : (
+            <ul className="space-y-2">
+              {placements.map((story) => (
+                <StoryCard
+                  key={story.id}
+                  story={story}
+                  onOpen={() => navigate(`/stories/${story.id}`)}
+                />
+              ))}
+            </ul>
+          )}
+        </section>
       )}
     </div>
   )

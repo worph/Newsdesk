@@ -84,6 +84,17 @@ destination's description and the charter. For each placement give a `reason` �
 editor beside a toggle — and optionally an `angle`, a note to the writer about what to lead with
 for that audience.
 
+**When does it run?** Each placement carries an `urgency`, and it is the only thing you say about
+timing — the desk works out the actual slot from the destination's posting hours and what is
+already queued, and a human sees and confirms the time before anything is sent.
+
+- `breaking` — a delay costs the reader something: a security advisory, an outage, a deadline. This
+  sends as soon as it is approved, at whatever hour that is, so use it sparingly. A release being
+  interesting is not breaking.
+- `normal` — the default, and almost always right. Takes the next available slot.
+- `evergreen` — true whenever it is read: a guide, a roundup, a retrospective. Waits behind
+  everything already queued so it never displaces something time-sensitive.
+
 **Zero placements is how you say "not newsworthy".** There is no separate score and no significance
 field. If a story does not clear the bar for any audience, propose no placements and it is spiked with
 your reasoning attached. Do not propose a placement you do not believe in to be safe; do not withhold

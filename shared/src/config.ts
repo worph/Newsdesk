@@ -44,6 +44,28 @@ export const stringerSchema = z.object({
   hint: z.string().optional(),
 })
 
+const hhmm = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'a time of day is HH:MM on a 24-hour clock')
+
+/**
+ * When an outlet posts, as opposed to what it posts.
+ *
+ * This is a rhythm, not a queue policy: the desk proposes the next slot that
+ * fits and a human always sees it before it is committed. Every field is
+ * optional because an outlet that says nothing should behave exactly as it did
+ * before scheduling existed — any day, any hour, on demand.
+ */
+export const cadenceSchema = z.object({
+  /** IANA zone. Falls back to the desk-wide timezone setting. */
+  timezone: z.string().min(1).optional(),
+  /** 0 = Sunday. Omitted means every day. */
+  days: z.array(z.number().int().min(0).max(6)).optional(),
+  window: z.object({ from: hhmm, to: hhmm }).optional(),
+  min_gap_minutes: z.number().int().positive().max(10_080).optional(),
+  max_per_day: z.number().int().positive().max(100).optional(),
+})
+
 export const outletSchema = z.object({
   id: idSchema,
   name: z.string().min(1),
@@ -61,6 +83,8 @@ export const outletSchema = z.object({
    */
   destination_key: z.string().min(1).optional(),
   args: argsSpecSchema,
+  /** The posting rhythm. Absent means "whenever it is approved". */
+  cadence: cadenceSchema.optional(),
 })
 
 /**
@@ -122,6 +146,7 @@ export const configSchema = z.object({
   reporting: reportingSchema.optional(),
 })
 
+export type Cadence = z.infer<typeof cadenceSchema>
 export type McpEndpoint = z.infer<typeof mcpEndpointSchema>
 export type Voice = z.infer<typeof voiceSchema>
 export type Stringer = z.infer<typeof stringerSchema>
@@ -260,6 +285,60 @@ function checkReporting(config: Config, endpointIds: Set<string>, issues: Config
   reporting.fetch.forEach((tool, i) => checkReportingTool(tool, 'fetch', i, endpointIds, issues))
 }
 
+/**
+ * A cadence that cannot be satisfied is worse than none: the proposer would
+ * walk its whole search horizon and hand back a slot a month out, which reads
+ * as a bug rather than as configuration. Catch the unsatisfiable shapes here,
+ * where the message can name the field.
+ */
+function checkCadence(outlet: Outlet, issues: ConfigIssue[]): void {
+  const cadence = outlet.cadence
+  if (!cadence) return
+  const path = `outlets.${outlet.id}.cadence`
+
+  if (cadence.timezone !== undefined) {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: cadence.timezone })
+    } catch {
+      issues.push({
+        path: `${path}.timezone`,
+        message: `"${cadence.timezone}" is not a timezone this runtime knows — use an IANA name like "Europe/Paris"`,
+      })
+    }
+  }
+
+  if (cadence.days !== undefined) {
+    if (cadence.days.length === 0) {
+      issues.push({ path: `${path}.days`, message: 'no days means the outlet could never post — omit the field for every day' })
+    }
+    for (const day of duplicates(cadence.days.map(String))) {
+      issues.push({ path: `${path}.days`, message: `day ${day} is listed twice` })
+    }
+  }
+
+  const window = cadence.window
+  if (window && window.from >= window.to) {
+    // Lexical comparison is exact for zero-padded HH:MM, and it is the same
+    // check the proposer makes. A window that wraps midnight is not supported:
+    // say so rather than silently posting nothing.
+    issues.push({
+      path: `${path}.window`,
+      message: `"${window.from}" is not before "${window.to}" — a window that wraps midnight is not supported, use two outlets or widen the window`,
+    })
+  }
+
+  if (window && cadence.min_gap_minutes !== undefined) {
+    const minutes = (at: string) => Number(at.slice(0, 2)) * 60 + Number(at.slice(3, 5))
+    const span = minutes(window.to) - minutes(window.from)
+    if (cadence.min_gap_minutes > span && (cadence.max_per_day ?? 2) > 1) {
+      issues.push({
+        path: `${path}.min_gap_minutes`,
+        message: `a ${cadence.min_gap_minutes}-minute gap does not fit twice in a ${span}-minute window — set max_per_day: 1 if one post a day is what you mean`,
+      })
+    }
+  }
+}
+
 function checkDestination(outlet: Outlet, issues: ConfigIssue[]): void {
   const path = `outlets.${outlet.id}`
   if (outlet.role !== 'publish' || outlet.driver !== 'mcp') return
@@ -368,6 +447,7 @@ export function validateConfig(config: Config): ConfigIssue[] {
 
     checkTemplates(outlet.args, path, issues)
     checkDestination(outlet, issues)
+    checkCadence(outlet, issues)
   }
 
   checkReporting(config, endpointIds, issues)

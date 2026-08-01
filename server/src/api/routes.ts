@@ -19,8 +19,15 @@ import {
 } from '../config/store.js'
 import type { Db } from '../db/index.js'
 import { checkHealth } from '../health.js'
-import { getOrCreateVapidKeys, removeSubscription, saveSubscription } from '../push.js'
-import { getSetting, getOrCreateSecret, SETTING } from '../settings.js'
+import {
+  getOrCreateVapidKeys,
+  notifyAll,
+  removeSubscription,
+  saveSubscription,
+  subscriptionCount,
+} from '../push.js'
+import { DEFAULT_TIMEZONE, getSetting, getOrCreateSecret, getTimezone, SETTING, setSetting } from '../settings.js'
+import { registerCalendarRoutes } from './calendar.js'
 import { registerIngestRoutes } from './ingest.js'
 import { registerMcpRoutes } from './mcp.js'
 import { registerPublicationRoutes } from './publications.js'
@@ -61,7 +68,7 @@ function candidateFrom(body: z.infer<typeof configBody>): unknown {
 }
 
 export interface PlacementOptions extends ReceiveOptions {
-  enqueuePublish?: (publicationId: string) => void
+  enqueuePublish?: (publicationId: string, runAfter?: Date) => void
   enqueueWriter?: (publicationId: string) => void
   driver?: () => InferenceDriver
   /** Public origin, for the OAuth redirect URI. */
@@ -77,6 +84,7 @@ export function registerRoutes(
   registerIngestRoutes(app, db, receiveOptions)
   registerStoryRoutes(app, db, receiveOptions.enqueueManagingEditor, receiveOptions.enqueueWriter)
   registerPublicationRoutes(app, db, receiveOptions.enqueuePublish, receiveOptions.driver)
+  registerCalendarRoutes(app, db)
   registerMcpRoutes(app, db, receiveOptions.publicUrl)
 
   // ── push ──────────────────────────────────────────────────────────────────
@@ -104,6 +112,36 @@ export function registerRoutes(
     if (!parsed.success) return reply.code(400).send({ error: 'endpoint required' })
     removeSubscription(db, parsed.data.endpoint)
     return { ok: true }
+  })
+
+  /**
+   * What the desk believes about notifications, so the Settings screen can
+   * disagree with the browser.
+   *
+   * A device holds its own registration, and that registration keeps looking
+   * healthy long after the desk has stopped being able to use it — a
+   * regenerated VAPID keypair invalidates every one of them without the browser
+   * ever hearing about it. Serving the key and the device count lets the screen
+   * catch exactly that: registered here, unknown there.
+   */
+  app.get('/api/v1/push/status', { preHandler: requireSession }, async () => ({
+    publicKey: getOrCreateVapidKeys(db).publicKey,
+    devices: subscriptionCount(db),
+  }))
+
+  /**
+   * Prove the whole path end to end. Everything else about push is inferred —
+   * this is the one way to find out whether a notification actually arrives,
+   * and the counts say where it stopped if it did not.
+   */
+  app.post('/api/v1/push/test', { preHandler: requireSession }, async (request) => {
+    const result = await notifyAll(db, {
+      title: 'Newsdesk',
+      body: 'Notifications are working. This is a test.',
+      url: '/queue',
+    })
+    request.log.info(result, 'test notification')
+    return result
   })
 
   // ── health ────────────────────────────────────────────────────────────────
@@ -196,6 +234,32 @@ export function registerRoutes(
       if (err instanceof ConfigRejected) return reply.code(422).send(issuesReply(err.issues))
       return reply.code(400).send({ error: 'could not parse', issues: issuesFrom(err) })
     }
+  })
+
+  /**
+   * The desk's timezone. Not part of the config YAML because it is a property
+   * of where the team sits, not of what the desk publishes — the same
+   * configuration exported and imported elsewhere should not drag someone
+   * else's working hours along with it.
+   */
+  app.get('/api/v1/settings/timezone', { preHandler: requireSession }, async () => {
+    return { timezone: getTimezone(db), detected: DEFAULT_TIMEZONE }
+  })
+
+  app.put('/api/v1/settings/timezone', { preHandler: requireSession }, async (request, reply) => {
+    const parsed = z.object({ timezone: z.string().min(1) }).safeParse(request.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'timezone required' })
+
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: parsed.data.timezone })
+    } catch {
+      return reply
+        .code(422)
+        .send({ error: `"${parsed.data.timezone}" is not a timezone this desk knows — use an IANA name like "Europe/Paris"` })
+    }
+
+    setSetting(db, SETTING.timezone, parsed.data.timezone)
+    return { timezone: parsed.data.timezone }
   })
 
   app.post('/api/v1/config/ingest-token/rotate', { preHandler: requireSession }, async (_request, reply) => {

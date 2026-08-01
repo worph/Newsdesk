@@ -61,6 +61,12 @@ export const outlets = sqliteTable('outlets', {
   destinationKey: text('destination_key'),
   /** JSON: each key is literal | derived | slot. */
   argsSpec: text('args_spec').notNull(),
+  /**
+   * JSON: the posting rhythm — window, days, spacing, daily cap. Read only by
+   * the slot proposer, never by delivery, so an outlet without one still
+   * publishes on demand exactly as before.
+   */
+  cadence: text('cadence'),
 })
 
 /** Append-only; the latest row wins. */
@@ -198,11 +204,22 @@ export const publications = sqliteTable(
     externalUrl: text('external_url'),
     error: text('error'),
     approvedAt: text('approved_at'),
+    /**
+     * When the frozen payload is due to go out. Null means it was approved to
+     * send immediately — the behaviour before scheduling existed — so this is
+     * a commitment and never a suggestion. The proposal the desk offers at
+     * review is computed on request and deliberately not stored: one made
+     * against yesterday's calendar would be wrong by the time anyone read it.
+     */
+    scheduledFor: text('scheduled_for'),
+    /** The managing editor's read on how long this can wait. */
+    urgency: text('urgency'), // breaking | normal | evergreen
     publishedAt: text('published_at'),
   },
   (t) => [
     uniqueIndex('publications_story_outlet_idx').on(t.storyId, t.outletId),
     index('publications_status_idx').on(t.status),
+    index('publications_scheduled_idx').on(t.scheduledFor),
   ],
 )
 

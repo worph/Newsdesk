@@ -141,7 +141,11 @@ export async function deliverPublication(db: Db, publicationId: string): Promise
 
   if (publication.status === 'PUBLISHED') return // already sent; a retry must not double-post
 
-  if (publication.status !== 'APPROVED' && publication.status !== 'FAILED') {
+  if (
+    publication.status !== 'APPROVED' &&
+    publication.status !== 'SCHEDULED' &&
+    publication.status !== 'FAILED'
+  ) {
     throw new McpError(
       `publication ${publicationId} is ${publication.status} — only an approved payload may be sent`,
       false,
@@ -209,6 +213,38 @@ export async function deliverPublication(db: Db, publicationId: string): Promise
 /** Registered against the queue's `publish` kind. */
 export function publishHandler() {
   return async (db: Db, refId: string): Promise<void> => {
+    /**
+     * Withdrawing a scheduled post deletes its pending job, but a job the
+     * worker has already claimed cannot be recalled — so the last check happens
+     * here, at the moment of sending, and it is quiet.
+     *
+     * Quiet matters: `deliverPublication` would throw, which parks the job
+     * FAILED and writes an error to the ops log for what is the desk doing
+     * exactly as it was told. The check lives on the queue path rather than
+     * inside `deliverPublication` so that function keeps its strict contract —
+     * called directly with a never-approved row, it still refuses loudly.
+     */
+    const publication = db
+      .select({
+        status: schema.publications.status,
+        payload: schema.publications.payload,
+        storyId: schema.publications.storyId,
+      })
+      .from(schema.publications)
+      .where(eq(schema.publications.id, refId))
+      .get()
+
+    if (publication && publication.status === 'AWAITING_APPROVAL' && !publication.payload) {
+      logEvent(db, {
+        level: 'info',
+        code: 'PUBLISH_CANCELLED',
+        storyId: publication.storyId,
+        publicationId: refId,
+        message: 'not sent — it was withdrawn before its scheduled time',
+      })
+      return
+    }
+
     await deliverPublication(db, refId)
   }
 }

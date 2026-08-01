@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.js'
 import { setPassword } from '../src/auth.js'
 import type { Db } from '../src/db/index.js'
-import { deliverPublication } from '../src/ports/delivery/index.js'
+import { enqueue } from '../src/pipeline/queue.js'
+import { deliverPublication, publishHandler } from '../src/ports/delivery/index.js'
 import { openTestDb, schema, seedDesk } from './helpers.js'
 
 let app: FastifyInstance
@@ -53,7 +54,14 @@ beforeEach(async () => {
     sessionSecret: 'test-secret-value-at-least-32-characters',
     publicDir: '/nonexistent',
     logLevel: 'silent',
-    receiveOptions: { enqueuePublish: (id) => published.push(id) },
+    receiveOptions: {
+      // Real job rows, not just a spy: scheduling *is* the job's `run_after`,
+      // and withdraw has to delete a row that genuinely exists.
+      enqueuePublish: (id, runAfter) => {
+        published.push(id)
+        enqueue(db, 'publish', id, runAfter)
+      },
+    },
   })
 
   const login = await app.inject({
@@ -321,5 +329,283 @@ describe('delivery', () => {
 
   it('refuses to retry something never approved', async () => {
     expect((await post(`/api/v1/publications/${publicationId}/retry`)).statusCode).toBe(422)
+  })
+})
+
+describe('the article half of the queue', () => {
+  /** A second story, older or newer than the seeded one, with a draft waiting. */
+  function draft(options: { createdAt: string; status: string; title: string }): string {
+    const otherStory = randomUUID()
+    const id = randomUUID()
+    db.insert(schema.stories)
+      .values({
+        id: otherStory,
+        title: options.title,
+        summary: 'S',
+        status: 'PLACED',
+        dedupVerdict: 'NEW',
+        createdAt: options.createdAt,
+      })
+      .run()
+    db.insert(schema.publications)
+      .values({
+        id,
+        storyId: otherStory,
+        outletId: 'discord-test',
+        status: options.status,
+        origin: 'managing-editor',
+        slots: JSON.stringify({ title: 'H', description: 'The body of the piece.' }),
+      })
+      .run()
+    return id
+  }
+
+  it('filters on several statuses at once', async () => {
+    // The queue asks one question about two states: a finished draft and a send
+    // that failed are both waiting on a person.
+    const failed = draft({ createdAt: '2026-01-01T00:00:00.000Z', status: 'FAILED', title: 'Failed' })
+    draft({ createdAt: '2026-01-02T00:00:00.000Z', status: 'PUBLISHED', title: 'Gone out' })
+
+    const body = (await get('/api/v1/publications?status=AWAITING_APPROVAL,FAILED')).json()
+    const ids = body.publications.map((p: { id: string }) => p.id)
+
+    expect(ids).toContain(publicationId)
+    expect(ids).toContain(failed)
+    expect(ids).toHaveLength(2)
+  })
+
+  it('orders oldest first, by when the story arrived', async () => {
+    // Not by approved_at: nothing in this list has been approved, so that
+    // column is null on every row and sorts them arbitrarily.
+    const oldest = draft({ createdAt: '2020-01-01T00:00:00.000Z', status: 'AWAITING_APPROVAL', title: 'Ancient' })
+
+    const body = (await get('/api/v1/publications?status=AWAITING_APPROVAL')).json()
+    expect(body.publications[0].id).toBe(oldest)
+  })
+
+  it('carries the opening of the draft, so a row can be read without opening it', async () => {
+    const body = (await get('/api/v1/publications?status=AWAITING_APPROVAL')).json()
+    const seeded = body.publications.find((p: { id: string }) => p.id === publicationId)
+
+    // The primary slot is the piece of writing; `title` is furniture the outlet
+    // happens to want.
+    expect(seeded.preview).toBe('Adds Intel QSV transcoding.')
+    expect(seeded.storyTitle).toBe('Immich v1.142.0')
+    expect(seeded.outletName).toBe('Discord')
+  })
+
+  it('previews nothing rather than guessing when no draft has been written', async () => {
+    db.update(schema.publications)
+      .set({ slots: null, status: 'PROPOSED' })
+      .where(eq(schema.publications.id, publicationId))
+      .run()
+
+    const body = (await get('/api/v1/publications?status=PROPOSED')).json()
+    expect(body.publications[0].preview).toBeNull()
+  })
+
+  it('never leaks the outlet spec it read the primary slot from', async () => {
+    // The destination is configuration, and the review surface is the one place
+    // it is deliberately withheld — a list must not be the way round it.
+    const body = (await get('/api/v1/publications?status=AWAITING_APPROVAL')).json()
+    expect(body.publications[0].argsSpec).toBeUndefined()
+    expect(body.publications[0].slots).toBeUndefined()
+  })
+})
+
+/**
+ * Scheduling changes when the approved bytes go out, and nothing else. These
+ * tests exist mostly to hold that line: the payload is still frozen at approval,
+ * the desk is still closed afterwards, and the only way back is a withdrawal
+ * that says so in the log.
+ */
+describe('scheduling', () => {
+  const soon = () => new Date(Date.now() + 6 * 60 * 60_000).toISOString()
+
+  const jobs = () => db.select().from(schema.jobs).where(eq(schema.jobs.kind, 'publish')).all()
+
+  it('approves without a time exactly as it always did', async () => {
+    const response = await post(`/api/v1/publications/${publicationId}/approve`)
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json().status).toBe('APPROVED')
+    expect(row().status).toBe('APPROVED')
+    expect(row().scheduledFor).toBeNull()
+    // Due immediately: the queue claims it on the next poll.
+    expect(new Date(jobs()[0]!.runAfter).getTime()).toBeLessThanOrEqual(Date.now())
+  })
+
+  it('freezes the payload and defers the send when given a time', async () => {
+    const at = soon()
+    const response = await post(`/api/v1/publications/${publicationId}/approve`, { scheduled_for: at })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json().status).toBe('SCHEDULED')
+
+    const stored = row()
+    expect(stored.status).toBe('SCHEDULED')
+    expect(stored.scheduledFor).toBe(at)
+    // The whole point: approved now, sent later, with the bytes already fixed.
+    expect(stored.approvedAt).toBeTruthy()
+    expect(JSON.parse(stored.payload!).channelId).toBe('1514993197082742814')
+    expect(jobs()[0]!.runAfter).toBe(at)
+  })
+
+  it('refuses a time that has already passed', async () => {
+    const response = await post(`/api/v1/publications/${publicationId}/approve`, {
+      scheduled_for: new Date(Date.now() - 60 * 60_000).toISOString(),
+    })
+
+    expect(response.statusCode).toBe(422)
+    expect(row().status).toBe('AWAITING_APPROVAL')
+  })
+
+  it('closes the desk while scheduled, exactly as approval does', async () => {
+    await post(`/api/v1/publications/${publicationId}/approve`, { scheduled_for: soon() })
+
+    for (const attempt of [
+      patch(`/api/v1/publications/${publicationId}`, { slots: { title: 'sneaky' } }),
+      post(`/api/v1/publications/${publicationId}/reject`),
+      post(`/api/v1/publications/${publicationId}/approve`, { scheduled_for: soon() }),
+    ]) {
+      expect((await attempt).statusCode).toBe(409)
+    }
+    // The frozen bytes are untouched by any of it.
+    expect(JSON.parse(row().payload!).title).toBe('Immich 1.142.0')
+  })
+
+  it('moves a scheduled send without touching what was approved', async () => {
+    await post(`/api/v1/publications/${publicationId}/approve`, { scheduled_for: soon() })
+    const frozen = row().payload
+
+    const later = new Date(Date.now() + 12 * 60 * 60_000).toISOString()
+    const response = await patch(`/api/v1/publications/${publicationId}/schedule`, {
+      scheduled_for: later,
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(row().scheduledFor).toBe(later)
+    expect(row().payload).toBe(frozen)
+    // One job, at the new time — the old one is gone rather than doubled.
+    expect(jobs().filter((job) => job.status === 'PENDING')).toHaveLength(1)
+    expect(jobs().find((job) => job.status === 'PENDING')!.runAfter).toBe(later)
+  })
+
+  it('withdraws back to an editable draft and drops the queued send', async () => {
+    await post(`/api/v1/publications/${publicationId}/approve`, { scheduled_for: soon() })
+
+    const response = await post(`/api/v1/publications/${publicationId}/withdraw`)
+    expect(response.statusCode).toBe(200)
+
+    const stored = row()
+    expect(stored.status).toBe('AWAITING_APPROVAL')
+    // Clearing the payload is what genuinely reopens it: re-approving re-freezes.
+    expect(stored.payload).toBeNull()
+    expect(stored.scheduledFor).toBeNull()
+    expect(stored.approvedAt).toBeNull()
+    expect(jobs().filter((job) => job.status === 'PENDING')).toHaveLength(0)
+
+    // And the desk is genuinely open again.
+    const edit = await patch(`/api/v1/publications/${publicationId}`, { slots: { title: 'Rewritten' } })
+    expect(edit.statusCode).toBe(200)
+
+    const event = db.select().from(schema.events).all().find((e) => e.code === 'WITHDRAWN')
+    expect(event).toBeTruthy()
+  })
+
+  it('will not withdraw something already on its way', async () => {
+    await post(`/api/v1/publications/${publicationId}/approve`)
+
+    const response = await post(`/api/v1/publications/${publicationId}/withdraw`)
+    expect(response.statusCode).toBe(409)
+    expect(row().status).toBe('APPROVED')
+  })
+
+  it('does not send a withdrawal that raced a claimed job', async () => {
+    db.update(schema.outlets).set({ driver: 'builtin' }).where(eq(schema.outlets.id, 'discord-test')).run()
+    await post(`/api/v1/publications/${publicationId}/approve`, { scheduled_for: soon() })
+    await post(`/api/v1/publications/${publicationId}/withdraw`)
+
+    // The worker had already claimed the job when the withdrawal landed, so it
+    // still runs. It must decline quietly rather than failing the job.
+    await publishHandler()(db, publicationId, { id: 'j', kind: 'publish', refId: publicationId, attempts: 1 })
+
+    expect(row().status).toBe('AWAITING_APPROVAL')
+    expect(row().publishedAt).toBeNull()
+    const event = db.select().from(schema.events).all().find((e) => e.code === 'PUBLISH_CANCELLED')
+    expect(event).toBeTruthy()
+  })
+
+  it('offers a send time at review and stops once the row settles', async () => {
+    const open = (await get(`/api/v1/publications/${publicationId}`)).json()
+    expect(open.scheduleProposal.at).toBeTruthy()
+    expect(new Date(open.scheduleProposal.at).getTime()).toBeGreaterThanOrEqual(Date.now() - 5 * 60_000)
+    expect(open.scheduleProposal.reason).toBeTruthy()
+
+    await post(`/api/v1/publications/${publicationId}/approve`, { scheduled_for: soon() })
+    const closed = (await get(`/api/v1/publications/${publicationId}`)).json()
+    expect(closed.scheduleProposal).toBeNull()
+  })
+})
+
+describe('the calendar', () => {
+  const window = () => ({
+    from: new Date(Date.now() - 24 * 60 * 60_000).toISOString(),
+    to: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+  })
+
+  const calendar = async () => {
+    const { from, to } = window()
+    return (await get(`/api/v1/calendar?${new URLSearchParams({ from, to })}`)).json()
+  }
+
+  it('shows what is planned and what already went out, as one list', async () => {
+    // One scheduled ahead, one already sent behind.
+    await post(`/api/v1/publications/${publicationId}/approve`, {
+      scheduled_for: new Date(Date.now() + 6 * 60 * 60_000).toISOString(),
+    })
+
+    // A second story: a publication is unique per story x outlet.
+    const olderStoryId = randomUUID()
+    db.insert(schema.stories)
+      .values({
+        id: olderStoryId,
+        title: 'Immich v1.141.0',
+        summary: 'The release before.',
+        status: 'PLACED',
+        dedupVerdict: 'NEW',
+      })
+      .run()
+
+    const sentId = randomUUID()
+    db.insert(schema.publications)
+      .values({
+        id: sentId,
+        storyId: olderStoryId,
+        outletId: 'discord-test',
+        status: 'PUBLISHED',
+        origin: 'managing-editor',
+        publishedAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+      })
+      .run()
+
+    const body = await calendar()
+    expect(body.entries).toHaveLength(2)
+    // Placed by when it happens, or happened — and in order.
+    expect(body.entries[0].id).toBe(sentId)
+    expect(body.entries[1].id).toBe(publicationId)
+    expect(body.timezone).toBe('UTC')
+  })
+
+  it('leaves undecided drafts off — a backlog is not a schedule', async () => {
+    const body = await calendar()
+    expect(body.entries).toHaveLength(0)
+  })
+
+  it('refuses a window it will not scan', async () => {
+    const response = await get(
+      `/api/v1/calendar?from=${new Date().toISOString()}&to=${new Date(Date.now() + 400 * 24 * 60 * 60_000).toISOString()}`,
+    )
+    expect(response.statusCode).toBe(422)
   })
 })

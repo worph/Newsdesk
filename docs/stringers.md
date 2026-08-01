@@ -127,6 +127,40 @@ Schedule (every 30 min)
 Where the feed carries only a summary, fetch the article and include its text — the relevance
 judgement is much better with the real body than with a teaser.
 
+## Stringer 3 — Telegram ideas
+
+The old n8n pipeline had a `telegram-idea` source: someone @-mentions the bot in an ideas group and
+that message enters the pipeline as a human-curated item with no newsworthiness gate of its own.
+This is the same thing, filed as a **`tip`** — a human note, considered whole, and reported before
+the managing editor reads it, which is where the old flow's "WebFetch any links in the idea" step
+now lives.
+
+```
+Schedule (hourly)
+  → HTTP Request: Beacon `tools/call` → telegram-mcp__get_chat_history  [the bot token lives here]
+  → Code node: keep the messages that @-mention the bot, strip the mention, build a dedup key
+  → Remove Duplicates (seen in previous executions)
+  → HTTP Request: POST /api/v1/filings  { stringer_id: "telegram-news-idea", kind: "tip" }
+```
+
+Three things about it are worth knowing before you copy it:
+
+- **The @mention is the ingest signal, not a convention.** Group privacy is on, so the bot only
+  ever receives messages that name it. Filtering on the mention costs nothing and keeps the rule
+  true if privacy is ever turned off.
+- **`get_chat_history` returns a rendered transcript, not JSON** — a `[YYYY-MM-DD HH:MM] sender:
+  text` line per message, with continuation lines carrying no prefix, and no message ids at all.
+  The parser must fold continuation lines into the message above them, and the dedup key can only
+  be timestamp + sender + text.
+- **This stringer keeps state, and it is the exception.** A `tip` is considered whole: there is no
+  watermark to trim it against and no cursor in the Telegram history to ask for "since". Without
+  the `removeItemsSeenInPreviousExecutions` node every idea would be re-filed every hour and burn a
+  reporting run each time. The desk would still catch them as duplicates — semantically, one LLM
+  call later — which is exactly the cost the deterministic pre-pass exists to avoid.
+
+A second tip stringer is the reason the tip line names its stringer: `POST /api/v1/tips` refuses to
+guess between two of them, and the in-app form shows which one it is filing to.
+
 ---
 
 ## Doing it without n8n
@@ -160,10 +194,11 @@ curl -s -X POST "$BASE/api/v1/filings" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"stringer_id": "appstore-state", "kind": "snapshot", "text": "immich 1.141.0\njellyfin 10.11.11\nnextcloud 31.0.2"}'
 
-# A tip (session cookie or the ingest token)
+# A tip (session cookie or the ingest token). `stringer_id` is optional with a
+# single tip stringer and required once there are two — see Stringer 3 above.
 curl -s -X POST "$BASE/api/v1/tips" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"text": "worth writing about", "url": "https://example.com/post"}'
+  -d '{"text": "worth writing about", "url": "https://example.com/post", "stringer_id": "tip-line"}'
 ```
 
 Then open **Wire** to see what landed, what was considered, and why anything was trimmed.

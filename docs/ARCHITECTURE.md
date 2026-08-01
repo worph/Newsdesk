@@ -183,8 +183,8 @@ put an internal note in a public channel, which no amount of reviewing catches w
 reading a document rather than JSON. **Destination is configuration. Content is authored.**
 
 One declaration drives three things: the writer's tool schema, the review UI, and the published
-payload. `primary: true` marks the slot that gets the full editor and the copy desk; other slots
-render as fields beside it. That is what keeps the review screen stable across a four-key Discord
+payload. `primary: true` marks the slot that gets the full editor and the copy desk; other slots —
+the headline among them — render as fields above it. That is what keeps the review screen stable across a four-key Discord
 embed and a one-key Telegram message — it is always *a document plus a few fields*.
 
 Three further properties:
@@ -309,11 +309,38 @@ yielded nothing is a success and says so.
 that contributed to it, and to the earlier story it duplicates or updates.
 
 **Publication** (one row per story × outlet — this *is* the ledger) — `PROPOSED` → `DRAFTING` →
-`AWAITING_APPROVAL` → `APPROVED` → `PUBLISHED`, with `REJECTED` and `FAILED` terminal.
+`AWAITING_APPROVAL` → `APPROVED` | `SCHEDULED` → `PUBLISHED`, with `REJECTED` and `FAILED` terminal.
 
 Approval is **per outlet**. A story running on a public Discord channel and in an internal Nextcloud
 Talk room produces two drafts, two chat threads, and two independent decisions. The review surface
 must make it unmistakable that approving one does not ship the other.
+
+### Approving to a time
+
+Approval commits to *when*, not only *whether*. `SCHEDULED` is `APPROVED` with a date on it: the
+payload is frozen at the same moment and by the same code, and only the instant the queue hands it
+to the wire moves. Approving with no time is the original behaviour and still sends immediately.
+
+The mechanism is the queue and nothing else. Job rows already carry `run_after` and the worker only
+claims jobs whose time has come, so a scheduled post is a job dated forward. It survives a restart
+for free — a waiting job is `PENDING`, and the boot-time reclaim only touches `RUNNING` rows.
+
+`SCHEDULED` closes the desk exactly as `APPROVED` does, and for a sharper reason: the payload was
+frozen hours before it will be sent, so an edit that appeared to take would be the widest possible
+gap between what the screen shows and what goes out. The way back is **withdraw**, which deletes the
+queued job and clears the frozen payload — clearing it is what genuinely reopens the row, since a
+re-approval must re-freeze. Withdrawal is reliable while the scheduled time is still in the future;
+a job the worker has already claimed cannot be recalled, so the publish handler re-reads the row and
+declines quietly rather than parking a failed job for what the human asked for.
+
+**Who decides the time.** The managing editor supplies one enum per placement — `urgency`:
+`breaking` | `normal` | `evergreen` — and nothing else. That is the only part of scheduling which is
+a judgement: whether a story goes stale by morning is something only a reader of it can say. The
+slot itself is arithmetic over the outlet's `cadence` (posting window, days, minimum spacing, daily
+cap) and what that outlet already owes the calendar, so it is computed in code, deterministically
+and with tests, rather than spent on an inference call. The proposal is computed when a human opens
+the review screen and is **never stored**: `scheduled_for` only ever holds a commitment, and a
+proposal measured against a calendar that has since filled up would be worse than none.
 
 Every transition is written to an append-only event log with a timestamp and an actor (`system` or
 `human`). The audit trail is not bolted on; it is the same rows the UI reads.
@@ -335,15 +362,20 @@ invented key. Writing is **per outlet** rather than one canonical draft adapted 
 volume quality is worth more than saved calls, and the shared story keeps the versions factually
 aligned. The managing editor's `angle` rides along as guidance.
 
-## 8. Review — an editable document with the copy desk beside it
+## 8. Review — an editable document with the copy desk a click away
 
 The review surface is the product. It behaves like a document with a conversation attached, not a
 form with a robot in it.
 
-- **The primary slot is a live document.** Directly typeable markdown with preview. Other slots are
-  fields beside it. What you save is what ships.
+- **The decision is at the top, the copy under it, the context below that.** Approve, send now, save
+  and spike sit above the fold; the placement's reason, the story and the sibling placements read as
+  material for that decision rather than as the page.
+- **The primary slot is a live document.** Directly typeable markdown, opened rendered — reading is
+  what the screen is for and editing is the exception. One toggle flips the headline and the body
+  together, so the two never disagree about which mode you are in. What you save is what ships.
 - **The copy desk edits in place.** "shorter", "lead with the security fix", "three headlines" — the
-  document updates as you talk, the reply beside it.
+  document updates as you talk. It opens on request rather than sitting beside the document, because
+  most drafts are read and approved without asking it anything.
 - **Every change is a version.** Copy-desk edits and manual saves both snapshot, so any revision is
   one click from undone. That is where safety lives, rather than an accept/reject ceremony on every
   suggestion.
@@ -363,7 +395,9 @@ Breaking one of these breaks the product, not just a feature.
    outlet.**
 2. **No inference runs between approval and send.** Publishing is a merge of stored configuration
    and approved slot values. If a model could alter the payload after approval, the approval would
-   mean nothing.
+   mean nothing. Scheduling stretches that gap from seconds to hours, which makes the invariant
+   more valuable rather than less: the bytes are fixed at approval and the only thing a schedule
+   moves is the clock. Changing what is sent means withdrawing and approving again.
 3. **The model never authors a destination — or a call.** Channel ids, endpoints, and placement keys
    are literals in configuration. Models fill slots and propose placements from a generated enum;
    they never write an address. The same holds for the reporter's tools: which tool, which endpoint

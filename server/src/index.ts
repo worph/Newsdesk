@@ -16,7 +16,9 @@ import { getOrCreateSecret, getSetting, SETTING, setSetting } from './settings.j
 async function main(): Promise<void> {
   const env = loadEnv()
   const { db } = openDb(env.dbFile)
-  runMigrations(db, env.migrationsDir)
+  // Logged once the app exists — this runs before there is a logger, and what
+  // it has to say is worth structured output rather than a bare console line.
+  const migrations = runMigrations(db, env.migrationsDir)
 
   const sessionSecret = getOrCreateSecret(db, SETTING.sessionSecret)
 
@@ -72,14 +74,29 @@ async function main(): Promise<void> {
         const config = reporting()
         return config?.enabled ? config.kinds : []
       },
-      enqueuePublish: (publicationId) => {
-        enqueue(db, 'publish', publicationId)
+      // `runAfter` is what makes a scheduled post work: the queue already only
+      // claims jobs whose time has come, so a future date is the whole feature.
+      enqueuePublish: (publicationId, runAfter) => {
+        enqueue(db, 'publish', publicationId, runAfter)
       },
       enqueueWriter,
       driver,
       publicUrl: env.publicUrl,
     },
   })
+
+  if (migrations.adoptedBaseline) {
+    app.log.warn(
+      { baseline: migrations.adoptedBaseline },
+      'baseline was already applied — recorded it rather than running it again',
+    )
+  }
+  if (migrations.reconciled.length > 0) {
+    app.log.warn({ statements: migrations.reconciled }, 'brought the schema back in line with the migrations')
+  }
+  if (migrations.extra.length > 0) {
+    app.log.info({ objects: migrations.extra }, 'database holds objects no migration creates')
+  }
 
   if (env.disableAuth) {
     app.log.warn('NEWSDESK_DISABLE_AUTH is set — every request counts as signed in. Development only.')

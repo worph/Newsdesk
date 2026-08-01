@@ -58,6 +58,18 @@ stringers:
     name: Tip line
     kind: tip
 
+  # Compatibility with the old n8n pipeline's `telegram-idea` source: someone
+  # @-mentions the bot in the ideas group and that message becomes a tip here.
+  # A tip either way — a human note, considered whole, reported before the
+  # managing editor reads it — so the only difference from the tip line above
+  # is which door it came through, which is why it gets its own row.
+  #
+  # The polling lives in the n8n workflow, not here: see docs/stringers.md,
+  # "Stringer 3 — Telegram ideas".
+  - id: telegram-news-idea
+    name: Telegram ideas
+    kind: tip
+
   - id: github-appstore
     name: GitHub stringer — AppStore releases
     kind: report
@@ -94,6 +106,16 @@ outlets:
     voice: alicia
     endpoint: beacon
     tool: discord-mcp__send_embed
+    # When this outlet posts, as opposed to what it posts. The desk proposes the
+    # next slot that fits and shows it at review — you always see a time before
+    # it is committed, and "Send now" is always there. Omit the whole block and
+    # the outlet posts the moment you approve, as it did before scheduling.
+    cadence:
+      timezone: Europe/Paris   # optional; falls back to the desk timezone
+      days: [1, 2, 3, 4, 5]    # 0 = Sunday
+      window: { from: "09:00", to: "18:00" }
+      min_gap_minutes: 90
+      max_per_day: 3
     args:
       channelId: "1514993197082742814"
       timestamp: true

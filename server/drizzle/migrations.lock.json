@@ -1,0 +1,15 @@
+{
+  "comment": "Shipped migrations are immutable: drizzle decides what to apply from the journal timestamp alone, so rewriting one makes every existing database re-run it. Append new migrations; never edit these.",
+  "migrations": [
+    {
+      "tag": "0000_baseline",
+      "when": 1785516232799,
+      "sha256": "cccfcff637723f65a70f06db60dabdb0aea061eaa7bfd6e35e6b655d5ff851b3"
+    },
+    {
+      "tag": "0001_lucky_crusher_hogan",
+      "when": 1785605553580,
+      "sha256": "8032c774121d353d9b6d9d0d50649aa338bac21a60eeeb7f65155c4ed1d61f8c"
+    }
+  ]
+}

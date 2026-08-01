@@ -40,6 +40,45 @@ export async function currentSubscription(): Promise<PushSubscription | null> {
   return registration.pushManager.getSubscription()
 }
 
+/** The inverse of the conversion above, to compare a live subscription's key. */
+function uint8ArrayToUrlBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+export interface DeviceRegistration {
+  /** This browser holds a push subscription. */
+  registered: boolean
+  /**
+   * It was made against a VAPID key the desk no longer serves, so nothing sent
+   * to it can be delivered.
+   *
+   * This is the failure the old screen could not see. A browser keeps its
+   * subscription happily after the desk's keypair changes — which is what
+   * re-creating the database does — and reports itself registered forever while
+   * every send is refused. Comparing keys is the only way to catch it from
+   * here, and re-subscribing is the fix.
+   */
+  stale: boolean
+}
+
+export async function deviceRegistration(serverKey: string): Promise<DeviceRegistration> {
+  const subscription = await currentSubscription()
+  if (!subscription) return { registered: false, stale: false }
+
+  const key = subscription.options.applicationServerKey
+  // A subscription that will not say what key it holds is taken at its word:
+  // claiming staleness we cannot prove would send people round a pointless loop.
+  if (!key) return { registered: true, stale: false }
+
+  return {
+    registered: true,
+    stale: uint8ArrayToUrlBase64(key as ArrayBuffer) !== serverKey.replace(/=+$/, ''),
+  }
+}
+
 export async function subscribeToPush(): Promise<{ ok: boolean; reason?: string }> {
   if (!pushSupported()) return { ok: false, reason: 'This browser does not support web push.' }
 

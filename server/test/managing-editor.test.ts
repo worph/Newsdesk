@@ -357,7 +357,9 @@ describe('applying the result', () => {
     )
 
     const proposed = JSON.parse(db.select().from(schema.stories).get()!.proposedPlacements!)
-    expect(proposed).toEqual([{ outlet_id: 'discord-test', reason: 'because' }])
+    // Urgency is part of the proposal, so it is part of the diff: "you moved
+    // this to the morning" is an override worth being able to see.
+    expect(proposed).toEqual([{ outlet_id: 'discord-test', reason: 'because', urgency: 'normal' }])
   })
 
   it('records several stories from one filing', () => {
@@ -502,5 +504,71 @@ describe('assignFiling end to end, on a scripted driver', () => {
 
     expect(db.select().from(schema.publications).get()?.outletId).toBe('discord-test')
     expect(driver.prompts).toHaveLength(2)
+  })
+})
+
+describe('what reaches the placement queue', () => {
+  it('reports placed and held stories, and only those', () => {
+    // The notification is driven off this list, so a spiked story appearing in
+    // it would put a chime on something nobody has to decide.
+    const { db } = openTestDb()
+    seedDesk(db)
+    const filingId = fileFiling(db, 'Three things happened.')
+
+    const applied = applyManagingEditorResult(
+      db,
+      filingId,
+      parse(['discord-test'], {
+        stories: [
+          {
+            title: 'Placed',
+            summary: 'S',
+            verdict: 'NEW',
+            placements: [{ outlet_id: 'discord-test', reason: 'r' }],
+          },
+          {
+            title: 'Held',
+            summary: 'S',
+            verdict: 'NEW',
+            hold_reason: 'the filing did not say which version',
+            placements: [{ outlet_id: 'discord-test', reason: 'r' }],
+          },
+          { title: 'Spiked', summary: 'S', verdict: 'NEW', placements: [] },
+        ],
+      }),
+    )
+
+    expect(applied.opened.map((story) => ({ title: story.title, held: story.held }))).toEqual([
+      { title: 'Placed', held: false },
+      { title: 'Held', held: true },
+    ])
+  })
+
+  it('reports nothing for a duplicate, which is already told', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+    db.insert(schema.stories)
+      .values({ id: 'earlier', title: 'Earlier', summary: 'S', status: 'PLACED', dedupVerdict: 'NEW' })
+      .run()
+    const filingId = fileFiling(db, 'The same thing again.')
+
+    const applied = applyManagingEditorResult(
+      db,
+      filingId,
+      parse(['discord-test'], {
+        stories: [
+          {
+            title: 'Again',
+            summary: 'S',
+            verdict: 'DUPLICATE',
+            related_story_id: 'earlier',
+            dedup_reason: 'same release',
+            placements: [],
+          },
+        ],
+      }),
+    )
+
+    expect(applied.opened).toEqual([])
   })
 })

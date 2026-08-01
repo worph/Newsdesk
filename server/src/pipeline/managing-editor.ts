@@ -6,6 +6,7 @@ import { logEvent } from '../events.js'
 import type { InferenceDriver } from '../ports/inference/types.js'
 import { runStructured } from '../ports/inference/structured.js'
 import { fillPrompt, loadPrompt } from '../prompts/load.js'
+import { notifyPlacementsWaiting, type PlacedStory } from '../push.js'
 import {
   checkVerdictLinks,
   managingEditorResultSchema,
@@ -158,6 +159,8 @@ export interface AppliedResult {
   placed: number
   dropped: number
   outcome: string
+  /** Stories that now stand in the placement queue, for the notification. */
+  opened: PlacedStory[]
 }
 
 /**
@@ -181,6 +184,7 @@ export function applyManagingEditorResult(
   options: ApplyOptions = {},
 ): AppliedResult {
   const storyIds: string[] = []
+  const opened: PlacedStory[] = []
   let placed = 0
   let dropped = 0
 
@@ -244,6 +248,10 @@ export function applyManagingEditorResult(
 
       if (status === 'DROPPED') {
         dropped++
+      } else {
+        // PLACED or HELD: either way it is now standing in the queue with a
+        // decision on it, which is the thing worth telling a phone about.
+        opened.push({ storyId: id, title: story.title, held })
       }
 
       // A duplicate proposes nothing: it is already told. A HELD story keeps
@@ -260,6 +268,9 @@ export function applyManagingEditorResult(
               origin: 'managing-editor',
               placementReason: placement.reason,
               angle: placement.angle ?? null,
+              // Read at review to propose a send time. Never acted on by
+              // itself: a human sees and commits every time.
+              urgency: placement.urgency,
               slots: null,
               payload: null,
             })
@@ -310,7 +321,7 @@ export function applyManagingEditorResult(
       ? `no story — ${result.no_story_reason ?? 'nothing in this filing'}`
       : `${result.stories.length} story/stories: ${placed} placement(s) proposed, ${dropped} spiked`
 
-  return { storyIds, placed, dropped, outcome }
+  return { storyIds, placed, dropped, outcome, opened }
 }
 
 /** Run the managing editor over one filing and record the outcome. */
@@ -380,6 +391,10 @@ export async function assignFiling(
     .set({ status: 'PROCESSED', outcome: applied.outcome })
     .where(eq(schema.filings.id, filingId))
     .run()
+
+  // Best-effort, and after the rows are safely written: a push that cannot go
+  // out must never cost us the stories it was announcing.
+  await notifyPlacementsWaiting(db, applied.opened).catch(() => undefined)
 
   return applied
 }

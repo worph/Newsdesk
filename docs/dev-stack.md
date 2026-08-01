@@ -199,6 +199,7 @@ Honest account of what this stack cannot do yet:
 | Wire empty and korben quiet | it waits for `/healthz` before its first run; check `docker compose … logs korben` |
 | Native module errors on start | `node_modules` leaked in from the host — `down -v` and rebuild |
 | `Cannot find module` after adding a dependency | the anonymous `node_modules` volume survived the rebuild — add `--renew-anon-volumes` |
+| A click fails right after you saved a file | `tsx watch` is restarting the API, and for a second or two nothing is listening. The screen now says so ("the API is not accepting connections…") and the `web` logs show `http proxy error`; click again. A bare `Internal Server Error` here means the proxy handler in `web/vite.config.ts` is not in effect |
 | Every job fails with "no JSON object found" | the `claude-code` behind your Beacon is not logged in — see [Inference](#inference) |
 | `Blocked request. This host … is not allowed` | Vite is rejecting the Host header — `allowedHosts` in `web/vite.config.ts` |
 | Edits do nothing, no restart logged | file watching is not firing — confirm `CHOKIDAR_USEPOLLING=true` reached the container |

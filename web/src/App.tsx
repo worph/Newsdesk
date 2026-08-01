@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { api } from './api'
 import { Layout } from './components/Layout'
+import { Calendar } from './pages/Calendar'
 import { Config } from './pages/Config'
 import { Login } from './pages/Login'
 import { Queue } from './pages/Queue'
@@ -33,6 +34,7 @@ export function App() {
     <Layout>
       <Routes>
         <Route path="/queue" element={<Queue />} />
+        <Route path="/calendar" element={<Calendar />} />
         <Route path="/stories" element={<Stories />} />
         <Route path="/stories/:id" element={<Story />} />
         <Route path="/review/:id" element={<Review />} />

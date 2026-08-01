@@ -18,6 +18,14 @@ import type { ToolSchema } from '../ports/inference/types.js'
 
 export const DEDUP_VERDICTS = ['NEW', 'DUPLICATE', 'UPDATE'] as const
 
+/**
+ * How long a placement can wait. This is the one scheduling input that is a
+ * judgement rather than arithmetic — only a reader of the story can say whether
+ * it goes stale by morning — so it is asked for here and the clock work is
+ * done in code. See pipeline/schedule.ts.
+ */
+export const URGENCIES = ['breaking', 'normal', 'evergreen'] as const
+
 export interface OutletChoice {
   id: string
   name: string
@@ -35,6 +43,7 @@ const placementShape = z.object({
   outlet_id: z.string(),
   reason: z.string().min(1, 'a placement needs a reason — it is shown beside the toggle at review'),
   angle: z.string().optional(),
+  urgency: z.enum(URGENCIES).default('normal'),
 })
 
 const storyShape = z.object({
@@ -164,6 +173,12 @@ export function managingEditorTools(outlets: OutletChoice[]): ToolSchema[] {
             type: 'string',
             description: 'Optional note to the writer: what to lead with for this audience.',
           },
+          urgency: {
+            type: 'string',
+            enum: [...URGENCIES],
+            description:
+              'How long this can wait. "breaking" sends as soon as it is approved, ignoring the posting window — use it only when a delay would cost the reader something. "normal" takes the next slot. "evergreen" waits behind everything already queued. Default "normal".',
+          },
         },
         required: ['outlet_id', 'reason'],
         additionalProperties: false,
@@ -197,7 +212,8 @@ export function managingEditorShapeHint(outletIds: string[]): string {
     '      "dedup_reason": string?,      // why that verdict',
     '      "hold_reason": string?,       // only if it cannot be judged as filed',
     '      "label": string?,             // coarse, sorts the queue, never filters',
-    `      "placements": [{ "outlet_id": ${ids}, "reason": string, "angle": string? }]`,
+    `      "placements": [{ "outlet_id": ${ids}, "reason": string, "angle": string?,`,
+    '                      "urgency": "breaking" | "normal" | "evergreen" }]  // default "normal"',
     '    }',
     '  ],',
     '  "no_story_reason": string?        // when "stories" is empty',

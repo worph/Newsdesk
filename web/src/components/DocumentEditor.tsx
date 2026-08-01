@@ -26,6 +26,7 @@ export function DocumentEditor({
   monospace = true,
   id,
   aside,
+  preview: controlled,
 }: {
   value: string
   onChange: (next: string) => void
@@ -41,8 +42,16 @@ export function DocumentEditor({
   id?: string
   /** Extra controls beside the preview toggle. */
   aside?: ReactNode
+  /**
+   * Controlled preview. A surface that reads and edits more than this one
+   * document — the review screen, where the headline flips with the body —
+   * owns the mode and renders the single toggle itself; passing it here hides
+   * the local one, so the two can never disagree.
+   */
+  preview?: boolean
 }) {
-  const [preview, setPreview] = useState(false)
+  const [own, setOwn] = useState(false)
+  const preview = controlled ?? own
   const over = max !== undefined && value.length > max
 
   return (
@@ -60,13 +69,15 @@ export function DocumentEditor({
               {value.length}/{max}
             </span>
           )}
-          <button
-            type="button"
-            onClick={() => setPreview((p) => !p)}
-            className="text-xs text-desk-500 hover:text-desk-700"
-          >
-            {preview ? 'edit' : 'preview'}
-          </button>
+          {controlled === undefined && (
+            <button
+              type="button"
+              onClick={() => setOwn((p) => !p)}
+              className="text-xs text-desk-500 hover:text-desk-700"
+            >
+              {preview ? 'edit' : 'preview'}
+            </button>
+          )}
         </div>
       </div>
 

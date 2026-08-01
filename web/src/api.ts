@@ -262,6 +262,8 @@ export interface PublicationDetail {
     payload: string | null
     error: string | null
     approvedAt: string | null
+    scheduledFor: string | null
+    urgency: string | null
     publishedAt: string | null
   }
   story: { id: string; title: string; summary: string; url: string | null; dedupVerdict: string }
@@ -269,6 +271,51 @@ export interface PublicationDetail {
   slotSpec: Record<string, SlotDef>
   preview: PayloadPreview
   siblings: Array<{ id: string; outletId: string; status: string }>
+  /**
+   * The send time the desk suggests, computed for this request. Null once the
+   * publication has settled — there is nothing left to propose.
+   */
+  scheduleProposal: { at: string; reason: string } | null
+  /** The desk's timezone, so times read the same here as they do in the cadence. */
+  timezone: string
+}
+
+/** One planned or completed send, as the Calendar page draws it. */
+export interface CalendarEntry {
+  id: string
+  storyId: string
+  storyTitle: string | null
+  outletId: string
+  outletName: string | null
+  status: string
+  urgency: string | null
+  scheduledFor: string | null
+  publishedAt: string | null
+  error: string | null
+  /** When it goes out, or when it did. What the entry is placed by. */
+  at: string
+}
+
+/**
+ * One publication as it appears in a list. The article half of the Queue —
+ * enough to decide whether to open it without opening it.
+ */
+export interface PublicationRow {
+  id: string
+  storyId: string
+  storyTitle: string | null
+  storySummary: string | null
+  storyCreatedAt: string | null
+  outletId: string
+  outletName: string | null
+  status: string
+  origin: string
+  placementReason: string | null
+  approvedAt: string | null
+  publishedAt: string | null
+  error: string | null
+  /** The opening of the primary slot: what was actually written. */
+  preview: string | null
 }
 
 export interface DraftVersion {
@@ -332,7 +379,7 @@ export const api = {
     request<{ filing: FilingDetail; sources: DossierSource[] }>(`/api/v1/filings/${id}`),
   reportFiling: (id: string) =>
     request<{ queued: true }>(`/api/v1/filings/${id}/report`, { method: 'POST' }),
-  postTip: (body: { text: string; url?: string }) =>
+  postTip: (body: { text: string; url?: string; stringer_id?: string }) =>
     request<{ result: { id: string; note: string } }>('/api/v1/tips', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -359,6 +406,13 @@ export const api = {
   rerunStory: (id: string) =>
     request<{ queued: number }>(`/api/v1/stories/${id}/rerun`, { method: 'POST' }),
   listJobs: () => request<{ stats: Record<string, number>; jobs: JobRow[] }>('/api/v1/jobs'),
+  listPublications: (params: { status?: string; limit?: number } = {}) => {
+    const search = new URLSearchParams()
+    if (params.status) search.set('status', params.status)
+    if (params.limit) search.set('limit', String(params.limit))
+    const qs = search.toString()
+    return request<{ publications: PublicationRow[] }>(`/api/v1/publications${qs ? `?${qs}` : ''}`)
+  },
   getPublication: (id: string) => request<PublicationDetail>(`/api/v1/publications/${id}`),
   savePublication: (id: string, slots: Record<string, string>) =>
     request<{ slots: Record<string, string>; versionId: string }>(`/api/v1/publications/${id}`, {
@@ -374,10 +428,33 @@ export const api = {
     }),
   getPayload: (id: string) =>
     request<PayloadPreview & { frozen: boolean }>(`/api/v1/publications/${id}/payload`),
-  approvePublication: (id: string) =>
-    request<{ status: string; payload: Record<string, unknown> }>(
+  /**
+   * Approve, and optionally say when. Omitting the time sends immediately —
+   * the behaviour approval always had, and what the "Send now" button uses.
+   */
+  approvePublication: (id: string, scheduledFor?: string) =>
+    request<{ status: string; payload: Record<string, unknown>; scheduledFor: string | null }>(
       `/api/v1/publications/${id}/approve`,
-      { method: 'POST' },
+      { method: 'POST', body: JSON.stringify(scheduledFor ? { scheduled_for: scheduledFor } : {}) },
+    ),
+  /** Pull a scheduled send back. Reopens the draft for editing. */
+  withdrawPublication: (id: string) =>
+    request<{ status: string }>(`/api/v1/publications/${id}/withdraw`, { method: 'POST' }),
+  /** Move a scheduled send. Changes when the approved bytes go out, never what they are. */
+  reschedulePublication: (id: string, scheduledFor: string) =>
+    request<{ status: string; scheduledFor: string }>(`/api/v1/publications/${id}/schedule`, {
+      method: 'PATCH',
+      body: JSON.stringify({ scheduled_for: scheduledFor }),
+    }),
+  getTimezone: () => request<{ timezone: string; detected: string }>('/api/v1/settings/timezone'),
+  setTimezone: (timezone: string) =>
+    request<{ timezone: string }>('/api/v1/settings/timezone', {
+      method: 'PUT',
+      body: JSON.stringify({ timezone }),
+    }),
+  getCalendar: (from: string, to: string) =>
+    request<{ entries: CalendarEntry[]; timezone: string }>(
+      `/api/v1/calendar?${new URLSearchParams({ from, to })}`,
     ),
   rejectPublication: (id: string, reason?: string) =>
     request<{ status: string }>(`/api/v1/publications/${id}/reject`, {
@@ -393,6 +470,13 @@ export const api = {
       { method: 'POST', body: JSON.stringify({ message }) },
     ),
   pushKey: () => request<{ publicKey: string }>('/api/v1/push/key'),
+  /** What the desk believes, so Settings can disagree with what the browser believes. */
+  pushStatus: () => request<{ publicKey: string; devices: number }>('/api/v1/push/status'),
+  testPush: () =>
+    request<{ subscribers: number; delivered: number; dropped: number; failed: number }>(
+      '/api/v1/push/test',
+      { method: 'POST' },
+    ),
   subscribePush: (body: { endpoint: string; keys: { p256dh: string; auth: string }; ua?: string }) =>
     request<{ id: string }>('/api/v1/push/subscribe', { method: 'POST', body: JSON.stringify(body) }),
   unsubscribePush: (endpoint: string) =>

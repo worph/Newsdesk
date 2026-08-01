@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import {
   parseConfig,
   reportingSchema,
+  type Cadence,
   type Config,
   type ConfigIssue,
   type ArgsSpec,
@@ -84,6 +85,7 @@ export function readConfig(db: Db): Config {
         ...(t.tool ? { tool: t.tool } : {}),
         ...(t.destinationKey ? { destination_key: t.destinationKey } : {}),
         args: JSON.parse(t.argsSpec) as ArgsSpec,
+        ...(t.cadence ? { cadence: JSON.parse(t.cadence) as Cadence } : {}),
       })),
   }
 }
@@ -192,6 +194,7 @@ export function writeConfig(db: Db, input: unknown, author: string): Config {
         tool: t.tool ?? null,
         destinationKey: t.destination_key ?? null,
         argsSpec: JSON.stringify(t.args),
+        cadence: t.cadence ? JSON.stringify(t.cadence) : null,
       }
       tx.insert(schema.outlets).values(row).onConflictDoUpdate({ target: schema.outlets.id, set: row }).run()
     }

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import { useArticleQueue, usePlacementQueue } from '../queue'
 
 /**
  * The four groups from IMPLEMENTATION.md section 7. Screens that are not built
@@ -11,6 +12,7 @@ import { api } from '../api'
 const NAV = [
   { group: 'Desk', items: [
     { to: '/queue', label: 'Queue', ready: true },
+    { to: '/calendar', label: 'Calendar', ready: true },
     { to: '/tips', label: 'Tip line', ready: true },
   ] },
   { group: 'Archive', items: [{ to: '/stories', label: 'Stories', ready: true }] },
@@ -21,6 +23,27 @@ const NAV = [
     { to: '/settings', label: 'Settings', ready: true },
   ] },
 ]
+
+/**
+ * How much is standing at the gate, wherever you are in the app.
+ *
+ * Both halves of the queue, because both are decisions waiting on you — a
+ * badge that counted only drafts would go quiet while placements piled up.
+ */
+function QueueBadge() {
+  const placements = usePlacementQueue()
+  const articles = useArticleQueue()
+
+  const waiting =
+    (placements.data?.stories.length ?? 0) + (articles.data?.publications.length ?? 0)
+  if (waiting === 0) return null
+
+  return (
+    <span className="ml-2 rounded-full bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[11px] text-emerald-700 dark:text-emerald-400">
+      {waiting}
+    </span>
+  )
+}
 
 function HealthPill() {
   const { data } = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 30_000 })
@@ -89,6 +112,7 @@ export function Layout({ children }: { children: ReactNode }) {
                     }
                   >
                     {item.label}
+                    {item.to === '/queue' && <QueueBadge />}
                   </NavLink>
                 ) : (
                   <span
