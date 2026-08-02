@@ -131,8 +131,16 @@ export function Review() {
   // fixing a bad send means editing and approving again.
   const sending = publication.status === 'APPROVED'
   const scheduled = publication.status === 'SCHEDULED'
+  // Its slot has come and it is waiting for a person to publish it in a real
+  // browser. The payload is frozen and may already be typed into a composer, so
+  // the desk is closed here exactly as it is for a scheduled send.
+  const awaitingSend = publication.status === 'AWAITING_SEND'
   const settled =
-    sending || scheduled || publication.status === 'PUBLISHED' || publication.status === 'REJECTED'
+    sending ||
+    scheduled ||
+    awaitingSend ||
+    publication.status === 'PUBLISHED' ||
+    publication.status === 'REJECTED'
   const dirty = JSON.stringify(draft) !== JSON.stringify(publication.slots)
   const manual = story.origin === 'desk'
   const decisionError = (approve.error ?? save.error ?? reject.error) as Error | undefined
@@ -160,6 +168,26 @@ export function Review() {
           <span className="text-xs text-desk-500">sent {when(publication.publishedAt)}</span>
         )}
       </div>
+
+      {/*
+        A browser outlet's slot has come and only a person can finish it. This
+        is the one call to action on the screen, above the copy, because
+        everything below is material for a decision that has already been made.
+      */}
+      {awaitingSend && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950">
+          <div className="flex-1 text-sm text-amber-900 dark:text-amber-200">
+            <strong>Waiting for you to publish this on {outlet.name}.</strong> The desk will open the
+            page and type the approved copy; you press their publish button.
+          </div>
+          <button
+            onClick={() => navigate(`/review/${publication.id}/live`)}
+            className="rounded-md bg-amber-900 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800 dark:bg-amber-200 dark:text-amber-950"
+          >
+            Open the browser
+          </button>
+        </div>
+      )}
 
       {/*
         The decision, at the top. Everything under it is material for making it:

@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import cookie from '@fastify/cookie'
 import fastifyStatic from '@fastify/static'
 import Fastify, { type FastifyInstance } from 'fastify'
+import { registerVncProxy } from './api/browser.js'
 import { registerRoutes } from './api/routes.js'
 import { GATE_TRUSTED } from './auth.js'
 import { createGateCheck, type GateCheck } from './gate.js'
@@ -68,6 +69,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   }
 
   registerRoutes(app, options.db, VERSION, options.receiveOptions ?? {})
+
+  /**
+   * A proxy's upstream is fixed when it is registered, so this is wired at boot
+   * rather than per request — and awaited here, where registration already is.
+   * It is a no-op unless a browser engine with a viewer is configured.
+   */
+  await registerVncProxy(app, options.db)
 
   // The SPA is built into server/public. Absent in dev, where Vite serves it.
   if (existsSync(options.publicDir)) {

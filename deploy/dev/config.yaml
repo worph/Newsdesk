@@ -18,6 +18,14 @@ mcp_endpoints:
     name: local beacon
     url: http://host.docker.internal:3000/mcp/
 
+browser_engines:
+  # The headed Chromium in this stack. `viewer: novnc` puts it inside the desk,
+  # proxied behind the desk's own session — the container has no host port.
+  - id: sidecar
+    name: Dev browser
+    api_base: http://browser:9746
+    viewer: novnc
+
 voices:
   - id: alicia
     name: Alicia
@@ -95,6 +103,78 @@ outlets:
         label: Body
         max: 4096
         primary: true
+
+  # A destination with no API, published the way a person would: the desk opens
+  # the page, types what you approved, proves it byte for byte, and then stops
+  # so you can press their publish button. `composer` is the stand-in site in
+  # this stack (deploy/dev/fixtures/composer.html) — swap the url and the
+  # selectors and the same outlet drives a real one.
+  - id: devgram
+    name: Devgram
+    description: |
+      A site with no API. Placement a story here to watch a browser publish end
+      to end — hand over, compose, byte-check, your click, then verify.
+    role: publish
+    driver: browser
+    voice: alicia
+    engine: sidecar
+    args:
+      # The page, pinned. The desk navigates here itself; the recipe never
+      # names it, because a destination in prose is a destination a model or an
+      # assistant could quietly move.
+      url: "http://composer/"
+      body:
+        slot: markdown
+        label: Post
+        max: 4096
+        primary: true
+    recipe: |
+      ## Stage
+      The composer is the textarea at the top of the page.
+      wait: textarea#composer
+      fill: textarea#composer <- body
+
+      ## Hand over
+      Read the post, then press the green **Publish** button under the box.
+
+      ## Verify
+      The newest post appears first, with its permalink as the link above it.
+      read: #posts a.permalink -> url
+
+  # A real destination behind a real login. Docmost has an API, but driving it
+  # through the browser is the point here: it exercises the sign-in handoff,
+  # which is the part of browser publishing that needs a person.
+  - id: docmost
+    name: Docmost — yunderalabs
+    description: |
+      The internal knowledge base. Notes and write-ups for the team, not for an
+      outside reader.
+    role: publish
+    driver: browser
+    voice: alicia
+    engine: sidecar
+    args:
+      url: "https://docmost-yunderalabs.nsl.sh/home"
+      body:
+        slot: markdown
+        label: Note
+        max: 8000
+        primary: true
+    recipe: |
+      ## Signed out
+      Docmost bounces an unauthenticated visit to /login, where the email field
+      is the one thing a signed-in page never has.
+      when: input#email[type="email"]
+
+      ## Stage
+      TODO: verified only as far as the login page. Docmost's editor is
+      ProseMirror-based, so this is the shape it should take — check the
+      selectors against the real editor once the browser is signed in.
+      wait: div.ProseMirror[contenteditable="true"]
+      fill: div.ProseMirror[contenteditable="true"] <- body
+
+      ## Hand over
+      Read the note, then publish it in Docmost.
 
 # ── Reporting ───────────────────────────────────────────────────────────────
 # Switched OFF in dev: the phase needs a search endpoint the dev stack can

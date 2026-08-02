@@ -21,8 +21,11 @@ describe('the shipped example configuration', () => {
   it('pins a literal destination on every publish outlet', () => {
     const { config } = parseConfig(yamlToConfig(readFileSync(examplePath, 'utf8')))
     for (const outlet of config.outlets.filter((t) => t.role === 'publish')) {
-      // Each tool names its destination differently — channelId, chatId, token.
-      const key = outlet.destination_key ?? KNOWN_DESTINATION_KEYS[outlet.tool ?? '']
+      // Each tool names its destination differently — channelId, chatId, token
+      // — and a browser outlet's is the page it publishes to.
+      const key =
+        outlet.destination_key ??
+        (outlet.driver === 'browser' ? 'url' : KNOWN_DESTINATION_KEYS[outlet.tool ?? ''])
       expect(typeof key).toBe('string')
       expect(typeof outlet.args[key!]).toBe('string')
     }

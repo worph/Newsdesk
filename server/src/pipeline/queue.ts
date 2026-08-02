@@ -15,7 +15,7 @@ import { logEvent } from '../events.js'
  * See ARCHITECTURE.md invariant 9 and IMPLEMENTATION.md section 5.2.
  */
 
-export type JobKind = 'report' | 'assign' | 'write' | 'publish'
+export type JobKind = 'report' | 'assign' | 'write' | 'publish' | 'handover-followup'
 
 export interface JobRow {
   id: string

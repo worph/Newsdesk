@@ -94,6 +94,41 @@ services:
         reservations:
           memory: 128M
 
+  # ── the browser, for outlets with no API ────────────────────────────────
+  # Newsdesk's own instance, not the shared yunderalabs one: that browser is
+  # busy with other work, and a publish that got its tab stolen mid-compose
+  # would be a post half-typed into someone else's page.
+  #
+  # Nothing is exposed. The container is reachable only from the backend on
+  # `pcs`, which proxies the noVNC surface behind the desk's own session — this
+  # is an unauthenticated browser-control API in front of every destination the
+  # profile is signed into. See docs/browser-publishing.md section 12.
+  newsdesk-browser:
+    image: ghcr.io/worph/browser-mcp:latest
+    container_name: newsdesk-browser
+    restart: unless-stopped
+    shm_size: "2gb"
+    environment:
+      VNC_RESOLUTION: "1440x900x24"
+      MCP_PORT: "9746"
+      # Logins live in the volume below, so reaping Chrome costs a cold start
+      # and nothing else. Most of the day this container holds no browser.
+      IDLE_TTL_MS: "900000"
+      TZ: $TZ
+    volumes:
+      # The signed-in sessions. The one thing here that is expensive to rebuild.
+      - /DATA/AppData/newsdesk/browser-profile/:/tmp/chrome-profile
+    networks:
+      - pcs
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          memory: 256M
+    cpu_shares: 60
+
 networks:
   pcs:
     name: pcs
@@ -122,6 +157,7 @@ x-casaos:
   # $AppID it does substitute, so the path follows the house pattern.
   pre-install-cmd: |
     mkdir -p /DATA/AppData/$AppID/data &&
+    mkdir -p /DATA/AppData/$AppID/browser-profile &&
     chown -R 1000:1000 /DATA/AppData/$AppID
   author: Yundera Team
   category: Productivity

@@ -29,6 +29,8 @@ import {
   subscriptionCount,
 } from '../push.js'
 import { DEFAULT_TIMEZONE, getSetting, getOrCreateSecret, getTimezone, SETTING, setSetting } from '../settings.js'
+import { registerActionRoutes } from './actions.js'
+import { registerBrowserRoutes } from './browser.js'
 import { registerCalendarRoutes } from './calendar.js'
 import { registerComposeRoutes } from './compose.js'
 import { registerConfigVersionRoutes } from './config-versions.js'
@@ -96,6 +98,8 @@ export interface PlacementOptions extends ReceiveOptions {
   probeTimeoutMs?: number
   /** Public origin, for the OAuth redirect URI. */
   publicUrl?: string
+  /** Where browser-publish screenshots are written. Under the data dir. */
+  traceDir?: string
 }
 
 export function registerRoutes(
@@ -107,8 +111,10 @@ export function registerRoutes(
   registerIngestRoutes(app, db, receiveOptions)
   registerStoryRoutes(app, db, receiveOptions.enqueueManagingEditor, receiveOptions.enqueueWriter)
   registerPublicationRoutes(app, db, receiveOptions.enqueuePublish, receiveOptions.driver)
+  registerActionRoutes(app, db)
   registerCalendarRoutes(app, db)
   registerComposeRoutes(app, db)
+  registerBrowserRoutes(app, db, receiveOptions.traceDir ?? '/data/traces')
   registerMcpRoutes(app, db, receiveOptions.publicUrl)
   registerLogRoutes(app, db, {
     driver: receiveOptions.driver,
@@ -173,7 +179,7 @@ export function registerRoutes(
     const result = await notifyAll(db, {
       title: 'Newsdesk',
       body: 'Notifications are working. This is a test.',
-      url: '/queue',
+      url: '/now',
     })
     request.log.info(result, 'test notification')
     return result

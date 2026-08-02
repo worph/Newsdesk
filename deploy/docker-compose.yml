@@ -18,3 +18,32 @@ services:
     volumes:
       # Holds newsdesk.db and, on first boot only, a seed config.yaml.
       - ./data:/data
+
+  # ── the browser, for outlets with no API ────────────────────────────────
+  # Optional. `docker compose --profile browser up -d` starts it; without it
+  # the desk runs exactly as before and browser outlets are simply unavailable.
+  #
+  # Deliberately not published on the host. This is an unauthenticated
+  # full-browser-control API in front of every site the profile is logged into,
+  # so Newsdesk is its only door — see docs/browser-publishing.md section 12.
+  browser:
+    profiles: ["browser"]
+    image: ghcr.io/worph/browser-mcp:latest
+    container_name: newsdesk-browser
+    restart: unless-stopped
+    # Chrome crashes without it; the default 64M is nowhere near enough.
+    shm_size: "2gb"
+    mem_limit: 2g
+    environment:
+      VNC_RESOLUTION: "${BROWSER_RESOLUTION:-1440x900x24}"
+      MCP_PORT: "9746"
+      # Reap Chrome quickly. Logins survive in the profile volume below, so a
+      # cold start costs seconds and most of the day nothing is running.
+      IDLE_TTL_MS: "${BROWSER_IDLE_TTL_MS:-900000}"
+    volumes:
+      # The logged-in sessions. Without this every image update signs the
+      # browser out of every destination — the one expensive thing here.
+      - browser-profile:/tmp/chrome-profile
+
+volumes:
+  browser-profile:

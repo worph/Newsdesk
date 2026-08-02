@@ -11,8 +11,11 @@
 > Companion documents: [`architecture.md`](./architecture.md) sections 4.3 (the delivery port) and 9
 > (invariants), [`dev-stack.md`](./dev-stack.md) (how the stack is composed).
 >
-> Status: **design — nothing here is implemented.** Written 2026-08-02 against the working tree,
-> and against `sandbox/browser-mcp` at the same date.
+> Status: **implemented** — human-click outlets end to end, plus the sign-in handoff (§8). Written
+> 2026-08-02 against the working tree and against `sandbox/browser-mcp` at the same date; §12's
+> phase-1 items needed no changes to that container after all (see the note there). Autonomous
+> outlets and model-assisted navigation remain design only, and configuration refuses the first of
+> them at save time rather than half-supporting it.
 
 ---
 
@@ -70,9 +73,15 @@ timestamp link on the first card.
 
 | Section | Meaning |
 |---|---|
+| `## Signed out` | optional. `when:` selectors that exist **only** on a login page — see §8. |
 | `## Stage` | everything up to a filled composer. The agent may act here. |
 | `## Hand over` | where the agent stops and what the human is expected to do. **Its presence is what makes an outlet human-click.** |
 | `## Verify` | optional. Absent means the desk cannot confirm the send — see §5. |
+
+**Where a recipe is edited:** it is a field on the outlet, so it lives with the rest of
+configuration — the **Advanced (YAML) editor** on the Configuration screen, or the assistant. The
+forms half of that screen renders outlets as read-only cards; a recipe is prose and arguably belongs
+there, which is the obvious next improvement.
 
 Two rules the validator enforces:
 
@@ -195,12 +204,35 @@ N streams. noVNC keeps a permanent job as the escape hatch for what lives outsid
 
 ## 8. Authentication
 
-Sessions are preflighted, never merely recovered from. A cheap `session_alive` check (navigate, look
-for a selector) runs at approval and again shortly before a slot. On failure the publication goes
-`NEEDS_AUTH`, a push notification deep-links the operator into **the same viewport**, they log in,
-and the desk re-checks and resumes. One mechanism, two uses.
+Sessions are preflighted, never merely recovered from. When a slot comes due the desk navigates to
+the pinned page and looks for anything the recipe's `## Signed out` section says exists **only** on a
+login page:
 
-`NEEDS_AUTH` is visible and must never quietly consume a slot.
+```markdown
+## Signed out
+Docmost bounces an unauthenticated visit to /login, where the email field is
+the one thing a signed-in page never has.
+when: input#email[type="email"]
+```
+
+A marker rather than the opposite test, because "signed in" has no reliable shape while every login
+page has something a signed-in page does not. Declaring nothing means the destination is never
+checked — the desk does not invent a login requirement for a public page.
+
+On failure the publication goes `NEEDS_AUTH`, a push notification deep-links the operator into **the
+same viewport** pointed at the site's own login page, they sign in, and press *I'm signed in*. That
+claim is **checked, not believed**: the desk re-probes before returning the row to `AWAITING_SEND`,
+because publishing into a login page is exactly what this state exists to prevent. One mechanism,
+two uses.
+
+⚠️ **The probe must let the page settle.** A single-page app answers the navigation and *then*
+decides it needs a login — Docmost renders both the `/login` redirect and the form about a second
+later — so a check made the instant navigation resolves sees the signed-in page it is about to stop
+being. The probe polls for the marker over a short window, which costs nothing on the signed-out
+path and a few seconds once per hand-over on the healthy one.
+
+`NEEDS_AUTH` is visible, nags on the same schedule as a hand-over, and gives its slot up the same
+way. It must never quietly consume one.
 
 ## 9. Resources and cleanup
 
@@ -258,21 +290,31 @@ work**, so Newsdesk runs its **own instance of the same image** — not a fork. 
 belongs upstream, config-gated and defaulted off, so the shared instance is unaffected and the
 sidecar turns them on.
 
-**Worth doing now, independent of Newsdesk:**
+**Phase 1 needed none of it.** Three findings made the container's code fine as it stands:
+
+- its REST surface (`/api/navigate`, `/api/action` with click/type/waitFor/getText, `/api/evaluate`,
+  `/api/screenshot`, `/api/vnc-password`) is enough to run a recipe, prove the bytes and serve a
+  viewer;
+- it exposes **no tab-creating tool**, so the orphan-tab leak feared below cannot happen through it;
+- `USER_DATA_DIR` is `/tmp/chrome-profile`, so the profile is mounted from compose without touching
+  the image, and `IDLE_TTL_MS` is already an environment variable.
+
+The lease therefore lives in Newsdesk (`ports/delivery/browser/lease.ts`) rather than in the
+container — correct rather than expedient, because the sidecar is Newsdesk's own and the desk is
+single-instance by invariant 9.
+
+**Still worth doing in `browser-mcp` itself, for the shared instance:**
 
 | # | Change | Why |
 |---|---|---|
-| 1 | **Mount the Chrome profile on a volume.** `USER_DATA_DIR` currently lives in the container's writable layer and `docker-compose.yml` mounts nothing. | Every image update or `docker compose down` logs the browser out of every site. This is actively costing logins today. |
-| 2 | **Sweep orphan tabs.** `src/browser-client.ts:42` always takes `pages()[0]`; anything the LLM opens is invisible to every surface and leaks for the life of the process. | A real leak, not a hypothetical. |
+| 1 | **Mount the Chrome profile on a volume** in its own compose file | every image update or `docker compose down` logs the shared browser out of every site. Newsdesk's sidecar already does this; the shared one does not. |
+| 2 | **Sweep orphan tabs** — `src/browser-client.ts:42` always takes `pages()[0]` | anything a tab-creating client opens is invisible to every surface and leaks for the life of the process |
+| 3 | `POST /api/lease` with a pool size | only matters for the *shared* instance, where Claude Code sessions and Newsdesk would otherwise contend. Newsdesk's own sidecar needs no arbitration. |
+| 4 | Kill Chrome on release, not only on idle | §9 |
 
-**Needed before the first browser outlet goes live:**
-
-| # | Change | Why |
-|---|---|---|
-| 3 | `POST /api/lease` with a pool size (default 1), returning a per-lease viewer URL | Newsdesk, Claude Code sessions and anything else on `mcp-network` share one tab with no arbitration today |
-| 4 | Keep-alive while a lease is held; configurable idle TTL | so a long login handoff is not reaped mid-flow |
-| 5 | Close-non-first-page and optional kill-on-release | §9 |
-| 6 | Do **not** publish the API port on the host for the sidecar | it is unauthenticated full browser control, plus a VNC password endpoint, in front of live logged-in sessions. Newsdesk is the only door. |
+**Not optional, and already done in this repo's compose:** the sidecar's API port is never
+published. It is unauthenticated full browser control, plus a VNC password endpoint, in front of
+live logged-in sessions.
 
 Optionally, and only if §7 lanes are ever needed: a configurable CDP bind address, defaulting to
 loopback. Exposed on the Newsdesk-internal network only — never on the shared `mcp-network`, because

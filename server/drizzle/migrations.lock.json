@@ -25,6 +25,11 @@
       "tag": "0004_nervous_victor_mancha",
       "when": 1785672405363,
       "sha256": "6a4fafe6982d334edcf9ab14a56b4e6e4d09b99182328d776898318a84b3ee45"
+    },
+    {
+      "tag": "0005_far_amphibian",
+      "when": 1785679854249,
+      "sha256": "bfeda66432d66abd061a00f4f51d9d7b9b556be357030cdedf41533b24445fe2"
     }
   ]
 }

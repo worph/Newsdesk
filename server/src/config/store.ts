@@ -47,6 +47,16 @@ export function readConfig(db: Queryable): Config {
       .from(schema.mcpEndpoints)
       .all()
       .map((e) => ({ id: e.id, name: e.name, url: e.url })),
+    browser_engines: db
+      .select()
+      .from(schema.browserEngines)
+      .all()
+      .map((e) => ({
+        id: e.id,
+        name: e.name,
+        api_base: e.apiBase,
+        viewer: e.viewer as Config['browser_engines'][number]['viewer'],
+      })),
     voices: db
       .select()
       .from(schema.voices)
@@ -87,6 +97,8 @@ export function readConfig(db: Queryable): Config {
         ...(t.destinationKey ? { destination_key: t.destinationKey } : {}),
         args: JSON.parse(t.argsSpec) as ArgsSpec,
         ...(t.cadence ? { cadence: JSON.parse(t.cadence) as Cadence } : {}),
+        ...(t.engineId ? { engine: t.engineId } : {}),
+        ...(t.recipe ? { recipe: t.recipe } : {}),
       })),
   }
 }
@@ -190,11 +202,12 @@ export function writeConfig(db: Db, input: unknown, author: string, reason?: str
     snapshot(tx, author, reason)
 
     const endpointIds = config.mcp_endpoints.map((e) => e.id)
+    const engineIds = config.browser_engines.map((e) => e.id)
     const voiceIds = config.voices.map((p) => p.id)
     const stringerIds = config.stringers.map((s) => s.id)
     const outletIds = config.outlets.map((t) => t.id)
 
-    // Outlets first on delete (they reference voices and endpoints).
+    // Outlets first on delete (they reference voices, endpoints and engines).
     tx.delete(schema.outlets)
       .where(outletIds.length ? notInArray(schema.outlets.id, outletIds) : sql`1=1`)
       .run()
@@ -207,11 +220,21 @@ export function writeConfig(db: Db, input: unknown, author: string, reason?: str
     tx.delete(schema.mcpEndpoints)
       .where(endpointIds.length ? notInArray(schema.mcpEndpoints.id, endpointIds) : sql`1=1`)
       .run()
+    tx.delete(schema.browserEngines)
+      .where(engineIds.length ? notInArray(schema.browserEngines.id, engineIds) : sql`1=1`)
+      .run()
 
     for (const e of config.mcp_endpoints) {
       tx.insert(schema.mcpEndpoints)
         .values({ id: e.id, name: e.name, url: e.url })
         .onConflictDoUpdate({ target: schema.mcpEndpoints.id, set: { name: e.name, url: e.url } })
+        .run()
+    }
+    for (const e of config.browser_engines) {
+      const row = { id: e.id, name: e.name, apiBase: e.api_base, viewer: e.viewer }
+      tx.insert(schema.browserEngines)
+        .values(row)
+        .onConflictDoUpdate({ target: schema.browserEngines.id, set: row })
         .run()
     }
     for (const p of config.voices) {
@@ -243,6 +266,8 @@ export function writeConfig(db: Db, input: unknown, author: string, reason?: str
         destinationKey: t.destination_key ?? null,
         argsSpec: JSON.stringify(t.args),
         cadence: t.cadence ? JSON.stringify(t.cadence) : null,
+        engineId: t.engine ?? null,
+        recipe: t.recipe ?? null,
       }
       tx.insert(schema.outlets).values(row).onConflictDoUpdate({ target: schema.outlets.id, set: row }).run()
     }

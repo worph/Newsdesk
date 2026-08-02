@@ -7,10 +7,12 @@
 # the whole design point is that inference and delivery live outside the app.
 #
 # Services:
-#   api      Fastify with tsx watch, on :8080
-#   web      Vite dev server, on :5173, proxying /api to api
-#   korben   a stringer polling korben.info and filing timeline reports
-#   n8n      optional (--profile n8n), to validate the production stringer path
+#   api       Fastify with tsx watch, on :8080
+#   web       Vite dev server, on :5173, proxying /api to api
+#   korben    a stringer polling korben.info and filing timeline reports
+#   browser   headed Chromium behind noVNC, for `driver: browser` outlets
+#   composer  a stand-in destination to publish into, on :5174
+#   n8n       optional (--profile n8n), to validate the production stringer path
 
 name: newsdesk-dev
 
@@ -94,6 +96,42 @@ services:
       - api
     restart: unless-stopped
 
+  # ── browser publishing ────────────────────────────────────────────────────
+  # A real headed Chromium behind noVNC, for `driver: browser` outlets. Started
+  # with the rest of the stack in dev because the whole point is to click
+  # through it; the production compose keeps it behind a profile.
+  #
+  # No host port. The desk proxies the viewer behind its own session, which is
+  # the only way in — this is unauthenticated browser control over every site
+  # the profile is signed into.
+  browser:
+    image: ghcr.io/worph/browser-mcp:latest
+    container_name: newsdesk-dev-browser
+    shm_size: "2gb"
+    environment:
+      VNC_RESOLUTION: "1440x900x24"
+      MCP_PORT: "9746"
+      # Short in dev: Chrome restarts lazily and the logins live in the volume.
+      IDLE_TTL_MS: "${BROWSER_IDLE_TTL_MS:-900000}"
+    volumes:
+      # Sessions survive a restart of the container. Losing them means logging
+      # every destination back in by hand through the viewer.
+      - dev-browser-profile:/tmp/chrome-profile
+    restart: unless-stopped
+
+  # A stand-in destination: a composer and a publish button, which is the shape
+  # of every site a browser outlet exists for. Lets the whole path run with no
+  # third-party account — see deploy/dev/fixtures/composer.html.
+  composer:
+    image: nginx:alpine
+    container_name: newsdesk-dev-composer
+    ports:
+      # Exposed so you can watch what the desk typed from your own browser too.
+      - "${COMPOSER_PORT:-5174}:80"
+    volumes:
+      - ./fixtures/composer.html:/usr/share/nginx/html/index.html:ro
+    restart: unless-stopped
+
   # Optional, for validating the production shape:
   #   docker compose -f deploy/dev/docker-compose.dev.yml --profile n8n up
   # Then import deploy/dev/n8n/korben-stringer.json and activate it.
@@ -118,4 +156,5 @@ services:
 
 volumes:
   dev-data:
+  dev-browser-profile:
   n8n-data:

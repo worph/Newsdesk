@@ -4,6 +4,8 @@ import { schema } from '../../db/index.js'
 import { logEvent } from '../../events.js'
 import { callTool, McpError } from '../mcp/client.js'
 import { attachAuth } from '../mcp/oauth.js'
+import { offerHandover } from './browser/handover.js'
+import { handsOver } from './browser/session.js'
 
 /**
  * The delivery port sends an already-approved payload. It performs no
@@ -141,6 +143,14 @@ export async function deliverPublication(db: Db, publicationId: string): Promise
 
   if (publication.status === 'PUBLISHED') return // already sent; a retry must not double-post
 
+  /**
+   * Already handed to an operator. A second `publish` job landing here — a
+   * reschedule that raced, a reclaimed job after a restart — must not offer it
+   * twice and must not be an error: the desk has done exactly what this row
+   * asked of it and is waiting for a human.
+   */
+  if (publication.status === 'AWAITING_SEND') return
+
   if (
     publication.status !== 'APPROVED' &&
     publication.status !== 'SCHEDULED' &&
@@ -157,6 +167,22 @@ export async function deliverPublication(db: Db, publicationId: string): Promise
 
   const outlet = db.select().from(schema.outlets).where(eq(schema.outlets.id, publication.outletId)).get()
   if (!outlet) throw new McpError(`outlet "${publication.outletId}" no longer exists`, false)
+
+  /**
+   * A browser outlet whose recipe hands over is not sent here — it is *offered*.
+   *
+   * The slot has come, so the desk stops and asks an operator to open the page
+   * and press the destination's own button. Deliberately nothing is staged at
+   * this moment: staging would occupy the single browser lane from now until
+   * whenever they get to it, and the browser would be reaped from under them
+   * long before that. The page is composed when they open the link.
+   *
+   * See docs/browser-publishing.md section 4.
+   */
+  if (outlet.driver === 'browser' && handsOver(outlet.recipe)) {
+    await offerHandover(db, publication, outlet)
+    return
+  }
 
   const payload = JSON.parse(publication.payload) as Record<string, unknown>
   const driver = createDeliveryDriver(db, outlet.driver)

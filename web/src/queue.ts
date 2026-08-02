@@ -17,8 +17,13 @@ export const PLACEMENT_STATUS = 'PLACED,HELD'
  * A finished draft, or one whose send failed. FAILED belongs in the queue
  * because it is still waiting on a person — the desk cannot fix a refused
  * delivery on its own.
+ *
+ * AWAITING_SEND belongs for the same reason and more urgently: a browser
+ * outlet's slot has already come, and the only thing between it and the wire is
+ * someone opening the page. Leaving it off the queue would hide the one kind of
+ * work the desk genuinely cannot do itself.
  */
-export const ARTICLE_STATUS = 'AWAITING_APPROVAL,FAILED'
+export const ARTICLE_STATUS = 'AWAITING_APPROVAL,FAILED,AWAITING_SEND'
 
 export function usePlacementQueue() {
   return useQuery({

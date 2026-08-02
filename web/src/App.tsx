@@ -5,8 +5,10 @@ import { Layout } from './components/Layout'
 import { Calendar } from './pages/Calendar'
 import { Compose } from './pages/Compose'
 import { Config } from './pages/Config'
+import { Live } from './pages/Live'
 import { Log } from './pages/Log'
 import { Login } from './pages/Login'
+import { Now } from './pages/Now'
 import { Queue } from './pages/Queue'
 import { Review } from './pages/Review'
 import { Settings } from './pages/Settings'
@@ -35,18 +37,20 @@ export function App() {
   return (
     <Layout>
       <Routes>
+        <Route path="/now" element={<Now />} />
         <Route path="/queue" element={<Queue />} />
         <Route path="/calendar" element={<Calendar />} />
         <Route path="/compose" element={<Compose />} />
         <Route path="/stories" element={<Stories />} />
         <Route path="/stories/:id" element={<Story />} />
         <Route path="/review/:id" element={<Review />} />
+        <Route path="/review/:id/live" element={<Live />} />
         <Route path="/config" element={<Config />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/wire" element={<Wire />} />
         <Route path="/log" element={<Log />} />
         <Route path="/tips" element={<Tips />} />
-        <Route path="*" element={<Navigate to="/queue" replace />} />
+        <Route path="*" element={<Navigate to="/now" replace />} />
       </Routes>
     </Layout>
   )

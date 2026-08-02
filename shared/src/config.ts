@@ -1,5 +1,12 @@
 import { z } from 'zod'
 import {
+  filledKeys,
+  hasHandover,
+  parseRecipe,
+  readKeys,
+  RECIPE_READ_KEYS,
+} from './recipe.js'
+import {
   argsSpecSchema,
   CALL_TEMPLATE_ROOTS,
   isDerived,
@@ -18,12 +25,31 @@ const idSchema = z
 
 export const STRINGER_KINDS = ['report', 'timeline', 'snapshot', 'tip'] as const
 export const OUTLET_ROLES = ['publish', 'notify'] as const
-export const OUTLET_DRIVERS = ['mcp', 'webhook', 'builtin'] as const
+export const OUTLET_DRIVERS = ['mcp', 'webhook', 'builtin', 'browser'] as const
 
 export const mcpEndpointSchema = z.object({
   id: idSchema,
   name: z.string().min(1),
   url: z.string().url(),
+})
+
+export const BROWSER_VIEWERS = ['novnc', 'none'] as const
+
+/**
+ * A browser the desk can drive, declared exactly like an MCP endpoint — because
+ * it is the same thing: an address configuration pins, never something a model
+ * chooses.
+ *
+ * `viewer` is what the operator is shown when the page is handed to them.
+ * `none` is the local case, where they are already sitting in front of the
+ * browser; `novnc` is the server case, iframed under the desk's own session.
+ */
+export const browserEngineSchema = z.object({
+  id: idSchema,
+  name: z.string().min(1),
+  /** Base address of the browser container's API. No trailing slash. */
+  api_base: z.string().url(),
+  viewer: z.enum(BROWSER_VIEWERS).default('novnc'),
 })
 
 export const voiceSchema = z.object({
@@ -85,6 +111,10 @@ export const outletSchema = z.object({
   args: argsSpecSchema,
   /** The posting rhythm. Absent means "whenever it is approved". */
   cadence: cadenceSchema.optional(),
+  /** browser driver: which browser drives it. */
+  engine: idSchema.optional(),
+  /** browser driver: the cookbook. Prose plus step lines — see recipe.ts. */
+  recipe: z.string().optional(),
 })
 
 /**
@@ -140,6 +170,7 @@ export const reportingSchema = z.object({
 export const configSchema = z.object({
   charter: z.string().min(1, 'the charter is the placement policy — it cannot be empty'),
   mcp_endpoints: z.array(mcpEndpointSchema).default([]),
+  browser_engines: z.array(browserEngineSchema).default([]),
   voices: z.array(voiceSchema).default([]),
   stringers: z.array(stringerSchema).default([]),
   outlets: z.array(outletSchema).default([]),
@@ -148,6 +179,7 @@ export const configSchema = z.object({
 
 export type Cadence = z.infer<typeof cadenceSchema>
 export type McpEndpoint = z.infer<typeof mcpEndpointSchema>
+export type BrowserEngine = z.infer<typeof browserEngineSchema>
 export type Voice = z.infer<typeof voiceSchema>
 export type Stringer = z.infer<typeof stringerSchema>
 export type Outlet = z.infer<typeof outletSchema>
@@ -386,6 +418,103 @@ function checkDestination(outlet: Outlet, issues: ConfigIssue[]): void {
 }
 
 /**
+ * A browser outlet, which has no tool and no advertised schema to check against
+ * — only a page, a cookbook and a pinned address.
+ *
+ * The address is checked exactly as an MCP destination is, and for the same
+ * reason: the danger is not only a model writing one, it is nobody writing one.
+ * A browser outlet whose url came from the recipe would put the destination in
+ * prose that an assistant helps edit, which is the one place invariant 3 says
+ * it must never be.
+ */
+function checkBrowser(outlet: Outlet, engineIds: Set<string>, issues: ConfigIssue[]): void {
+  const path = `outlets.${outlet.id}`
+
+  if (!outlet.engine) {
+    issues.push({ path: `${path}.engine`, message: 'a browser outlet needs an engine to drive' })
+  } else if (!engineIds.has(outlet.engine)) {
+    issues.push({ path: `${path}.engine`, message: `unknown browser engine "${outlet.engine}"` })
+  }
+
+  // The address, pinned. Defaulting the key to `url` keeps the common case free
+  // of ceremony without making the check optional.
+  const key = outlet.destination_key ?? 'url'
+  const value = outlet.args[key]
+  if (value === undefined) {
+    issues.push({
+      path: `${path}.args.${key}`,
+      message: `a browser outlet must pin the page it publishes to as a literal "${key}" — the desk navigates there itself, and the recipe never names it`,
+    })
+  } else if (isSlot(value) || isDerived(value)) {
+    issues.push({
+      path: `${path}.args.${key}`,
+      message: `"${key}" must be a literal — a model must never write an address`,
+    })
+  } else if (typeof value !== 'string' || !/^https?:\/\/\S+$/.test(value.trim())) {
+    issues.push({
+      path: `${path}.args.${key}`,
+      message: `"${key}" must be an absolute http(s) url`,
+    })
+  }
+
+  if (!outlet.recipe || outlet.recipe.trim() === '') {
+    issues.push({
+      path: `${path}.recipe`,
+      message: 'a browser outlet needs a recipe — without one the desk does not know what to do on the page',
+    })
+    return
+  }
+
+  const { recipe, issues: recipeIssues } = parseRecipe(outlet.recipe)
+  for (const issue of recipeIssues) {
+    issues.push({ path: `${path}.recipe`, message: `line ${issue.line}: ${issue.message}` })
+  }
+
+  /**
+   * Phase 1 publishes only where a human presses the destination's own button.
+   * Refusing at save time is the honest form of that: an outlet with no hand
+   * over section would otherwise look configured and then sit in the queue
+   * doing nothing anyone could explain.
+   */
+  if (!hasHandover(recipe)) {
+    issues.push({
+      path: `${path}.recipe`,
+      message:
+        'autonomous browser outlets are not supported yet — add a `## Hand over` section describing what the operator clicks',
+    })
+  }
+
+  const filled = filledKeys(recipe)
+  if (filled.length === 0) {
+    issues.push({
+      path: `${path}.recipe`,
+      message: 'the stage section must `fill:` at least one slot — otherwise nothing authored reaches the page',
+    })
+  }
+  const slotKeys = new Set(slotsOf(outlet.args).map((slot) => slot.key))
+  for (const filledKey of filled) {
+    if (!slotKeys.has(filledKey)) {
+      issues.push({
+        path: `${path}.recipe`,
+        message: `\`fill: … <- ${filledKey}\` names "${filledKey}", which is not an authoring slot on this outlet`,
+      })
+    }
+  }
+  for (const dupe of duplicates(filled)) {
+    issues.push({ path: `${path}.recipe`, message: `"${dupe}" is filled twice` })
+  }
+
+  for (const key of readKeys(recipe)) {
+    if (!(RECIPE_READ_KEYS as readonly string[]).includes(key)) {
+      issues.push({
+        path: `${path}.recipe`,
+        message: `\`read: … -> ${key}\` has nowhere to go — a verify step stores ${RECIPE_READ_KEYS.join(' or ')}`,
+      })
+    }
+  }
+}
+
+/**
  * `parseMode` and a slot's `format` are one decision written in two places, and
  * a mismatch is invisible until a real send fails — which on Telegram is a 400
  * that spikes the whole message, not a formatting blemish.
@@ -455,6 +584,7 @@ export function validateConfig(config: Config): ConfigIssue[] {
 
   for (const [label, ids] of [
     ['mcp_endpoints', config.mcp_endpoints.map((e) => e.id)],
+    ['browser_engines', config.browser_engines.map((e) => e.id)],
     ['voices', config.voices.map((p) => p.id)],
     ['stringers', config.stringers.map((s) => s.id)],
     ['outlets', config.outlets.map((t) => t.id)],
@@ -466,6 +596,7 @@ export function validateConfig(config: Config): ConfigIssue[] {
 
   const voiceIds = new Set(config.voices.map((p) => p.id))
   const endpointIds = new Set(config.mcp_endpoints.map((e) => e.id))
+  const engineIds = new Set(config.browser_engines.map((e) => e.id))
 
   for (const outlet of config.outlets) {
     const path = `outlets.${outlet.id}`
@@ -486,6 +617,17 @@ export function validateConfig(config: Config): ConfigIssue[] {
       } else if (!endpointIds.has(outlet.endpoint)) {
         issues.push({ path: `${path}.endpoint`, message: `unknown endpoint "${outlet.endpoint}"` })
       }
+    }
+
+    if (outlet.driver === 'browser') {
+      checkBrowser(outlet, engineIds, issues)
+    } else if (outlet.engine !== undefined || outlet.recipe !== undefined) {
+      // Silently ignoring these would make a mis-typed driver look like it
+      // worked — the outlet would publish through the wrong transport entirely.
+      issues.push({
+        path,
+        message: `\`${outlet.engine !== undefined ? 'engine' : 'recipe'}\` only applies to a browser outlet — this one is "${outlet.driver}"`,
+      })
     }
 
     const slots = slotsOf(outlet.args)

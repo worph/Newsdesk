@@ -76,6 +76,14 @@ export const EVENT_CODES = {
   PUBLISH_FAILED: { category: 'delivery', label: 'send failed', assistable: true },
   PUBLISH_CANCELLED: { category: 'delivery', label: 'send cancelled' },
   PUBLISH_LATE: { category: 'delivery', label: 'sent late' },
+  HANDOVER_DUE: { category: 'delivery', label: 'waiting for someone to publish' },
+  NEEDS_AUTH: { category: 'delivery', label: 'the browser is signed out', assistable: true },
+  SIGNIN_CHECK_FAILED: { category: 'delivery', label: 'could not check the sign-in' },
+  SIGNED_IN: { category: 'delivery', label: 'signed back in' },
+  STAGED: { category: 'delivery', label: 'composed in the browser' },
+  STAGE_FAILED: { category: 'delivery', label: 'could not compose', assistable: true },
+  VERIFY_FAILED: { category: 'delivery', label: 'could not confirm the post' },
+  SEND_EXPIRED: { category: 'delivery', label: 'hand-over expired' },
 
   // ── queue ─────────────────────────────────────────────────────────────────
   JOB_RETRY: { category: 'queue', label: 'job will retry' },
@@ -151,6 +159,9 @@ interface EventDetails {
     stack?: string
   }
   PUBLISH_LATE: { outletId: string; scheduledFor: string; sentAt: string; lateBySeconds: number }
+  /** Which page, which browser, and what it refused to do — see publish_traces for the steps. */
+  STAGE_FAILED: { outletId: string; engine: string; error: string; stack?: string }
+  SEND_EXPIRED: { outletId: string; waitedHours: number; error?: string }
   JOB_RETRY: { jobId: string; kind: string; refId: string; attempts: number; retryInSeconds: number; error: string }
   JOB_FAILED: { jobId: string; kind: string; refId: string; attempts: number; error: string; stack?: string }
   JOB_DEFERRED: { jobId: string; kind: string; refId: string; retryInSeconds: number; reason: string }

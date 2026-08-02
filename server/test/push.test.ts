@@ -242,8 +242,9 @@ describe('the placement queue notification', () => {
     expect(send).toHaveBeenCalledTimes(1)
     const payload = JSON.parse(send.mock.calls[0]?.[1] as string) as { body: string; url: string }
     expect(payload.body).toBe('One · Two')
-    // No single story to open, so it lands on the queue holding both.
-    expect(payload.url).toBe('/queue')
+    // No single story to open, so it lands on the action list — a notification
+    // exists to be acted on, and the Queue makes you hunt for what just chimed.
+    expect(payload.url).toBe('/now')
   })
 
   it('deep-links a lone story to itself', async () => {

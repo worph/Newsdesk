@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { resolve } from 'node:path'
 import { buildApp, VERSION } from './app.js'
 import { setPassword } from './auth.js'
 import { importConfigFileOnFirstBoot, isUnconfigured, readReporting } from './config/store.js'
@@ -9,6 +10,8 @@ import { managingEditorHandler } from './pipeline/managing-editor.js'
 import { enqueue, JobQueue } from './pipeline/queue.js'
 import { reporterHandler } from './pipeline/reporter.js'
 import { writerHandler } from './pipeline/writer.js'
+import { handoverFollowupHandler } from './ports/delivery/browser/handover.js'
+import { setTraceDir } from './ports/delivery/browser/session.js'
 import { publishHandler } from './ports/delivery/index.js'
 import { createInferenceDriver } from './ports/inference/index.js'
 import { createMcpReportingTools } from './ports/reporting/tools.js'
@@ -22,6 +25,11 @@ async function main(): Promise<void> {
   const migrations = runMigrations(db, env.migrationsDir)
 
   const sessionSecret = getOrCreateSecret(db, SETTING.sessionSecret)
+
+  // Browser publish evidence — screenshots of what was composed and what went
+  // out. Beside the database rather than inside it, because images are large
+  // and a backup is meant to stay one file worth copying.
+  setTraceDir(resolve(env.dataDir, 'traces'))
 
   // A fixed token lets a stringer be configured from the same compose file
   // that starts the desk. First boot only — rotating from the UI afterwards
@@ -56,6 +64,7 @@ async function main(): Promise<void> {
   queue.register('assign', managingEditorHandler(driver, { enqueueWriter }))
   queue.register('write', writerHandler(driver))
   queue.register('publish', publishHandler())
+  queue.register('handover-followup', handoverFollowupHandler())
 
   const app = await buildApp({
     db,
@@ -83,6 +92,7 @@ async function main(): Promise<void> {
       enqueueWriter,
       driver,
       publicUrl: env.publicUrl,
+      traceDir: resolve(env.dataDir, 'traces'),
       /**
        * The restart remedy, wired to the same shutdown the signal handlers
        * use. Under compose the policy is `restart: unless-stopped`, so exiting

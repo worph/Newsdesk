@@ -19,6 +19,10 @@ import { browserTimezone, stamp, until } from '../time'
 const TONE: Record<string, string> = {
   SCHEDULED: 'bg-amber-100 text-amber-900 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-200',
   APPROVED: 'bg-amber-100 text-amber-900 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-200',
+  // Its time has come and it is owed a person, not a poll: louder than a slot
+  // still in the future, and not the green of something already out.
+  AWAITING_SEND:
+    'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-400 hover:bg-emerald-200 dark:bg-emerald-950 dark:text-emerald-200 dark:ring-emerald-700',
   PUBLISHED:
     'bg-emerald-100 text-emerald-900 hover:bg-emerald-200 dark:bg-emerald-950 dark:text-emerald-200',
   FAILED: 'bg-red-100 text-red-900 hover:bg-red-200 dark:bg-red-950 dark:text-red-200',
@@ -52,15 +56,26 @@ function Chip({ entry, onOpen }: { entry: CalendarEntry; onOpen: () => void }) {
     hour12: false,
   })
 
+  /**
+   * A browser slot is not a send time. It is the moment the desk stops and asks
+   * someone to publish it by hand, and the post goes out whenever they do —
+   * which may be an hour later. Marking it keeps the calendar honest about the
+   * difference rather than showing two unlike things as one.
+   */
+  const byHand = entry.driver === 'browser' && entry.status !== 'PUBLISHED'
+
   return (
     <button
       onClick={onOpen}
-      title={`${entry.storyTitle ?? entry.storyId} → ${entry.outletName ?? entry.outletId}`}
+      title={`${entry.storyTitle ?? entry.storyId} → ${entry.outletName ?? entry.outletId}${
+        byHand ? ' — you publish this one by hand' : ''
+      }`}
       className={`block w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] ${
         TONE[entry.status] ?? 'bg-desk-200 text-desk-700 dark:bg-desk-800 dark:text-desk-300'
       }`}
     >
-      <span className="font-mono opacity-70">{time}</span> {entry.storyTitle ?? entry.storyId}
+      <span className="font-mono opacity-70">{time}</span>
+      {byHand && <span aria-hidden> ✋</span>} {entry.storyTitle ?? entry.storyId}
     </button>
   )
 }

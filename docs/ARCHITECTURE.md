@@ -212,8 +212,11 @@ was generated at publish time from a prompt in a bridge config, so the text reac
 
 **The `driver` field is the portability escape hatch.** `mcp` reuses Beacon and keeps credentials
 out of the app — that is the deployment we run. `webhook` (a Discord incoming-webhook URL, one
-field) and `builtin` exist so the app can be installed from a store without an MCP bus. Same
-contract, different transport. A genuinely multi-step delivery (upload media, then post referencing
+field) and `builtin` exist so the app can be installed from a store without an MCP bus. `browser`
+covers the destinations that have no API at all, or that forbid posting through one: the desk drives
+a real browser from a written cookbook, types the frozen payload, proves it byte for byte, and stops
+so a person can press the destination's own button ([`browser-publishing.md`](./browser-publishing.md)).
+Same contract, different transport. A genuinely multi-step delivery (upload media, then post referencing
 it) is not an agent problem — it is an n8n webhook outlet. Stringers are n8n on the way in;
 complicated deliveries are n8n on the way out.
 
@@ -441,6 +444,10 @@ Breaking one of these breaks the product, not just a feature.
    mean nothing. Scheduling stretches that gap from seconds to hours, which makes the invariant
    more valuable rather than less: the bytes are fixed at approval and the only thing a schedule
    moves is the clock. Changing what is sent means withdrawing and approving again.
+   *A browser outlet is the same rule with a longer arm: the desk types the frozen payload into the
+   destination's own composer itself and then **reads the field back and compares it byte for byte**
+   before anyone is shown anything. Inference may one day operate the transport; it never carries
+   the copy, and the comparison is what makes that structural rather than promised.*
 3. **The model never authors a destination — or a call.** Channel ids, endpoints, and placement keys
    are literals in configuration. Models fill slots and propose placements from a generated enum;
    they never write an address. The same holds for the reporter's tools: which tool, which endpoint
@@ -460,7 +467,10 @@ Breaking one of these breaks the product, not just a feature.
    alerts cannot go out through Beacon — so the app must be fully diagnosable from its own error
    screen with every port broken.
 8. **Newsdesk stores no third-party credentials.** Only its own session secrets, its ingest token,
-   and its push keys.
+   and its push keys. *A browser sidecar may hold live sessions in its own volume, which the desk
+   can start, stop and drive but never read. That is the one place the rule bends, and it bends in
+   the letter rather than the spirit: the cookies are the browser's, the desk holds no password and
+   could not export one.*
 9. **Single instance.** Scheduler and queue state live in the database so restarts resume cleanly,
    and the app is never run as two replicas.
 10. **A citation exists because the desk retrieved the page.** Sourced claims in a dossier are
@@ -490,6 +500,12 @@ One container, one SQLite file on a mounted volume, no sidecars. Reachable over 
 subdomain in our deployment), which the PWA and web push both require. Packaged for the Yundera
 AppStore with an `x-casaos` block; usable as a plain `docker compose up` anywhere else. Backup is
 copying one file.
+
+**One exception, and it is opt-in.** `driver: browser` outlets need a real browser, which is a
+second container — headed Chromium behind a noVNC surface, with the signed-in sessions on a volume
+of its own. It sits behind a compose profile, so the plain install is unchanged and simply does not
+offer that driver, and its port is never published: the desk proxies the viewer behind its own
+session and is the only way in. See [`browser-publishing.md`](./browser-publishing.md).
 
 ## 12. Open questions
 

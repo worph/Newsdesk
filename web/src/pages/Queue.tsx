@@ -129,6 +129,13 @@ function Empty({ children }: { children: React.ReactNode }) {
  */
 function ArticleCard({ publication, onOpen }: { publication: PublicationRow; onOpen: () => void }) {
   const failed = publication.status === 'FAILED'
+  /**
+   * Already approved, already due, and the only thing left is a person opening
+   * the page and pressing publish. It reads differently from a draft awaiting a
+   * decision — the decision is made — so it says what it is owed rather than
+   * sitting in the pile looking like more reading.
+   */
+  const awaitingSend = publication.status === 'AWAITING_SEND'
   // A piece you are writing yourself starts blank on purpose. Without saying so,
   // an empty row here is indistinguishable from a writer that failed silently.
   const mine = publication.storyOrigin === 'desk'
@@ -138,7 +145,9 @@ function ArticleCard({ publication, onOpen }: { publication: PublicationRow; onO
       <button onClick={onOpen} className="flex w-full items-start gap-3 px-4 py-3 text-left">
         <span
           aria-hidden
-          className={`mt-1.5 size-2 shrink-0 rounded-full ${failed ? 'bg-red-500' : 'bg-amber-500'}`}
+          className={`mt-1.5 size-2 shrink-0 rounded-full ${
+            failed ? 'bg-red-500' : awaitingSend ? 'bg-emerald-500' : 'bg-amber-500'
+          }`}
         />
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
@@ -149,6 +158,11 @@ function ArticleCard({ publication, onOpen }: { publication: PublicationRow; onO
             {failed && (
               <Badge tone="bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300">
                 send failed
+              </Badge>
+            )}
+            {awaitingSend && (
+              <Badge tone="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                publish it yourself
               </Badge>
             )}
             {mine ? (
@@ -255,7 +269,15 @@ export function Queue() {
                 <ArticleCard
                   key={publication.id}
                   publication={publication}
-                  onOpen={() => navigate(`/review/${publication.id}`)}
+                  onOpen={() =>
+                    navigate(
+                      // Its decision is made; what it wants is the browser, not
+                      // the editor.
+                      publication.status === 'AWAITING_SEND'
+                        ? `/review/${publication.id}/live`
+                        : `/review/${publication.id}`,
+                    )
+                  }
                 />
               ))}
             </ul>

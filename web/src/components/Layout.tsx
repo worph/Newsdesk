@@ -2,7 +2,6 @@ import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import { useArticleQueue, usePlacementQueue } from '../queue'
 
 /**
  * The four groups from IMPLEMENTATION.md section 7. Screens that are not built
@@ -11,6 +10,7 @@ import { useArticleQueue, usePlacementQueue } from '../queue'
  */
 const NAV = [
   { group: 'Desk', items: [
+    { to: '/now', label: 'Needs you', ready: true },
     { to: '/queue', label: 'Queue', ready: true },
     { to: '/calendar', label: 'Calendar', ready: true },
     { to: '/compose', label: 'Write', ready: true },
@@ -28,19 +28,26 @@ const NAV = [
 /**
  * How much is standing at the gate, wherever you are in the app.
  *
- * Both halves of the queue, because both are decisions waiting on you — a
- * badge that counted only drafts would go quiet while placements piled up.
+ * Counted by the same endpoint the "Needs you" screen renders, so the badge and
+ * the list can never disagree — a badge saying 3 over a screen showing 2 is
+ * worse than no badge. It goes amber when something is actually held up, which
+ * is the difference between a backlog and a thing to do now.
  */
-function QueueBadge() {
-  const placements = usePlacementQueue()
-  const articles = useArticleQueue()
+function ActionBadge() {
+  const { data } = useQuery({ queryKey: ['actions'], queryFn: api.listActions, refetchInterval: 20_000 })
 
-  const waiting =
-    (placements.data?.stories.length ?? 0) + (articles.data?.publications.length ?? 0)
+  const waiting = data?.total ?? 0
   if (waiting === 0) return null
 
+  const held = (data?.overdue ?? 0) > 0
   return (
-    <span className="ml-2 rounded-full bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[11px] text-emerald-700 dark:text-emerald-400">
+    <span
+      className={`ml-2 rounded-full px-1.5 py-0.5 font-mono text-[11px] ${
+        held
+          ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400'
+          : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+      }`}
+    >
       {waiting}
     </span>
   )
@@ -113,7 +120,7 @@ export function Layout({ children }: { children: ReactNode }) {
                     }
                   >
                     {item.label}
-                    {item.to === '/queue' && <QueueBadge />}
+                    {item.to === '/now' && <ActionBadge />}
                   </NavLink>
                 ) : (
                   <span

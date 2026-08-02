@@ -237,6 +237,49 @@ export async function notifyDraftReady(
   })
 }
 
+/**
+ * Called when a browser outlet's slot comes due.
+ *
+ * The wording matters more here than anywhere else in the desk: this is not
+ * "something is waiting", it is a job with a deadline that only a person can
+ * finish. Nothing goes out until they tap it.
+ */
+export async function notifyHandoverDue(
+  db: Db,
+  publicationId: string,
+  outletName: string,
+  storyTitle: string,
+  options: { reminder?: boolean } = {},
+): Promise<void> {
+  await notifyAll(db, {
+    title: options.reminder ? `Still waiting to publish on ${outletName}` : `Ready to publish on ${outletName}`,
+    body: storyTitle,
+    url: `/review/${publicationId}/live`,
+  })
+}
+
+/**
+ * Called when the browser has been signed out of a destination and something
+ * is due to go there.
+ *
+ * The one notification in the desk that asks for a credential rather than a
+ * decision — so it says which destination, and the link opens the browser at
+ * that site's own login page rather than anywhere in the desk.
+ */
+export async function notifyNeedsAuth(
+  db: Db,
+  publicationId: string,
+  outletName: string,
+  storyTitle: string,
+  options: { reminder?: boolean } = {},
+): Promise<void> {
+  await notifyAll(db, {
+    title: options.reminder ? `Still signed out of ${outletName}` : `Sign in to ${outletName}`,
+    body: `${storyTitle} — nothing can go out until the browser is signed back in.`,
+    url: `/review/${publicationId}/live`,
+  })
+}
+
 export interface PlacedStory {
   storyId: string
   title: string
@@ -264,7 +307,9 @@ export async function notifyPlacementsWaiting(db: Db, opened: PlacedStory[]): Pr
   await notifyAll(db, {
     title: waiting > 1 ? `${waiting} placements waiting` : held ? 'A story needs context' : 'A placement is waiting',
     body: single ? single.title : opened.map((story) => story.title).join(' · '),
-    // A single story opens on itself; several have no one page but the queue.
-    url: single ? `/stories/${single.storyId}` : '/queue',
+    // A single story opens on itself; several have no one page, so they land
+    // on the action list rather than the backlog — a notification exists to be
+    // acted on, and the Queue makes you hunt for the thing that just chimed.
+    url: single ? `/stories/${single.storyId}` : '/now',
   })
 }

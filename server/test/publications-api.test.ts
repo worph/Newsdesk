@@ -474,6 +474,53 @@ describe('scheduling', () => {
     expect(JSON.parse(row().payload!).title).toBe('Immich 1.142.0')
   })
 
+  /**
+   * A browser outlet's slot has come and it is waiting for a person to publish
+   * it by hand. The payload is frozen and may already be typed into a live
+   * composer, so the desk has to be as closed as it is for a scheduled send —
+   * and withdrawing has to be the way back, because that is also how an
+   * unclaimed hand-over expires.
+   */
+  describe('waiting for a person to publish it', () => {
+    const staged = () => {
+      db.update(schema.publications)
+        .set({ status: 'AWAITING_SEND' })
+        .where(eq(schema.publications.id, publicationId))
+        .run()
+    }
+
+    it('closes the desk exactly as a scheduled send does', async () => {
+      await post(`/api/v1/publications/${publicationId}/approve`, { scheduled_for: soon() })
+      staged()
+
+      for (const attempt of [
+        patch(`/api/v1/publications/${publicationId}`, { slots: { title: 'sneaky' } }),
+        post(`/api/v1/publications/${publicationId}/approve`),
+        post(`/api/v1/publications/${publicationId}/reject`),
+      ]) {
+        expect((await attempt).statusCode).toBe(409)
+      }
+      expect(JSON.parse(row().payload!).title).toBe('Immich 1.142.0')
+    })
+
+    it('withdraws back to an editable draft', async () => {
+      await post(`/api/v1/publications/${publicationId}/approve`, { scheduled_for: soon() })
+      staged()
+
+      expect((await post(`/api/v1/publications/${publicationId}/withdraw`)).statusCode).toBe(200)
+
+      const stored = row()
+      expect(stored.status).toBe('AWAITING_APPROVAL')
+      expect(stored.payload).toBeNull()
+      // Nothing should still look like it is sitting in a browser.
+      expect(stored.stagedAt).toBeNull()
+      expect(
+        (await patch(`/api/v1/publications/${publicationId}`, { slots: { title: 'Rewritten' } }))
+          .statusCode,
+      ).toBe(200)
+    })
+  })
+
   it('moves a scheduled send without touching what was approved', async () => {
     await post(`/api/v1/publications/${publicationId}/approve`, { scheduled_for: soon() })
     const frozen = row().payload

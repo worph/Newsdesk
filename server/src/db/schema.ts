@@ -25,6 +25,18 @@ export const mcpEndpoints = sqliteTable('mcp_endpoints', {
   status: text('status'),
 })
 
+/**
+ * A browser the desk can drive. Configuration, exactly like an MCP endpoint —
+ * the credentials it holds live in the container's own profile volume and are
+ * never read by the desk (invariant 8).
+ */
+export const browserEngines = sqliteTable('browser_engines', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  apiBase: text('api_base').notNull(),
+  viewer: text('viewer').notNull().default('novnc'), // novnc | none
+})
+
 export const voices = sqliteTable('voices', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -61,6 +73,16 @@ export const outlets = sqliteTable('outlets', {
   destinationKey: text('destination_key'),
   /** JSON: each key is literal | derived | slot. */
   argsSpec: text('args_spec').notNull(),
+  /** browser driver: which browser drives it. */
+  engineId: text('engine_id').references(() => browserEngines.id),
+  /**
+   * browser driver: the cookbook, prose and step lines together.
+   *
+   * Text rather than a parsed structure on purpose — it is a document the
+   * operator edits, and the parse is cheap. Storing the parse would make the
+   * prose and the steps two things that can disagree.
+   */
+  recipe: text('recipe'),
   /**
    * JSON: the posting rhythm — window, days, spacing, daily cap. Read only by
    * the slot proposer, never by delivery, so an outlet without one still
@@ -225,6 +247,19 @@ export const publications = sqliteTable(
     scheduledFor: text('scheduled_for'),
     /** The managing editor's read on how long this can wait. */
     urgency: text('urgency'), // breaking | normal | evergreen
+    /**
+     * When a browser outlet's page was actually composed and handed to the
+     * operator. Null while AWAITING_SEND means the slot has come but nobody has
+     * opened it yet — staging happens when they do, so nothing holds the
+     * browser during the wait.
+     */
+    stagedAt: text('staged_at'),
+    /**
+     * How the desk knows this went out: `verified` when a verify step found the
+     * post, `attested` when the operator said so and the recipe had no way to
+     * check. Both are legitimate; the two being indistinguishable would not be.
+     */
+    evidence: text('evidence'), // verified | attested
     publishedAt: text('published_at'),
   },
   (t) => [
@@ -232,6 +267,39 @@ export const publications = sqliteTable(
     index('publications_status_idx').on(t.status),
     index('publications_scheduled_idx').on(t.scheduledFor),
   ],
+)
+
+/**
+ * Every step the desk took inside a browser to publish something.
+ *
+ * The records half of browser publishing, and the sibling of
+ * `dossier_sources`: a row exists because the thing actually happened, which is
+ * what makes the audit claim worth anything. It is also the injection log —
+ * the desk is acting on a live page full of other people's text, and invariant
+ * 4 says pages a model or a driver read must be recorded.
+ *
+ * The row that matters most is the byte comparison: `detail` carries the hash
+ * of the frozen payload and the hash of what was actually read back out of the
+ * field, which is the evidence invariant 2 held.
+ */
+export const publishTraces = sqliteTable(
+  'publish_traces',
+  {
+    id: text('id').primaryKey(),
+    publicationId: text('publication_id')
+      .notNull()
+      .references(() => publications.id),
+    at: text('at').notNull().default(now),
+    phase: text('phase').notNull(), // stage | handover | verify
+    action: text('action').notNull(), // navigate | wait | click | fill | read | screenshot | compare
+    selector: text('selector'),
+    url: text('url'),
+    ok: integer('ok', { mode: 'boolean' }).notNull(),
+    detail: text('detail'),
+    /** Path under the data dir; the image itself is never in the database. */
+    screenshotPath: text('screenshot_path'),
+  },
+  (t) => [index('publish_traces_pub_idx').on(t.publicationId)],
 )
 
 /** Every copy-desk edit and manual save. Safety lives here, not in an accept ceremony. */

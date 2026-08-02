@@ -50,6 +50,13 @@ export function registerCalendarRoutes(app: FastifyInstance, db: Db): void {
         storyTitle: schema.stories.title,
         outletId: schema.publications.outletId,
         outletName: schema.outlets.name,
+        /**
+         * A browser outlet's slot is not when the post goes out — it is when it
+         * is put in front of an operator, who presses the destination's own
+         * button whenever they get to it. Two entries that mean different
+         * things must not look alike, so the driver travels with the entry.
+         */
+        driver: schema.outlets.driver,
         status: schema.publications.status,
         urgency: schema.publications.urgency,
         scheduledFor: schema.publications.scheduledFor,

@@ -27,6 +27,19 @@ mcp_endpoints:
     name: yunderalabs beacon
     url: http://beacon-backend:9300/mcp
 
+# ── Which browser the desk can drive ────────────────────────────────────────
+# Only needed for `driver: browser` outlets — destinations with no API, where a
+# person presses the publish button. Points at the sidecar in the compose file;
+# its port is never published, so the desk is its only door.
+#
+# `viewer: novnc` embeds the live browser in the desk so you can read the post
+# and click. Use `none` when you are sitting in front of the browser yourself.
+browser_engines:
+  - id: sidecar
+    name: Newsdesk browser
+    api_base: http://newsdesk-browser:9746
+    viewer: novnc
+
 # ── Voices ──────────────────────────────────────────────────────────────────
 # A voice is tone, audience and rules, stored once and shared by outlets.
 voices:
@@ -158,6 +171,47 @@ outlets:
         # Converts the writer's markdown to Telegram's tags at merge time —
         # before approval freezes the payload, so you review what is sent.
         format: telegram-html
+
+  # ── an outlet with no API ─────────────────────────────────────────────────
+  # Some destinations have no MCP bridge and no webhook, and some forbid
+  # automated posting outright. A browser outlet publishes the way a person
+  # would: the desk opens the page, types the copy you approved, checks it byte
+  # for byte, and then stops — you press the destination's own publish button.
+  #
+  # Needs the `browser` compose profile running. See docs/browser-publishing.md.
+  #
+  # - id: linkedin-company
+  #   name: LinkedIn — company page
+  #   description: the company page, for announcements a general audience would care about
+  #   role: publish
+  #   driver: browser
+  #   voice: alicia
+  #   engine: sidecar
+  #   args:
+  #     # The page, pinned. The desk navigates here itself and the recipe never
+  #     # names it — a destination in prose an assistant helps edit is exactly
+  #     # what invariant 3 exists to prevent.
+  #     url: "https://www.linkedin.com/company/example/admin/page-posts/published/"
+  #     body:
+  #       slot: markdown
+  #       label: Post
+  #       max: 3000
+  #       primary: true
+  #   # Prose you edit, with step lines the desk executes. A line that is not a
+  #   # step is for the person reading the live browser.
+  #   recipe: |
+  #     ## Stage
+  #     The composer opens as a modal over the page.
+  #     wait:  button.share-box-feed-entry__trigger
+  #     click: button.share-box-feed-entry__trigger
+  #     fill:  div.ql-editor[contenteditable="true"] <- body
+  #
+  #     ## Hand over
+  #     Read it, then click "Post" at the bottom right of the modal.
+  #
+  #     ## Verify
+  #     Optional. Without this the desk records your word that it went out.
+  #     read: a.app-aware-link[href*='/feed/update/'] -> url
 
   # Uncomment once the argument keys are confirmed against a live call — that
   # Beacon exposes tool descriptions without schemas.

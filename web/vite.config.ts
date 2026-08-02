@@ -62,7 +62,15 @@ export default defineConfig({
     // it costs CPU, so it is opt-in via the environment.
     ...(usePolling ? { watch: { usePolling: true, interval: 500 } } : {}),
     proxy: {
-      '/api': { target: apiTarget, changeOrigin: true, configure: explainProxyErrors },
+      /**
+       * `ws` matters for exactly one route and is invisible until you hit it:
+       * the noVNC viewer opens a websocket at
+       * `/api/v1/browser/vnc/websockify`, and without this Vite answers the
+       * upgrade itself and the viewer sits on "connecting" forever with
+       * nothing in any log. Production never comes through here — Fastify
+       * serves the built SPA and the proxy on one port.
+       */
+      '/api': { target: apiTarget, changeOrigin: true, ws: true, configure: explainProxyErrors },
       '/healthz': { target: apiTarget, changeOrigin: true, configure: explainProxyErrors },
     },
   },

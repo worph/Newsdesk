@@ -1,4 +1,4 @@
-import { and, eq, gte, or } from 'drizzle-orm'
+import { and, eq, gte, inArray, or } from 'drizzle-orm'
 import { type ArgsSpec, type Cadence } from '@newsdesk/shared'
 import type { Db } from '../db/index.js'
 import { schema } from '../db/index.js'
@@ -80,6 +80,12 @@ export function mergeContext(loaded: Loaded, slots: Record<string, string>) {
  * to take would be the widest possible gap between what the screen shows and
  * what goes out. `withdraw` is the way back — it clears the frozen bytes, which
  * is what genuinely reopens the desk.
+ *
+ * AWAITING_SEND is the same case again, one step further along: a browser
+ * outlet's slot has come and the bytes are waiting for an operator to open the
+ * page and press the destination's own button. The payload is frozen and may
+ * already be typed into a live composer, so editing here would be editing
+ * something that is halfway out the door.
  */
 export function closedReason(status: string): string | undefined {
   switch (status) {
@@ -90,6 +96,10 @@ export function closedReason(status: string): string | undefined {
       return 'this is approved and queued to send'
     case 'SCHEDULED':
       return 'this is scheduled to send — withdraw it first if you need to change it'
+    case 'AWAITING_SEND':
+      return 'this is staged and waiting to be sent — withdraw it first if you need to change it'
+    case 'NEEDS_AUTH':
+      return 'the browser is signed out of this destination — sign it back in, or withdraw this'
     case 'PUBLISHED':
       return 'this has already been published'
     case 'REJECTED':
@@ -159,12 +169,18 @@ export function proposalFor(db: Db, loaded: Loaded, now = new Date()): { at: str
  */
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
 
-/** Drop the queued send for a publication that has not been claimed yet. */
+/**
+ * Drop the queued work for a publication that has not been claimed yet.
+ *
+ * Both kinds, because a browser hand-over leaves a reminder job behind as well
+ * as the send: a withdrawn publication that kept nagging an operator to go and
+ * publish it would be the desk arguing with itself.
+ */
 function cancelPendingSend(tx: Tx, publicationId: string): void {
   tx.delete(schema.jobs)
     .where(
       and(
-        eq(schema.jobs.kind, 'publish'),
+        inArray(schema.jobs.kind, ['publish', 'handover-followup']),
         eq(schema.jobs.refId, publicationId),
         eq(schema.jobs.status, 'PENDING'),
       ),
@@ -220,6 +236,13 @@ export function approvePublication(
       ok: false,
       status: 409,
       error: 'this is already scheduled — move the time instead, or withdraw it',
+    }
+  }
+  if (loaded.publication.status === 'AWAITING_SEND' || loaded.publication.status === 'NEEDS_AUTH') {
+    return {
+      ok: false,
+      status: 409,
+      error: 'this is already waiting to be published by hand — withdraw it instead',
     }
   }
   if (loaded.publication.status === 'PUBLISHED') {
@@ -301,21 +324,30 @@ export function approvePublication(
  * if it finds it withdrawn, which shrinks the window to the width of one send,
  * but does not close it. In practice withdrawing before the scheduled minute
  * always works; withdrawing during it may not.
+ *
+ * AWAITING_SEND withdraws for the same reasons, and it is also how a browser
+ * hand-over that nobody acted on expires: the operator never opened it, the
+ * news has moved on, and the desk would rather ask for a new slot than fire
+ * stale copy tomorrow morning. Nothing external has happened yet either way —
+ * the destination's own button was never pressed.
  */
 export function withdrawPublication(db: Db, id: string): Outcome<{ status: 'AWAITING_APPROVAL' }> {
   const loaded = load(db, id)
   if (!loaded) return { ok: false, status: 404, error: 'no such publication' }
 
-  if (loaded.publication.status !== 'SCHEDULED') {
+  const withdrawable = ['SCHEDULED', 'AWAITING_SEND', 'NEEDS_AUTH']
+  if (!withdrawable.includes(loaded.publication.status)) {
     return {
       ok: false,
       status: 409,
       error:
         loaded.publication.status === 'APPROVED'
           ? 'this was approved to send immediately — it is already on its way'
-          : `only a scheduled publication can be withdrawn — this is ${loaded.publication.status.toLowerCase()}`,
+          : `only a scheduled or staged publication can be withdrawn — this is ${loaded.publication.status.toLowerCase()}`,
     }
   }
+
+  const staged = loaded.publication.status !== 'SCHEDULED'
 
   db.transaction((tx) => {
     cancelPendingSend(tx, id)
@@ -325,6 +357,9 @@ export function withdrawPublication(db: Db, id: string): Outcome<{ status: 'AWAI
         payload: null,
         approvedAt: null,
         scheduledFor: null,
+        // A row that goes back to the desk must not look like it is still
+        // sitting in a browser waiting for someone.
+        stagedAt: null,
         error: null,
       })
       .where(eq(schema.publications.id, id))
@@ -337,7 +372,9 @@ export function withdrawPublication(db: Db, id: string): Outcome<{ status: 'AWAI
     code: 'WITHDRAWN',
     storyId: loaded.publication.storyId,
     publicationId: id,
-    message: `withdrawn from the schedule for ${loaded.outlet.name} — it was due ${loaded.publication.scheduledFor}`,
+    message: staged
+      ? `withdrawn from ${loaded.outlet.name} before anyone sent it`
+      : `withdrawn from the schedule for ${loaded.outlet.name} — it was due ${loaded.publication.scheduledFor}`,
   })
 
   return { ok: true, status: 'AWAITING_APPROVAL' }

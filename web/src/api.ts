@@ -415,6 +415,8 @@ export interface CalendarEntry {
   storyTitle: string | null
   outletId: string
   outletName: string | null
+  /** `browser` means the slot is a hand-over time, not a send time. */
+  driver: string | null
   status: string
   urgency: string | null
   scheduledFor: string | null
@@ -448,12 +450,77 @@ export interface PublicationRow {
   preview: string | null
 }
 
+/**
+ * One thing the desk is waiting on you for.
+ *
+ * Deliberately pre-digested by the server: the verb, the sentence and the link
+ * are decided there, so the screen is a list and nothing more. Anything it had
+ * to work out for itself would be a second place the wording could drift from
+ * what the notification said.
+ */
+export type ActionKind = 'sign-in' | 'publish' | 'fix' | 'approve' | 'write' | 'place' | 'answer'
+
+export interface DeskAction {
+  id: string
+  kind: ActionKind
+  title: string
+  where: string | null
+  verb: string
+  because: string
+  href: string
+  /** The desk is already late: a slot that has passed, or a send that broke. */
+  overdue: boolean
+  since: string | null
+}
+
 export interface DraftVersion {
   id: string
   publicationId: string
   slots: Record<string, string>
   origin: 'writer' | 'copy-desk' | 'human'
   createdAt: string
+}
+
+/**
+ * A page composed in a real browser and handed to the operator.
+ *
+ * `handover` is the recipe's own prose — what the person is expected to press.
+ * It is shown verbatim rather than summarised: the whole point of the cookbook
+ * is that the instruction and what the desk did are one document.
+ */
+export interface StagedPage {
+  publicationId: string
+  outletName: string
+  handover: string
+  screenshotPath: string | null
+  stagedAt: string
+  lease: { expiresAt: string }
+  viewer: { kind: 'novnc'; path: string } | { kind: 'none' }
+}
+
+export interface BrowserBusyInfo {
+  label: string
+  publicationId: string
+  since: string
+}
+
+export interface ViewerInfo {
+  kind: 'novnc' | 'none'
+  url?: string
+  /** Set when someone else's publish holds the browser. */
+  heldBy?: string | null
+}
+
+export interface PublishTrace {
+  id: string
+  at: string
+  phase: 'stage' | 'handover' | 'verify'
+  action: string
+  selector: string | null
+  url: string | null
+  ok: boolean
+  detail: Record<string, unknown> | null
+  screenshotPath: string | null
 }
 
 export interface ChatMessage {
@@ -592,6 +659,9 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ scheduled_for: scheduledFor }),
     }),
+  /** Everything waiting on a person, ordered by what is most overdue. */
+  listActions: () =>
+    request<{ actions: DeskAction[]; total: number; overdue: number }>('/api/v1/actions'),
   getTimezone: () => request<{ timezone: string; detected: string }>('/api/v1/settings/timezone'),
   setTimezone: (timezone: string) =>
     request<{ timezone: string }>('/api/v1/settings/timezone', {
@@ -609,6 +679,45 @@ export const api = {
     }),
   retryPublication: (id: string) =>
     request<{ queued: boolean }>(`/api/v1/publications/${id}/retry`, { method: 'POST' }),
+
+  // ── browser publishing ────────────────────────────────────────────────────
+  /**
+   * Compose the page. Called when the operator opens the live view, not when
+   * the slot came — nothing holds the browser while a person is being waited
+   * for. A 409 means someone else's publish has it.
+   */
+  stagePublication: (id: string) =>
+    request<StagedPage>(`/api/v1/publications/${id}/stage`, { method: 'POST' }),
+  /** They pressed the destination's own button. */
+  markSent: (id: string) =>
+    request<{ status: string; evidence: 'verified' | 'attested'; externalUrl: string | null }>(
+      `/api/v1/publications/${id}/sent`,
+      { method: 'POST' },
+    ),
+  /**
+   * Put the destination's login page in front of the operator and hold the
+   * browser while they use it. The viewer alone is not enough: the browser
+   * starts lazily, and nothing else points it at this outlet.
+   */
+  openSignIn: (id: string) =>
+    request<{ url: string; lease: { expiresAt: string } }>(
+      `/api/v1/publications/${id}/open-sign-in`,
+      { method: 'POST' },
+    ),
+  /**
+   * "I've signed in." The desk goes and looks rather than taking your word —
+   * publishing into a login page is what this whole state prevents.
+   */
+  confirmSignedIn: (id: string) =>
+    request<{ signedIn: boolean }>(`/api/v1/publications/${id}/signed-in`, { method: 'POST' }),
+  /** They did not. The slot survives; the browser is given back. */
+  markNotSent: (id: string) =>
+    request<{ ok: boolean }>(`/api/v1/publications/${id}/not-sent`, { method: 'POST' }),
+  keepBrowserAlive: (id: string) =>
+    request<{ held: boolean }>(`/api/v1/publications/${id}/keepalive`, { method: 'POST' }),
+  getViewer: (id: string) => request<ViewerInfo>(`/api/v1/browser/viewer/${id}`),
+  listTraces: (id: string) =>
+    request<{ traces: PublishTrace[] }>(`/api/v1/publications/${id}/traces`),
   listChat: (id: string) => request<{ messages: ChatMessage[] }>(`/api/v1/publications/${id}/chat`),
   sendChat: (id: string, message: string) =>
     request<{ reply: string; slots: Record<string, string>; versionId: string }>(
