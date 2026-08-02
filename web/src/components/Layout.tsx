@@ -13,6 +13,7 @@ const NAV = [
   { group: 'Desk', items: [
     { to: '/queue', label: 'Queue', ready: true },
     { to: '/calendar', label: 'Calendar', ready: true },
+    { to: '/compose', label: 'Write', ready: true },
     { to: '/tips', label: 'Tip line', ready: true },
   ] },
   { group: 'Archive', items: [{ to: '/stories', label: 'Stories', ready: true }] },

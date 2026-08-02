@@ -153,6 +153,17 @@ export const stories = sqliteTable(
     relatedStoryId: text('related_story_id'),
     /** JSON: the ids the verdict was made against. */
     comparedIds: text('compared_ids'),
+    /**
+     * Who filed it: the managing editor reading the wire, or the desk itself
+     * when you write and place a piece by hand.
+     *
+     * It is not decoration. A manual story carries no proposed placements, so
+     * every placement on it is `origin: 'human'` — and anything measuring how
+     * often you override the managing editor has to be able to leave those out,
+     * or a desk that posts by hand reads as a managing editor getting it wrong
+     * every time.
+     */
+    origin: text('origin').notNull().default('managing-editor'), // managing-editor | desk
     /** Coarse and cosmetic: sorts the queue, never filters. */
     label: text('label'),
     dropReason: text('drop_reason'),

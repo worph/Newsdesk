@@ -15,7 +15,7 @@ export function when(iso: string): string {
   return date.toISOString().slice(0, 10)
 }
 
-const STATUS_STYLE: Record<string, string> = {
+export const STATUS_STYLE: Record<string, string> = {
   PLACED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
   PROPOSED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
   DROPPED: 'bg-desk-200 text-desk-600 dark:bg-desk-800 dark:text-desk-400',

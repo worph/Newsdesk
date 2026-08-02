@@ -310,6 +310,8 @@ that contributed to it, and to the earlier story it duplicates or updates.
 
 **Publication** (one row per story × outlet — this *is* the ledger) — `PROPOSED` → `DRAFTING` →
 `AWAITING_APPROVAL` → `APPROVED` | `SCHEDULED` → `PUBLISHED`, with `REJECTED` and `FAILED` terminal.
+A publication written at the desk enters at `AWAITING_APPROVAL`: no writer is coming, so there is
+nothing for the two states before it to be waiting on.
 
 Approval is **per outlet**. A story running on a public Discord channel and in an internal Nextcloud
 Talk room produces two drafts, two chat threads, and two independent decisions. The review surface
@@ -341,6 +343,35 @@ cap) and what that outlet already owes the calendar, so it is computed in code, 
 and with tests, rather than spent on an inference call. The proposal is computed when a human opens
 the review screen and is **never stored**: `scheduled_for` only ever holds a commitment, and a
 proposal measured against a calendar that has since filled up would be worse than none.
+
+### Writing at the desk
+
+Not everything worth sending arrives on the wire. **Compose** is the front door for a piece you
+wrote yourself: name it, pick the destinations, and the desk creates one story and one blank
+publication per destination. From there it is the ordinary review editor — the same slots, the same
+limits, the same copy desk, the same payload merge, the same gate, the same schedule, the same
+ledger. Nothing downstream can tell a manual publication from a written one, and nothing downstream
+should be able to: what differs is only who authored the slots.
+
+Two rules keep it from becoming a second pipeline.
+
+**No inference on this path.** Not one call, anywhere between the compose form and the wire. A
+manual send is what the desk is for when the wire is quiet, the agent is busy, or inference is
+broken outright — a version of it that needed a model working would be missing the point. The copy
+desk is still one click away per destination, but only if you ask for it.
+
+**No copy is authored centrally.** Each destination is written separately, against its own outlet's
+declared slots. Pouring one document into five outlets would be the desk quietly deciding that every
+audience takes the same words, which is the exact judgement per-outlet identity exists to make.
+Where two destinations genuinely do take nearly the same text, *copy from* pulls one into another —
+deterministically, keys both outlets declare and nothing else — as a starting point to cut down,
+not as a shared document.
+
+Stories written at the desk carry `origin: 'desk'` and stay in the comparison window with the rest:
+a piece you sent by hand is exactly the thing that should make a stringer's filing about the same
+event come back a duplicate next week. The column exists so that anything measuring how often you
+override the managing editor can leave them out — every placement on a manual story is `human`, and
+counting those would read as a managing editor getting it wrong every single time.
 
 Every transition is written to an append-only event log with a timestamp and an actor (`system` or
 `human`). The audit trail is not bolted on; it is the same rows the UI reads.

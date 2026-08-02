@@ -1,4 +1,5 @@
-import { isSlot, templateExpressions, type ArgsSpec } from '@newsdesk/shared'
+import { isSlot, templateExpressions, type ArgsSpec, type SlotDef } from '@newsdesk/shared'
+import { escapeTelegramHtml, markdownToTelegramHtml } from './telegram-html.js'
 
 /**
  * The published payload is `merge(literals, derived, approved slots)` — pure
@@ -87,6 +88,24 @@ export function renderTemplate(template: string, context: TemplateContext): stri
   return out
 }
 
+/**
+ * Convert an authored value to the destination's wire syntax.
+ *
+ * This is the one place the payload is anything other than what was typed, and
+ * it runs *before* approval freezes the payload — so the editor reviews the
+ * converted bytes and invariant 2 holds: nothing changes after approval. A slot
+ * with no `format` is passed through untouched, which is every slot today
+ * except a Telegram one.
+ *
+ * A `markdown` slot is parsed and re-emitted; anything else is prose that must
+ * merely survive the destination's parser, so it is escaped and not parsed —
+ * a headline reading `4 * 3 > 10` is not a request for formatting.
+ */
+function formatSlotValue(def: SlotDef, value: string): string {
+  if (def.format !== 'telegram-html') return value
+  return def.slot === 'markdown' ? markdownToTelegramHtml(value) : escapeTelegramHtml(value)
+}
+
 export class PayloadIncomplete extends Error {
   constructor(readonly missing: string[]) {
     super(`draft is missing required slot(s): ${missing.join(', ')}`)
@@ -115,7 +134,7 @@ export function mergePayload(args: ArgsSpec, context: MergeContext): Record<stri
         if (!spec.optional) missing.push(key)
         continue
       }
-      payload[key] = filled
+      payload[key] = typeof filled === 'string' ? formatSlotValue(spec, filled) : filled
       continue
     }
 

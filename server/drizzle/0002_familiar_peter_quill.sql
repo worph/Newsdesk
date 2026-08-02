@@ -1,0 +1,1 @@
+ALTER TABLE `stories` ADD `origin` text DEFAULT 'managing-editor' NOT NULL;

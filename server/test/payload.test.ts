@@ -142,3 +142,52 @@ describe('previewPayload', () => {
     expect('description' in preview.payload).toBe(false)
   })
 })
+
+describe('slot format', () => {
+  const telegramArgs: ArgsSpec = {
+    chatId: '-5333649854',
+    parseMode: 'HTML',
+    text: {
+      slot: 'markdown',
+      label: 'Message',
+      max: 4096,
+      optional: false,
+      primary: true,
+      format: 'telegram-html',
+    },
+    caption: {
+      slot: 'text',
+      label: 'Caption',
+      optional: true,
+      primary: false,
+      format: 'telegram-html',
+    },
+  }
+
+  it('converts a markdown slot to the destination syntax', () => {
+    const payload = mergePayload(telegramArgs, context({ text: '**Immich** is `1.142.0`' }))
+    expect(payload.text).toBe('<b>Immich</b> is <code>1.142.0</code>')
+  })
+
+  it('escapes a text slot rather than parsing it — a headline is not markup', () => {
+    const payload = mergePayload(telegramArgs, context({ text: 'x', caption: '4 * 3 > 10 & up' }))
+    expect(payload.caption).toBe('4 * 3 &gt; 10 &amp; up')
+  })
+
+  it('carries a lone underscore through, which is the send that used to fail', () => {
+    const payload = mergePayload(telegramArgs, context({ text: 'set AUTH_HASH / OIDC' }))
+    expect(payload.text).toBe('set AUTH_HASH / OIDC')
+  })
+
+  it('leaves a slot with no format exactly as authored', () => {
+    const payload = mergePayload(discordArgs, context({ title: 'T', description: '**bold** & <b>' }))
+    expect(payload.description).toBe('**bold** & <b>')
+  })
+
+  it('shows the converted bytes at review, not the source — that is what gets sent', () => {
+    // Approval freezes what mergePayload returns, so a preview of anything else
+    // would be an approval of something that never goes out.
+    const preview = previewPayload(telegramArgs, context({ text: '# Title' }))
+    expect(preview.payload.text).toBe('<b>Title</b>')
+  })
+})

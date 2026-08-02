@@ -35,6 +35,8 @@ export interface StoryRow {
   dedupReason: string | null
   relatedStoryId: string | null
   relatedTitle: string | null
+  /** 'managing-editor' | 'desk' — a story the wire produced, or one you wrote. */
+  origin: string
   label: string | null
   dropReason: string | null
   holdReason: string | null
@@ -152,6 +154,7 @@ export function registerStoryRoutes(
       dedupReason: row.dedupReason,
       relatedStoryId: row.relatedStoryId,
       relatedTitle: row.relatedStoryId ? (titles.get(row.relatedStoryId) ?? null) : null,
+      origin: row.origin,
       label: row.label,
       dropReason: row.dropReason,
       holdReason: row.holdReason,

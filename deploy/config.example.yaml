@@ -132,6 +132,33 @@ outlets:
         max: 4096
         primary: true
 
+  - id: telegram-broadcast
+    name: Telegram broadcast
+    description: the public Telegram channel, same stories as Discord in a shorter format
+    role: publish
+    driver: mcp
+    voice: alicia
+    endpoint: beacon
+    tool: telegram-mcp__send_message
+    args:
+      chatId: "-5333649854"
+      # Telegram parses the message text, so the two lines below are one
+      # decision and the desk refuses to save them out of step.
+      #
+      # `HTML` is the only mode that can carry written copy. In `Markdown` and
+      # `MarkdownV2` every _ * ` [ in the message is a delimiter that must be
+      # closed, so a body containing AUTH_HASH or a snake_case identifier fails
+      # the whole send with "can't parse entities".
+      parseMode: HTML
+      text:
+        slot: markdown
+        label: Message
+        max: 4096
+        primary: true
+        # Converts the writer's markdown to Telegram's tags at merge time —
+        # before approval freezes the payload, so you review what is sent.
+        format: telegram-html
+
   # Uncomment once the argument keys are confirmed against a live call — that
   # Beacon exposes tool descriptions without schemas.
   # - id: nextcloud-tech

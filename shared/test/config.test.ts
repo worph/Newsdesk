@@ -387,3 +387,91 @@ describe('an outlet cadence', () => {
     ] })).toThrow()
   })
 })
+
+describe('parseMode and slot format', () => {
+  /** The live telegram-broadcast outlet, correctly paired. */
+  function telegramOutlet(): Record<string, any> {
+    return {
+      id: 'telegram-broadcast',
+      name: 'Telegram broadcast',
+      description: 'the public Telegram channel',
+      role: 'publish',
+      driver: 'mcp',
+      voice: 'alicia',
+      endpoint: 'beacon',
+      tool: 'telegram-mcp__send_message',
+      args: {
+        chatId: '-5333649854',
+        parseMode: 'HTML',
+        text: {
+          slot: 'markdown',
+          label: 'Message',
+          max: 4096,
+          primary: true,
+          format: 'telegram-html',
+        },
+      },
+    }
+  }
+
+  it('accepts HTML paired with telegram-html', () => {
+    expect(issuesFor((c) => c.outlets.push(telegramOutlet()))).toEqual([])
+  })
+
+  it('refuses Markdown outright — written copy cannot survive its delimiters', () => {
+    const issues = issuesFor((c) => {
+      const outlet = telegramOutlet()
+      outlet.args.parseMode = 'Markdown'
+      delete outlet.args.text.format
+      c.outlets.push(outlet)
+    })
+    expect(issues).toHaveLength(1)
+    expect(issues[0]).toContain('outlets.telegram-broadcast.args.parseMode')
+    expect(issues[0]).toContain('snake_case')
+  })
+
+  it('refuses MarkdownV2 for the same reason', () => {
+    const issues = issuesFor((c) => {
+      const outlet = telegramOutlet()
+      outlet.args.parseMode = 'MarkdownV2'
+      delete outlet.args.text.format
+      c.outlets.push(outlet)
+    })
+    expect(issues).toHaveLength(1)
+    expect(issues[0]).toContain('args.parseMode')
+  })
+
+  it('refuses HTML on a slot that is not converted to it', () => {
+    const issues = issuesFor((c) => {
+      const outlet = telegramOutlet()
+      delete outlet.args.text.format
+      c.outlets.push(outlet)
+    })
+    expect(issues).toEqual([
+      expect.stringContaining('outlets.telegram-broadcast.args.text'),
+    ])
+  })
+
+  it('refuses telegram-html without the parse mode that reads it', () => {
+    const issues = issuesFor((c) => {
+      const outlet = telegramOutlet()
+      delete outlet.args.parseMode
+      c.outlets.push(outlet)
+    })
+    expect(issues).toHaveLength(1)
+    expect(issues[0]).toContain('needs `parseMode: HTML`')
+  })
+
+  it('leaves an outlet with no parse mode alone — Discord parses nothing', () => {
+    expect(issuesFor(() => {})).toEqual([])
+  })
+
+  it('does not ask a url slot to be converted — only parsed text is at risk', () => {
+    const issues = issuesFor((c) => {
+      const outlet = telegramOutlet()
+      outlet.args.photo = { slot: 'image', label: 'Photo', optional: true }
+      c.outlets.push(outlet)
+    })
+    expect(issues).toEqual([])
+  })
+})

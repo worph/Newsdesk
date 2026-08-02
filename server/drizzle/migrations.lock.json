@@ -10,6 +10,11 @@
       "tag": "0001_lucky_crusher_hogan",
       "when": 1785605553580,
       "sha256": "8032c774121d353d9b6d9d0d50649aa338bac21a60eeeb7f65155c4ed1d61f8c"
+    },
+    {
+      "tag": "0002_familiar_peter_quill",
+      "when": 1785663224046,
+      "sha256": "d21db7629176aa858afc849be99304cd64bc4e4bbec26d2da400717ea5bd5986"
     }
   ]
 }

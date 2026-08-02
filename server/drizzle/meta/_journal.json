@@ -15,6 +15,13 @@
       "when": 1785605553580,
       "tag": "0001_lucky_crusher_hogan",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785663224046,
+      "tag": "0002_familiar_peter_quill",
+      "breakpoints": true
     }
   ]
 }

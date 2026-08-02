@@ -386,6 +386,67 @@ function checkDestination(outlet: Outlet, issues: ConfigIssue[]): void {
 }
 
 /**
+ * `parseMode` and a slot's `format` are one decision written in two places, and
+ * a mismatch is invisible until a real send fails — which on Telegram is a 400
+ * that spikes the whole message, not a formatting blemish.
+ *
+ * Nothing here is Telegram-aware beyond the argument name: an outlet that pins
+ * `parseMode` is talking to a bridge that parses the message text, and a model
+ * never escapes its prose for a delimiter grammar. So the only workable pairing
+ * is `parseMode: HTML` with `format: telegram-html` on every prose slot, and
+ * every other combination is a configuration bug caught at save time.
+ *
+ * `Markdown`/`MarkdownV2` cost yunderalabs a publish on 2026-08-01: a body
+ * containing `AUTH_HASH` opened an italic entity that never closed.
+ */
+function checkParseMode(outlet: Outlet, issues: ConfigIssue[]): void {
+  const path = `outlets.${outlet.id}`
+  const parseMode = outlet.args.parseMode
+  const mode = typeof parseMode === 'string' && !isDerived(parseMode) ? parseMode : undefined
+
+  // Slots whose text the destination parses. A url or an image address is
+  // carried in its own argument and never read as markup.
+  const prose = slotsOf(outlet.args).filter(
+    ({ def }) => def.slot === 'markdown' || def.slot === 'text',
+  )
+
+  if ((mode === 'Markdown' || mode === 'MarkdownV2') && prose.length > 0) {
+    issues.push({
+      path: `${path}.args.parseMode`,
+      message:
+        `"${mode}" cannot carry written copy — every _ * \` [ in the message is a delimiter that ` +
+        'must be closed, so one snake_case word fails the send. Use `parseMode: HTML` and give ' +
+        `${prose.map((p) => p.key).join(', ')} \`format: telegram-html\`.`,
+    })
+    return
+  }
+
+  if (mode === 'HTML') {
+    for (const { key, def } of prose) {
+      if (def.format !== 'telegram-html') {
+        issues.push({
+          path: `${path}.args.${key}`,
+          message:
+            'this slot is sent as HTML but is not converted to it — add `format: telegram-html`, ' +
+            'or the markup shows up as raw text and an unescaped < fails the send.',
+        })
+      }
+    }
+  }
+
+  for (const { key, def } of slotsOf(outlet.args)) {
+    if (def.format === 'telegram-html' && mode !== 'HTML') {
+      issues.push({
+        path: `${path}.args.${key}`,
+        message: `\`format: telegram-html\` needs \`parseMode: HTML\` pinned on the outlet — ${
+          mode ? `this one pins "${mode}"` : 'this one pins none'
+        }, so the tags would be shown rather than read.`,
+      })
+    }
+  }
+}
+
+/**
  * Semantic validation on top of the shape check. These are errors, not
  * warnings — a config that fails any of them must not be saved.
  */
@@ -447,6 +508,7 @@ export function validateConfig(config: Config): ConfigIssue[] {
 
     checkTemplates(outlet.args, path, issues)
     checkDestination(outlet, issues)
+    checkParseMode(outlet, issues)
     checkCadence(outlet, issues)
   }
 

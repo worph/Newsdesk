@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { api } from './api'
 import { Layout } from './components/Layout'
 import { Calendar } from './pages/Calendar'
+import { Compose } from './pages/Compose'
 import { Config } from './pages/Config'
 import { Login } from './pages/Login'
 import { Queue } from './pages/Queue'
@@ -35,6 +36,7 @@ export function App() {
       <Routes>
         <Route path="/queue" element={<Queue />} />
         <Route path="/calendar" element={<Calendar />} />
+        <Route path="/compose" element={<Compose />} />
         <Route path="/stories" element={<Stories />} />
         <Route path="/stories/:id" element={<Story />} />
         <Route path="/review/:id" element={<Review />} />

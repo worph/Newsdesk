@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, type PublicationRow } from '../api'
-import { Badge, StoryCard, when } from '../components/StoryCard'
+import { Badge, STATUS_STYLE, StoryCard, when } from '../components/StoryCard'
 import { useArticleQueue, usePlacementQueue } from '../queue'
 
 /**
@@ -65,6 +66,54 @@ function Tabs({
   )
 }
 
+/**
+ * A placement row wears two chips that look alike and mean nothing alike: the
+ * first is a decision the desk made, the second is a word it invented. That is
+ * two lines of explanation — too little for the copy above the list, too much
+ * to leave to guesswork — so it sits behind an "i".
+ */
+function ChipLegend() {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <span
+      className="relative inline-block align-middle"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false)
+      }}
+      onKeyDown={(event) => event.key === 'Escape' && setOpen(false)}
+    >
+      <button
+        type="button"
+        aria-label="What the chips mean"
+        aria-expanded={open}
+        onClick={() => setOpen((was) => !was)}
+        className="grid size-4 place-items-center rounded-full border border-desk-300 font-mono text-[10px] leading-none text-desk-500 hover:border-desk-500 hover:text-desk-700 dark:border-desk-700 dark:hover:border-desk-500 dark:hover:text-desk-300"
+      >
+        i
+      </button>
+
+      {open && (
+        <span
+          role="tooltip"
+          className="absolute left-0 top-6 z-10 block w-80 space-y-1.5 rounded-lg border border-desk-200 bg-white px-3 py-2 text-xs leading-relaxed text-desk-600 shadow-lg dark:border-desk-800 dark:bg-desk-900 dark:text-desk-400"
+        >
+          <span className="block">
+            <Badge tone={STATUS_STYLE.PLACED}>placed</Badge> — the desk's call on the story itself:
+            it picked destinations and is waiting on you. <Badge tone={STATUS_STYLE.HELD}>held</Badge>{' '}
+            means it needs an answer first, <Badge tone={STATUS_STYLE.DROPPED}>dropped</Badge> means
+            it was spiked.
+          </span>
+          <span className="block">
+            <Badge>release</Badge> — a coarse label the desk gave the story so like things sort
+            together. Cosmetic: it never decides where anything runs.
+          </span>
+        </span>
+      )}
+    </span>
+  )
+}
+
 function Empty({ children }: { children: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-dashed border-desk-300 px-4 py-6 text-center text-xs text-desk-500 dark:border-desk-700">
@@ -80,6 +129,9 @@ function Empty({ children }: { children: React.ReactNode }) {
  */
 function ArticleCard({ publication, onOpen }: { publication: PublicationRow; onOpen: () => void }) {
   const failed = publication.status === 'FAILED'
+  // A piece you are writing yourself starts blank on purpose. Without saying so,
+  // an empty row here is indistinguishable from a writer that failed silently.
+  const mine = publication.storyOrigin === 'desk'
 
   return (
     <li className="rounded-lg border border-desk-200 dark:border-desk-800">
@@ -99,16 +151,26 @@ function ArticleCard({ publication, onOpen }: { publication: PublicationRow; onO
                 send failed
               </Badge>
             )}
-            {publication.origin === 'human' && <Badge>added by you</Badge>}
+            {mine ? (
+              <Badge>yours</Badge>
+            ) : (
+              publication.origin === 'human' && <Badge>added by you</Badge>
+            )}
             {publication.storyCreatedAt && (
               <span className="text-xs text-desk-500">{when(publication.storyCreatedAt)}</span>
             )}
           </span>
 
-          {publication.preview && (
+          {publication.preview ? (
             <span className="mt-1 block text-sm text-desk-600 dark:text-desk-400">
               {publication.preview}
             </span>
+          ) : (
+            mine && (
+              <span className="mt-1 block text-sm text-desk-500 italic">
+                Not written yet — open it to write this destination.
+              </span>
+            )
           )}
 
           {/* A failed send is the one row here that is not simply waiting on you. */}
@@ -182,8 +244,8 @@ export function Queue() {
       {tab === 'article' ? (
         <section className="space-y-2">
           <p className="text-xs text-desk-500">
-            Drafts the writer has finished, one per destination. Approve is the only path to the
-            wire.
+            Drafts waiting on you, one per destination — what the writer finished, and what you
+            started yourself. Approve is the only path to the wire.
           </p>
           {drafts.length === 0 ? (
             <Empty>No draft is waiting. One appears here as soon as the writer finishes a piece.</Empty>
@@ -201,9 +263,12 @@ export function Queue() {
         </section>
       ) : (
         <section className="space-y-2">
-          <p className="text-xs text-desk-500">
-            Where the managing editor proposed each story should run, and why. Each chip is one
-            destination — approving one never ships the others.
+          <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-desk-500">
+            <span>
+              Where the managing editor proposed each story should run, and why. Each chip is one
+              destination — approving one never ships the others.
+            </span>
+            <ChipLegend />
           </p>
           {placements.length === 0 ? (
             <Empty>

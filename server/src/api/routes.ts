@@ -28,6 +28,7 @@ import {
 } from '../push.js'
 import { DEFAULT_TIMEZONE, getSetting, getOrCreateSecret, getTimezone, SETTING, setSetting } from '../settings.js'
 import { registerCalendarRoutes } from './calendar.js'
+import { registerComposeRoutes } from './compose.js'
 import { registerIngestRoutes } from './ingest.js'
 import { registerMcpRoutes } from './mcp.js'
 import { registerPublicationRoutes } from './publications.js'
@@ -85,6 +86,7 @@ export function registerRoutes(
   registerStoryRoutes(app, db, receiveOptions.enqueueManagingEditor, receiveOptions.enqueueWriter)
   registerPublicationRoutes(app, db, receiveOptions.enqueuePublish, receiveOptions.driver)
   registerCalendarRoutes(app, db)
+  registerComposeRoutes(app, db)
   registerMcpRoutes(app, db, receiveOptions.publicUrl)
 
   // ── push ──────────────────────────────────────────────────────────────────

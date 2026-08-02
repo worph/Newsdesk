@@ -19,11 +19,30 @@ import { z } from 'zod'
 export const SLOT_TYPES = ['text', 'markdown', 'image', 'link'] as const
 export type SlotType = (typeof SLOT_TYPES)[number]
 
+/**
+ * The wire syntax a slot is converted to when the payload is merged.
+ *
+ * Absent — the default — means the authored value is sent exactly as written,
+ * which is right for every destination that accepts markdown or plain text.
+ * It is wrong for a destination with its own markup grammar: Telegram parses
+ * the message against `parseMode` and rejects the whole send when it cannot,
+ * so `AUTH_HASH` in a body sent as `parseMode: Markdown` is a 400 — one
+ * underscore opens an italic entity that never closes.
+ *
+ * The conversion runs in `mergePayload`, before approval freezes the payload,
+ * so what the editor reviews is the bytes that go out. See
+ * server/src/render/telegram-html.ts.
+ */
+export const SLOT_FORMATS = ['telegram-html'] as const
+export type SlotFormat = (typeof SLOT_FORMATS)[number]
+
 export const slotDefSchema = z.object({
   slot: z.enum(SLOT_TYPES),
   label: z.string().min(1, 'a slot needs a label — it is what the editor sees'),
   max: z.number().int().positive().optional(),
   optional: z.boolean().default(false),
+  /** Convert on merge. Absent means the authored value is sent verbatim. */
+  format: z.enum(SLOT_FORMATS).optional(),
   /** At most one per outlet: the slot that gets the full editor and the copy desk. */
   primary: z.boolean().default(false),
   /** Guidance passed through to the writer prompt. */

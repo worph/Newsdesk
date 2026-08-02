@@ -200,6 +200,8 @@ export interface StoryRow {
   dedupReason: string | null
   relatedStoryId: string | null
   relatedTitle: string | null
+  /** 'managing-editor' | 'desk' — read off the wire, or written here. */
+  origin: string
   label: string | null
   dropReason: string | null
   holdReason: string | null
@@ -249,6 +251,19 @@ export interface PayloadPreview {
   missing: string[]
 }
 
+/**
+ * One of the destinations this story runs in. `written` is what lets a strip of
+ * them work as navigation for a piece being written destination by
+ * destination — a blank one must look blank without opening it.
+ */
+export interface Sibling {
+  id: string
+  outletId: string
+  outletName: string | null
+  status: string
+  written: boolean
+}
+
 export interface PublicationDetail {
   publication: {
     id: string
@@ -266,11 +281,18 @@ export interface PublicationDetail {
     urgency: string | null
     publishedAt: string | null
   }
-  story: { id: string; title: string; summary: string; url: string | null; dedupVerdict: string }
+  story: {
+    id: string
+    title: string
+    summary: string
+    url: string | null
+    dedupVerdict: string
+    origin: string
+  }
   outlet: { id: string; name: string; description: string; role: string; driver: string; tool: string | null }
   slotSpec: Record<string, SlotDef>
   preview: PayloadPreview
-  siblings: Array<{ id: string; outletId: string; status: string }>
+  siblings: Sibling[]
   /**
    * The send time the desk suggests, computed for this request. Null once the
    * publication has settled — there is nothing left to propose.
@@ -306,6 +328,8 @@ export interface PublicationRow {
   storyTitle: string | null
   storySummary: string | null
   storyCreatedAt: string | null
+  /** 'desk' means you wrote it: a blank draft here is unstarted, not broken. */
+  storyOrigin: string | null
   outletId: string
   outletName: string | null
   status: string
@@ -403,6 +427,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  /**
+   * Write and place a piece yourself. Creates the story and one blank
+   * publication per destination, then hands you to the normal review editor —
+   * one per destination, each written, approved and sent on its own.
+   */
+  compose: (body: {
+    title: string
+    summary?: string
+    url?: string
+    outlet_ids: string[]
+    urgency?: 'breaking' | 'normal' | 'evergreen'
+  }) =>
+    request<{
+      storyId: string
+      publications: Array<{ id: string; outletId: string; outletName: string }>
+    }>('/api/v1/compose', { method: 'POST', body: JSON.stringify(body) }),
   rerunStory: (id: string) =>
     request<{ queued: number }>(`/api/v1/stories/${id}/rerun`, { method: 'POST' }),
   listJobs: () => request<{ stats: Record<string, number>; jobs: JobRow[] }>('/api/v1/jobs'),
