@@ -9,6 +9,23 @@ import * as schema from './schema.js'
 // migration guards need the raw handle for `pragma` and `sqlite_master`.
 export type Db = BetterSQLite3Database<typeof schema> & { $client: SqliteDatabase }
 
+/**
+ * A transaction handle, which drizzle types separately from the database.
+ *
+ * Only the first argument of the callback `db.transaction` is given, derived
+ * rather than named, so it cannot drift from whatever drizzle actually passes.
+ */
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
+
+/**
+ * Whatever can run a query — the database or a transaction on it.
+ *
+ * Readers take this so they can be called from inside a transaction and see
+ * its uncommitted state. Writers keep taking `Db` or `Tx` explicitly, because
+ * which one they are given is a decision, not a detail.
+ */
+export type Queryable = Db | Tx
+
 export interface DbHandle {
   db: Db
   sqlite: SqliteDatabase

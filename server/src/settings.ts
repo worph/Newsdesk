@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { eq } from 'drizzle-orm'
-import type { Db } from './db/index.js'
+import type { Db, Queryable } from './db/index.js'
 import { schema } from './db/index.js'
 
 export const SETTING = {
@@ -18,7 +18,7 @@ export const SETTING = {
   reporting: 'reporting',
 } as const
 
-export function getSetting(db: Db, key: string): string | undefined {
+export function getSetting(db: Queryable, key: string): string | undefined {
   const row = db.select().from(schema.settings).where(eq(schema.settings.key, key)).get()
   return row?.value
 }

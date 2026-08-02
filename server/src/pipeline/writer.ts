@@ -145,7 +145,12 @@ export async function draftPublication(
       level: 'error',
       code: 'DRAFT_FAILED',
       publicationId,
-      message: `the writer could not produce a usable draft: ${message}`,
+      message: 'the writer could not produce a usable draft',
+      detail: {
+        publicationId,
+        error: message,
+        ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
+      },
     })
     throw err
   }

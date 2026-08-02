@@ -170,14 +170,120 @@ export interface TipTurn {
   content: string
 }
 
+/** One restore point: what the configuration was, just before a write changed it. */
+export interface ConfigVersion {
+  id: number
+  at: string
+  author: string
+  reason: string | null
+  sha256: string
+  restoredFromId: number | null
+  summary: string
+}
+
+export interface RestorePreview {
+  id: number
+  at: string
+  /** Why this cannot be restored at all. Empty means it would go through. */
+  issues: ConfigIssue[]
+  /** Why you might not want to, even though it would go through. */
+  warnings: string[]
+  currentYaml: string
+  versionYaml: string
+}
+
+/**
+ * One proposal from the error assistant.
+ *
+ * `risk` and `confirmWith` are decided by the server from the remedy's kind
+ * and the fields it touches. The browser never computes either — a client that
+ * decided a channel-id change was "safe" would change nothing about how it is
+ * applied.
+ */
+export interface Remedy {
+  id: string
+  kind: string
+  risk: 'safe' | 'high'
+  title: string
+  rationale: string
+  payload: Record<string, unknown>
+  status: 'PROPOSED' | 'APPLIED' | 'DISMISSED' | 'FAILED'
+  appliedAt: string | null
+  error: string | null
+  /** What must be typed back to apply it. Null for the ordinary tier. */
+  confirmWith: string | null
+}
+
+export interface AssistSession {
+  id: string
+  eventId: number
+  at: string
+  status: string
+  diagnosis: string | null
+  confidence: 'high' | 'medium' | 'low' | null
+  /** Proposals the desk refused after the model returned them, and why. */
+  rejected: { title: string; reason: string }[]
+  remedies: Remedy[]
+}
+
+export interface AssistStatus {
+  available: boolean
+  reason?: string
+  canRestart: boolean
+}
+
+export interface AppliedResult {
+  status: 'applied'
+  kind: string
+  outcome: string
+  next?: { action: 'authorize-endpoint' | 'wait-for-restart'; id?: string }
+}
+
+export type EventLevel = 'debug' | 'info' | 'warn' | 'error'
+
+export type EventCategory =
+  | 'pipeline'
+  | 'delivery'
+  | 'queue'
+  | 'editorial'
+  | 'config'
+  | 'ports'
+  | 'system'
+  | 'other'
+
+/**
+ * A row of the operations log, with the entities already resolved server-side.
+ *
+ * `category` and `assistable` are computed on the server rather than derived
+ * here on purpose: there are no frontend tests, so every rule that could be
+ * got wrong lives where a test can reach it.
+ */
 export interface EventRow {
   id: number
   at: string
-  level: 'debug' | 'info' | 'warn' | 'error'
+  level: EventLevel
   actor: string
   code: string
+  category: EventCategory
+  /** Whether the error assistant has anything to offer on this code. */
+  assistable: boolean
   message: string
   detail: unknown
+  storyId: string | null
+  /** Null when the story is gone; `storyId` is still shown in that case. */
+  storyTitle: string | null
+  publicationId: string | null
+  outletId: string | null
+  outletName: string | null
+}
+
+export interface EventQuery {
+  minLevel?: EventLevel
+  category?: EventCategory
+  actor?: 'system' | 'human'
+  q?: string
+  before?: number
+  limit?: number
 }
 
 export interface StoryPlacement {
@@ -521,11 +627,34 @@ export const api = {
     request<{ id: string }>('/api/v1/push/subscribe', { method: 'POST', body: JSON.stringify(body) }),
   unsubscribePush: (endpoint: string) =>
     request<{ ok: true }>('/api/v1/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) }),
-  listEvents: (params: { level?: string; limit?: number } = {}) => {
+  assistStatus: () => request<AssistStatus>('/api/v1/assist/status'),
+  getAssist: (eventId: number) =>
+    request<{ session: AssistSession | null }>(`/api/v1/events/${eventId}/assist`),
+  runAssist: (eventId: number) =>
+    request<{ session: AssistSession }>(`/api/v1/events/${eventId}/assist`, { method: 'POST' }),
+  applyRemedy: (id: string, confirm?: string) =>
+    request<AppliedResult>(`/api/v1/remedies/${id}/apply`, {
+      method: 'POST',
+      body: JSON.stringify(confirm ? { confirm } : {}),
+    }),
+  dismissRemedy: (id: string) =>
+    request<{ status: string }>(`/api/v1/remedies/${id}/dismiss`, { method: 'POST' }),
+  listConfigVersions: () => request<{ versions: ConfigVersion[] }>('/api/v1/config/versions'),
+  previewConfigRestore: (id: number) =>
+    request<RestorePreview>(`/api/v1/config/versions/${id}/preview`),
+  restoreConfigVersion: (id: number) =>
+    request<{ ok: true; yaml: string }>(`/api/v1/config/versions/${id}/restore`, { method: 'POST' }),
+  listEvents: (params: EventQuery = {}) => {
     const search = new URLSearchParams()
-    if (params.level) search.set('level', params.level)
+    if (params.minLevel) search.set('minLevel', params.minLevel)
+    if (params.category) search.set('category', params.category)
+    if (params.actor) search.set('actor', params.actor)
+    if (params.q) search.set('q', params.q)
+    if (params.before !== undefined) search.set('before', String(params.before))
     if (params.limit) search.set('limit', String(params.limit))
     const qs = search.toString()
-    return request<{ events: EventRow[] }>(`/api/v1/events${qs ? `?${qs}` : ''}`)
+    return request<{ events: EventRow[]; nextCursor: number | null }>(
+      `/api/v1/events${qs ? `?${qs}` : ''}`,
+    )
   },
 }

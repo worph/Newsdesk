@@ -5,6 +5,7 @@ import { Layout } from './components/Layout'
 import { Calendar } from './pages/Calendar'
 import { Compose } from './pages/Compose'
 import { Config } from './pages/Config'
+import { Log } from './pages/Log'
 import { Login } from './pages/Login'
 import { Queue } from './pages/Queue'
 import { Review } from './pages/Review'
@@ -43,6 +44,7 @@ export function App() {
         <Route path="/config" element={<Config />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/wire" element={<Wire />} />
+        <Route path="/log" element={<Log />} />
         <Route path="/tips" element={<Tips />} />
         <Route path="*" element={<Navigate to="/queue" replace />} />
       </Routes>

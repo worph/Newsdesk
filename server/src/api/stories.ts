@@ -269,7 +269,8 @@ export function registerStoryRoutes(
       code: 'ROUTE_ADDED',
       storyId: id,
       publicationId,
-      message: `editor added a placement to ${parsed.data.outlet_id}`,
+      message: `you added a placement on ${outlet.name}`,
+      detail: { outletId: outlet.id },
     })
 
     return reply.code(201).send({ id: publicationId, drafting: Boolean(enqueueWriter) })

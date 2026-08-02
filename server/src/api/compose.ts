@@ -124,7 +124,8 @@ export function registerComposeRoutes(app: FastifyInstance, db: Db): void {
       actor: 'human',
       code: 'COMPOSED',
       storyId,
-      message: `wrote "${title}" for ${wanted.length} destination(s): ${wanted.join(', ')}`,
+      message: `you wrote "${title}" for ${wanted.map((id) => found.get(id)?.name ?? id).join(', ')}`,
+      detail: { outletIds: wanted },
     })
 
     return reply.code(201).send({

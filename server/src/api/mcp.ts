@@ -23,6 +23,21 @@ import {
  * interactive at all.
  */
 
+/**
+ * What to call an endpoint in a sentence a human reads.
+ *
+ * Falls back to the id, which is the only honest thing to say about an
+ * endpoint that has just been deleted or never existed.
+ */
+function endpointName(db: Db, id: string): string {
+  const row = db
+    .select({ name: schema.mcpEndpoints.name })
+    .from(schema.mcpEndpoints)
+    .where(eq(schema.mcpEndpoints.id, id))
+    .get()
+  return row?.name ?? id
+}
+
 const callbackQuery = z.object({
   code: z.string().min(1).optional(),
   state: z.string().min(1).optional(),
@@ -93,7 +108,7 @@ export function registerMcpRoutes(app: FastifyInstance, db: Db, publicUrl?: stri
           level: 'info',
           code: 'mcp.oauth.started',
           actor: 'human',
-          message: `authorization started for endpoint "${request.params.id}"`,
+          message: `authorization started for ${endpointName(db, request.params.id)}`,
         })
         return { status: 'redirect' as const, authorizationUrl }
       } catch (err) {
@@ -101,8 +116,8 @@ export function registerMcpRoutes(app: FastifyInstance, db: Db, publicUrl?: stri
         logEvent(db, {
           level: 'error',
           code: 'mcp.oauth.failed',
-          message: `could not start authorization for "${request.params.id}": ${message}`,
-          detail: { endpoint: request.params.id, phase: 'start' },
+          message: `could not start authorization for ${endpointName(db, request.params.id)}`,
+          detail: { endpointId: request.params.id, phase: 'start', error: message },
         })
         return reply.code(err instanceof OAuthFlowError ? 400 : 502).send({ error: message })
       }
@@ -130,8 +145,8 @@ export function registerMcpRoutes(app: FastifyInstance, db: Db, publicUrl?: stri
       logEvent(db, {
         level: 'error',
         code: 'mcp.oauth.failed',
-        message: `the authorization server refused: ${detail}`,
-        detail: { phase: 'callback' },
+        message: 'the authorization server refused the connection',
+        detail: { phase: 'callback', error: detail },
       })
       return reply.code(400).type('text/html').send(callbackPage(false, detail))
     }
@@ -155,9 +170,9 @@ export function registerMcpRoutes(app: FastifyInstance, db: Db, publicUrl?: stri
         code: 'mcp.oauth.connected',
         actor: 'human',
         message: summary.warning
-          ? `endpoint "${endpoint.id}" connected without a refresh token`
-          : `endpoint "${endpoint.id}" connected`,
-        detail: { endpoint: endpoint.id, hasRefreshToken: summary.hasRefreshToken },
+          ? `${endpoint.name} is connected, but without a refresh token — it will stop working later`
+          : `${endpoint.name} is connected`,
+        detail: { endpointId: endpoint.id, hasRefreshToken: summary.hasRefreshToken },
       })
       // A connection with no refresh token works now and stops working later,
       // so it is said plainly on the page rather than buried in the log.
@@ -170,8 +185,8 @@ export function registerMcpRoutes(app: FastifyInstance, db: Db, publicUrl?: stri
       logEvent(db, {
         level: 'error',
         code: 'mcp.oauth.failed',
-        message: `token exchange failed: ${message}`,
-        detail: { phase: 'exchange' },
+        message: 'the token exchange failed, so the endpoint is not connected',
+        detail: { phase: 'exchange', error: message },
       })
       return reply.code(400).type('text/html').send(callbackPage(false, message))
     }
@@ -183,7 +198,7 @@ export function registerMcpRoutes(app: FastifyInstance, db: Db, publicUrl?: stri
     { preHandler: requireSession },
     async (request, reply) => {
       const row = db
-        .select({ id: schema.mcpEndpoints.id })
+        .select({ id: schema.mcpEndpoints.id, name: schema.mcpEndpoints.name })
         .from(schema.mcpEndpoints)
         .where(eq(schema.mcpEndpoints.id, request.params.id))
         .get()
@@ -194,7 +209,8 @@ export function registerMcpRoutes(app: FastifyInstance, db: Db, publicUrl?: stri
         level: 'info',
         code: 'mcp.oauth.forgotten',
         actor: 'human',
-        message: `disconnected endpoint "${request.params.id}"`,
+        message: `disconnected ${row.name}`,
+        detail: { endpointId: row.id },
       })
       return { status: 'disconnected' as const }
     },

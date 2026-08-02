@@ -5,7 +5,7 @@ import { hasSession, requireIngestToken, requireSession } from '../auth.js'
 import { readReporting } from '../config/store.js'
 import type { Db } from '../db/index.js'
 import { schema } from '../db/index.js'
-import { listEvents } from '../events.js'
+import { logEvent } from '../events.js'
 import { runTipDesk } from '../pipeline/tip-desk.js'
 import type { InferenceDriver } from '../ports/inference/types.js'
 import {
@@ -128,7 +128,14 @@ export function registerIngestRoutes(
     try {
       return await runTipDesk(db, receiveOptions.driver(), parsed.data)
     } catch (err) {
-      return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) })
+      const message = err instanceof Error ? err.message : String(err)
+      logEvent(db, {
+        level: 'warn',
+        code: 'TIP_DESK_FAILED',
+        message: 'the tip desk could not answer',
+        detail: { error: message },
+      })
+      return reply.code(502).send({ error: message })
     }
   })
 
@@ -230,14 +237,4 @@ export function registerIngestRoutes(
     return reply.code(202).send({ queued: true })
   })
 
-  app.get('/api/v1/events', { preHandler: requireSession }, async (request) => {
-    const query = request.query as { level?: string; since?: string; limit?: string }
-    return {
-      events: listEvents(db, {
-        ...(query.level ? { level: query.level as 'debug' | 'info' | 'warn' | 'error' } : {}),
-        ...(query.since ? { since: query.since } : {}),
-        ...(query.limit ? { limit: Number(query.limit) } : {}),
-      }).map((e) => ({ ...e, detail: e.detail ? JSON.parse(e.detail) : null })),
-    }
-  })
 }

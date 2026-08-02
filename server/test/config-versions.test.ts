@@ -1,0 +1,248 @@
+import { eq } from 'drizzle-orm'
+import { describe, expect, it } from 'vitest'
+import {
+  ConfigRejected,
+  configToYaml,
+  getConfigVersion,
+  listConfigVersions,
+  previewRestore,
+  readConfig,
+  restoreConfigVersion,
+  writeConfig,
+} from '../src/config/store.js'
+import type { Db } from '../src/db/index.js'
+import { openTestDb, schema, seedDesk } from './helpers.js'
+
+/**
+ * The safety net under every configuration change, including the ones the
+ * error assistant proposes. What matters is that the snapshot is of the state
+ * being replaced rather than the state replacing it, that a refused restore
+ * writes nothing at all, and that the one loss a restore cannot undo is said
+ * out loud before anyone clicks.
+ */
+
+function configWith(db: Db, mutate: (config: ReturnType<typeof readConfig>) => void) {
+  const config = readConfig(db)
+  mutate(config)
+  return config
+}
+
+describe('snapshotting a write', () => {
+  it('stores the configuration as it was BEFORE the write', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+
+    writeConfig(db, configWith(db, (config) => { config.outlets[0]!.name = 'Discord renamed' }), 'ui')
+
+    const versions = listConfigVersions(db)
+    expect(versions).toHaveLength(1)
+    // The snapshot is the way back, so it must hold the old name, not the new.
+    // Read through getConfigVersion: the list omits the document on purpose,
+    // and asserting against a field the list does not carry would pass for the
+    // wrong reason.
+    const stored = getConfigVersion(db, versions[0]!.id)!
+    expect(stored.yaml).toContain('Discord')
+    expect(stored.yaml).not.toContain('Discord renamed')
+    expect(readConfig(db).outlets[0]?.name).toBe('Discord renamed')
+  })
+
+  it('mints one version for a change and none for a save that changed nothing', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+
+    writeConfig(db, readConfig(db), 'ui')
+    expect(listConfigVersions(db)).toHaveLength(1)
+
+    // The Config screen saves the whole document every time it is pressed. A
+    // pass over the forms that changed nothing must not look like a change.
+    writeConfig(db, readConfig(db), 'ui')
+    expect(listConfigVersions(db)).toHaveLength(1)
+  })
+
+  it('records the author and the reason it was given', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+
+    writeConfig(
+      db,
+      configWith(db, (config) => { config.outlets[0]!.enabled = false }),
+      'assistant',
+      'before remedy 4 — disable the failing outlet',
+    )
+
+    expect(listConfigVersions(db)[0]).toMatchObject({
+      author: 'assistant',
+      reason: 'before remedy 4 — disable the failing outlet',
+    })
+  })
+
+  it('rolls the snapshot back with the write when the write fails', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+    db.insert(schema.filings)
+      .values({ id: 'f1', stringerId: 'korben', kind: 'timeline', text: 'x', status: 'RECEIVED' })
+      .run()
+
+    // Removing a stringer that filings reference is refused by `inUse`.
+    expect(() =>
+      writeConfig(db, configWith(db, (config) => { config.stringers = [] }), 'ui'),
+    ).toThrow(ConfigRejected)
+
+    expect(listConfigVersions(db)).toHaveLength(0)
+  })
+})
+
+describe('restoring a version', () => {
+  it('brings back an outlet that was removed', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+
+    const before = configToYaml(readConfig(db))
+    writeConfig(db, configWith(db, (config) => { config.outlets = [] }), 'ui')
+    expect(readConfig(db).outlets).toHaveLength(0)
+
+    const version = listConfigVersions(db)[0]!
+    restoreConfigVersion(db, version.id)
+
+    expect(readConfig(db).outlets).toHaveLength(1)
+    expect(configToYaml(readConfig(db))).toBe(before)
+  })
+
+  it('snapshots the state it is replacing, so a restore can itself be undone', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+
+    writeConfig(db, configWith(db, (config) => { config.outlets[0]!.name = 'Second' }), 'ui')
+    const first = listConfigVersions(db)[0]!
+
+    restoreConfigVersion(db, first.id)
+    const versions = listConfigVersions(db)
+
+    expect(versions).toHaveLength(2)
+    // The newest snapshot says what it was taken ahead of.
+    expect(versions[0]?.restoredFromId).toBe(first.id)
+    expect(getConfigVersion(db, versions[0]!.id)?.yaml).toContain('Second')
+  })
+
+  it('is refused, and writes nothing, when it would orphan a publication', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+
+    // Add a second outlet, so the snapshot taken here is one WITHOUT it.
+    writeConfig(
+      db,
+      configWith(db, (config) => {
+        config.outlets.push({ ...config.outlets[0]!, id: 'discord-two', name: 'Second channel' })
+      }),
+      'ui',
+    )
+    const beforeSecondOutlet = listConfigVersions(db)[0]!
+
+    // Something now depends on the outlet that version does not have.
+    db.insert(schema.stories)
+      .values({ id: 's1', title: 't', summary: 's', status: 'PLACED', dedupVerdict: 'NEW' })
+      .run()
+    db.insert(schema.publications)
+      .values({ id: 'p1', storyId: 's1', outletId: 'discord-two', status: 'PUBLISHED', origin: 'human' })
+      .run()
+
+    const versionsBefore = listConfigVersions(db).length
+    expect(() => restoreConfigVersion(db, beforeSecondOutlet.id)).toThrow(ConfigRejected)
+
+    // Refused before the transaction opens, so nothing moved — not the
+    // configuration, and not the history either.
+    expect(readConfig(db).outlets).toHaveLength(2)
+    expect(listConfigVersions(db)).toHaveLength(versionsBefore)
+  })
+
+  it('reports the refusal on the preview, before anyone clicks', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+
+    writeConfig(
+      db,
+      configWith(db, (config) => {
+        config.outlets.push({ ...config.outlets[0]!, id: 'discord-two', name: 'Second channel' })
+      }),
+      'ui',
+    )
+    const version = listConfigVersions(db)[0]!
+
+    db.insert(schema.stories)
+      .values({ id: 's1', title: 't', summary: 's', status: 'PLACED', dedupVerdict: 'NEW' })
+      .run()
+    db.insert(schema.publications)
+      .values({ id: 'p1', storyId: 's1', outletId: 'discord-two', status: 'PUBLISHED', origin: 'human' })
+      .run()
+
+    const preview = previewRestore(db, version.id)!
+    expect(preview.issues.length).toBeGreaterThan(0)
+    expect(preview.issues.map((issue) => issue.message).join(' ')).toContain('discord-two')
+  })
+})
+
+describe('the loss a restore cannot undo', () => {
+  it('warns that a removed endpoint takes its authorization with it', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+    db.update(schema.mcpEndpoints)
+      .set({ auth: JSON.stringify({ oauth: { accessToken: 'sekrit' } }) })
+      .where(eq(schema.mcpEndpoints.id, 'beacon'))
+      .run()
+
+    // Snapshot taken while only "beacon" existed, so restoring it would drop
+    // the endpoint added after — and that one is connected.
+    writeConfig(
+      db,
+      configWith(db, (config) => {
+        config.mcp_endpoints.push({ id: 'other', name: 'Other beacon', url: 'http://other/mcp/' })
+      }),
+      'ui',
+    )
+    const beforeOther = listConfigVersions(db)[0]!
+    db.update(schema.mcpEndpoints)
+      .set({ auth: JSON.stringify({ oauth: { accessToken: 'second-token' } }) })
+      .where(eq(schema.mcpEndpoints.id, 'other'))
+      .run()
+
+    const preview = previewRestore(db, beforeOther.id)!
+    expect(preview.issues).toHaveLength(0)
+    // It would go through — which is exactly why the warning has to be here.
+    expect(preview.warnings.join(' ')).toContain('Other beacon')
+    expect(preview.warnings.join(' ')).toContain('connect it again')
+  })
+
+  it('keeps the token on an endpoint that survives the restore', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+    db.update(schema.mcpEndpoints)
+      .set({ auth: JSON.stringify({ oauth: { accessToken: 'sekrit' } }) })
+      .where(eq(schema.mcpEndpoints.id, 'beacon'))
+      .run()
+
+    writeConfig(db, configWith(db, (config) => { config.outlets[0]!.name = 'Renamed' }), 'ui')
+    restoreConfigVersion(db, listConfigVersions(db).at(-1)!.id)
+
+    // The upsert in writeConfig sets only name and url, deliberately — this is
+    // what makes an ordinary restore survivable at all.
+    const row = db.select().from(schema.mcpEndpoints).where(eq(schema.mcpEndpoints.id, 'beacon')).get()
+    expect(row?.auth).toContain('sekrit')
+  })
+
+  it('never copies the token into the history', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+    db.update(schema.mcpEndpoints)
+      .set({ auth: JSON.stringify({ oauth: { accessToken: 'sekrit' } }) })
+      .where(eq(schema.mcpEndpoints.id, 'beacon'))
+      .run()
+
+    writeConfig(db, configWith(db, (config) => { config.outlets[0]!.name = 'Renamed' }), 'ui')
+
+    for (const version of listConfigVersions(db)) {
+      expect(version.summary).not.toContain('sekrit')
+    }
+    const stored = db.select().from(schema.configVersions).all()
+    expect(stored.map((row) => row.yaml).join(' ')).not.toContain('sekrit')
+  })
+})

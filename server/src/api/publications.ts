@@ -140,7 +140,18 @@ export function registerPublicationRoutes(
       const result = await runCopyDesk(db, driver(), id, parsed.data.message)
       return result
     } catch (err) {
-      return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) })
+      const message = err instanceof Error ? err.message : String(err)
+      // Otherwise this 502s to the browser and leaves nothing behind: a copy
+      // desk that has been failing all afternoon is invisible on every screen.
+      logEvent(db, {
+        level: 'warn',
+        code: 'COPY_DESK_FAILED',
+        publicationId: id,
+        storyId: loaded.publication.storyId,
+        message: `the copy desk could not answer for ${loaded.outlet.name}`,
+        detail: { publicationId: id, error: message },
+      })
+      return reply.code(502).send({ error: message })
     }
   })
 

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { parseConfig } from '@newsdesk/shared'
+import { KNOWN_DESTINATION_KEYS, parseConfig } from '@newsdesk/shared'
 import { describe, expect, it } from 'vitest'
 import { yamlToConfig } from '../src/config/store.js'
 
@@ -21,8 +21,10 @@ describe('the shipped example configuration', () => {
   it('pins a literal destination on every publish outlet', () => {
     const { config } = parseConfig(yamlToConfig(readFileSync(examplePath, 'utf8')))
     for (const outlet of config.outlets.filter((t) => t.role === 'publish')) {
-      const key = outlet.destination_key ?? 'channelId'
-      expect(typeof outlet.args[key]).toBe('string')
+      // Each tool names its destination differently — channelId, chatId, token.
+      const key = outlet.destination_key ?? KNOWN_DESTINATION_KEYS[outlet.tool ?? '']
+      expect(typeof key).toBe('string')
+      expect(typeof outlet.args[key!]).toBe('string')
     }
   })
 

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import {
   parseConfig,
@@ -10,7 +11,7 @@ import {
 } from '@newsdesk/shared'
 import { desc, eq, inArray, notInArray, sql } from 'drizzle-orm'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
-import type { Db } from '../db/index.js'
+import type { Db, Queryable, Tx } from '../db/index.js'
 import { schema } from '../db/index.js'
 import { getSetting, SETTING, setSetting } from '../settings.js'
 
@@ -21,7 +22,7 @@ import { getSetting, SETTING, setSetting } from '../settings.js'
  * enforced by validateConfig, which runs over the whole configuration on every
  * write. Content gets tables; this is configuration.
  */
-export function readReporting(db: Db): Reporting | undefined {
+export function readReporting(db: Queryable): Reporting | undefined {
   const raw = getSetting(db, SETTING.reporting)
   if (!raw) return undefined
   try {
@@ -34,7 +35,7 @@ export function readReporting(db: Db): Reporting | undefined {
 }
 
 /** Assemble the live configuration out of the tables. */
-export function readConfig(db: Db): Config {
+export function readConfig(db: Queryable): Config {
   const charterRow = db.select().from(schema.charter).orderBy(desc(schema.charter.id)).limit(1).get()
   const reporting = readReporting(db)
 
@@ -134,13 +135,60 @@ function inUse(db: Db, config: Config): ConfigIssue[] {
   return issues
 }
 
+function hash(yaml: string): string {
+  return createHash('sha256').update(yaml).digest('hex')
+}
+
+/**
+ * Record what the configuration was, unless it is what we already recorded.
+ *
+ * The equality check is what keeps the history readable: the Config screen
+ * saves the whole document on every press, so without it a pass over the
+ * forms that changed nothing would mint a version indistinguishable from one
+ * that changed everything.
+ */
+function snapshot(tx: Tx, author: string, reason?: string, restoredFromId?: number): void {
+  const yaml = configToYaml(readConfig(tx))
+  const sha256 = hash(yaml)
+
+  const latest = tx
+    .select({ sha256: schema.configVersions.sha256 })
+    .from(schema.configVersions)
+    .orderBy(desc(schema.configVersions.id))
+    .limit(1)
+    .get()
+  if (latest?.sha256 === sha256) return
+
+  tx.insert(schema.configVersions)
+    .values({
+      author,
+      reason: reason ?? null,
+      yaml,
+      sha256,
+      restoredFromId: restoredFromId ?? null,
+    })
+    .run()
+}
+
 /** Validate, then replace the configuration tables in one transaction. */
-export function writeConfig(db: Db, input: unknown, author: string): Config {
+export function writeConfig(db: Db, input: unknown, author: string, reason?: string): Config {
   const { config, issues } = parseConfig(input)
   const all = [...issues, ...inUse(db, config)]
   if (all.length > 0) throw new ConfigRejected(all)
 
   db.transaction((tx) => {
+    /**
+     * The way back, taken before the first delete and inside this same
+     * transaction.
+     *
+     * Inside, because the deletes below are destructive and a snapshot taken
+     * before the transaction opened would leave a window at exactly the moment
+     * a crash is likeliest; one taken after would not be a snapshot at all. If
+     * anything downstream throws, this row rolls back with the rest, which is
+     * correct — nothing was lost, so there is nothing to restore.
+     */
+    snapshot(tx, author, reason)
+
     const endpointIds = config.mcp_endpoints.map((e) => e.id)
     const voiceIds = config.voices.map((p) => p.id)
     const stringerIds = config.stringers.map((s) => s.id)
@@ -221,6 +269,173 @@ export function writeConfig(db: Db, input: unknown, author: string): Config {
 
 export function configToYaml(config: Config): string {
   return stringifyYaml(config, { lineWidth: 100 })
+}
+
+// ── history ─────────────────────────────────────────────────────────────────
+
+export interface ConfigVersionSummary {
+  id: number
+  at: string
+  author: string
+  reason: string | null
+  sha256: string
+  restoredFromId: number | null
+  /** Counts rather than a diff, so the list is scannable without opening anything. */
+  summary: string
+}
+
+function summarise(yaml: string): string {
+  try {
+    const config = parseConfig(parseYaml(yaml)).config
+    return [
+      `${config.outlets.length} outlet${config.outlets.length === 1 ? '' : 's'}`,
+      `${config.stringers.length} stringer${config.stringers.length === 1 ? '' : 's'}`,
+      `${config.voices.length} voice${config.voices.length === 1 ? '' : 's'}`,
+      `${config.mcp_endpoints.length} endpoint${config.mcp_endpoints.length === 1 ? '' : 's'}`,
+    ].join(', ')
+  } catch {
+    // A snapshot we can no longer parse is still a snapshot worth offering:
+    // the YAML is intact and a human can read it even if this build's schema
+    // has moved on.
+    return 'could not be summarised'
+  }
+}
+
+export function listConfigVersions(db: Db, limit = 50): ConfigVersionSummary[] {
+  return db
+    .select()
+    .from(schema.configVersions)
+    .orderBy(desc(schema.configVersions.id))
+    .limit(Math.min(limit, 200))
+    .all()
+    .map((row) => ({
+      id: row.id,
+      at: row.at,
+      author: row.author,
+      reason: row.reason,
+      sha256: row.sha256,
+      restoredFromId: row.restoredFromId,
+      summary: summarise(row.yaml),
+    }))
+}
+
+export function getConfigVersion(db: Db, id: number): { id: number; at: string; yaml: string } | undefined {
+  const row = db.select().from(schema.configVersions).where(eq(schema.configVersions.id, id)).get()
+  return row ? { id: row.id, at: row.at, yaml: row.yaml } : undefined
+}
+
+export interface RestorePreview {
+  id: number
+  at: string
+  /** Why this cannot be restored at all. Empty means the restore would go through. */
+  issues: ConfigIssue[]
+  /** Why you might not want to, even though it would go through. */
+  warnings: string[]
+  currentYaml: string
+  versionYaml: string
+}
+
+/**
+ * What restoring this version would do, without doing any of it.
+ *
+ * Restore is not a one-click operation and pretending otherwise is how people
+ * lose things: `inUse` can refuse it outright, and the endpoint case below is
+ * both silent and permanent.
+ */
+export function previewRestore(db: Db, id: number): RestorePreview | undefined {
+  const row = db.select().from(schema.configVersions).where(eq(schema.configVersions.id, id)).get()
+  if (!row) return undefined
+
+  const current = readConfig(db)
+  let issues: ConfigIssue[] = []
+  let target: Config | undefined
+
+  try {
+    const parsed = parseConfig(parseYaml(row.yaml))
+    target = parsed.config
+    issues = [...parsed.issues, ...inUse(db, parsed.config)]
+  } catch (err) {
+    issues = [{ path: '', message: err instanceof Error ? err.message : String(err) }]
+  }
+
+  const warnings: string[] = []
+  if (target) {
+    /**
+     * The hazard that has no undo.
+     *
+     * `writeConfig` deletes endpoints absent from the document, and
+     * `mcp_endpoints.auth` holds the OAuth token — which is not part of the
+     * configuration surface and therefore not in any snapshot. So an endpoint
+     * dropped by a restore loses its connection permanently, and one re-added
+     * by a restore comes back signed out. `inUse` guards stringers and outlets
+     * against exactly this kind of loss; it has no equivalent for endpoints,
+     * which is why it is said here instead.
+     *
+     * An endpoint that survives keeps its token: the upsert in `writeConfig`
+     * sets only name and url, deliberately.
+     */
+    const targetIds = new Set(target.mcp_endpoints.map((endpoint) => endpoint.id))
+    const connected = db
+      .select({ id: schema.mcpEndpoints.id, name: schema.mcpEndpoints.name, auth: schema.mcpEndpoints.auth })
+      .from(schema.mcpEndpoints)
+      .all()
+
+    for (const endpoint of connected) {
+      if (!targetIds.has(endpoint.id) && endpoint.auth) {
+        warnings.push(
+          `"${endpoint.name}" would be removed, and its authorization cannot be restored — you would have to connect it again.`,
+        )
+      }
+    }
+
+    const currentIds = new Set(current.mcp_endpoints.map((endpoint) => endpoint.id))
+    for (const endpoint of target.mcp_endpoints) {
+      if (!currentIds.has(endpoint.id)) {
+        warnings.push(`"${endpoint.name}" would come back, but signed out — it will need authorizing.`)
+      }
+    }
+  }
+
+  return {
+    id: row.id,
+    at: row.at,
+    issues,
+    warnings,
+    currentYaml: configToYaml(current),
+    versionYaml: row.yaml,
+  }
+}
+
+/**
+ * Put a stored version back.
+ *
+ * It goes through `writeConfig` rather than around it, so a restore is
+ * validated exactly like any other save — one that `inUse` refuses throws
+ * `ConfigRejected` and writes nothing — and so the state being replaced is
+ * itself snapshotted first. Restoring a restore therefore works.
+ */
+export function restoreConfigVersion(db: Db, id: number, author = 'restore'): Config {
+  const row = db.select().from(schema.configVersions).where(eq(schema.configVersions.id, id)).get()
+  if (!row) throw new ConfigRejected([{ path: '', message: `no configuration version ${id}` }])
+
+  const config = writeConfig(db, parseYaml(row.yaml), author, `restored version ${id}`)
+
+  // Stamp the snapshot writeConfig just took, so the history says what it was
+  // taken ahead of rather than leaving a bare row before a restore.
+  const latest = db
+    .select({ id: schema.configVersions.id })
+    .from(schema.configVersions)
+    .orderBy(desc(schema.configVersions.id))
+    .limit(1)
+    .get()
+  if (latest) {
+    db.update(schema.configVersions)
+      .set({ restoredFromId: id })
+      .where(eq(schema.configVersions.id, latest.id))
+      .run()
+  }
+
+  return config
 }
 
 export function yamlToConfig(text: string): unknown {

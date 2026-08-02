@@ -251,6 +251,22 @@ export class JobQueue {
           })
           .where(eq(schema.jobs.id, job.id))
           .run()
+
+        // Debug, not warn: waiting on purpose is the system working. It is
+        // logged at all because "not now" and "nothing happened" are otherwise
+        // the same silence from outside.
+        logEvent(this.db, {
+          level: 'debug',
+          code: 'JOB_DEFERRED',
+          message: `a ${job.kind} job is waiting its turn`,
+          detail: {
+            jobId: job.id,
+            kind: job.kind,
+            refId: job.refId,
+            retryInSeconds: Math.round(err.retryAfterMs / 1000),
+            reason: message,
+          },
+        })
         return
       }
 
@@ -274,8 +290,15 @@ export class JobQueue {
       logEvent(this.db, {
         level: 'warn',
         code: 'JOB_RETRY',
-        message: `${job.kind} job will retry in ${Math.round(delay / 1000)}s (attempt ${job.attempts})`,
-        detail: { jobId: job.id, refId: job.refId, error: message },
+        message: `a ${job.kind} job did not go through and will try again in ${Math.round(delay / 1000)}s`,
+        detail: {
+          jobId: job.id,
+          kind: job.kind,
+          refId: job.refId,
+          attempts: job.attempts,
+          retryInSeconds: Math.round(delay / 1000),
+          error: message,
+        },
       })
     }
   }
@@ -290,8 +313,8 @@ export class JobQueue {
     logEvent(this.db, {
       level: 'error',
       code: 'JOB_FAILED',
-      message: `${job.kind} job failed: ${message}`,
-      detail: { jobId: job.id, refId: job.refId, attempts: job.attempts },
+      message: `a ${job.kind} job gave up after ${job.attempts} attempt${job.attempts === 1 ? '' : 's'}`,
+      detail: { jobId: job.id, kind: job.kind, refId: job.refId, attempts: job.attempts, error: message },
     })
   }
 }

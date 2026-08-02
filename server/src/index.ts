@@ -4,6 +4,7 @@ import { setPassword } from './auth.js'
 import { importConfigFileOnFirstBoot, isUnconfigured, readReporting } from './config/store.js'
 import { openDb, runMigrations } from './db/index.js'
 import { disableAuthIgnored, loadEnv } from './env.js'
+import { logEvent } from './events.js'
 import { managingEditorHandler } from './pipeline/managing-editor.js'
 import { enqueue, JobQueue } from './pipeline/queue.js'
 import { reporterHandler } from './pipeline/reporter.js'
@@ -82,6 +83,19 @@ async function main(): Promise<void> {
       enqueueWriter,
       driver,
       publicUrl: env.publicUrl,
+      /**
+       * The restart remedy, wired to the same shutdown the signal handlers
+       * use. Under compose the policy is `restart: unless-stopped`, so exiting
+       * cleanly is what a restart is; `restartable()` is what stops the remedy
+       * being offered anywhere that is not true.
+       */
+      restart: () => {
+        void (async () => {
+          await queue.stop()
+          await app.close()
+          process.exit(0)
+        })()
+      },
     },
   })
 
@@ -93,6 +107,15 @@ async function main(): Promise<void> {
   }
   if (migrations.reconciled.length > 0) {
     app.log.warn({ statements: migrations.reconciled }, 'brought the schema back in line with the migrations')
+    // The boot guard firing is worth a row: it means the database and the
+    // migrations had drifted, and the next person to see something strange
+    // deserves to find that here rather than in yesterday's container logs.
+    logEvent(db, {
+      level: 'warn',
+      code: 'SCHEMA_RECONCILED',
+      message: 'the database schema had drifted and was brought back in line at boot',
+      detail: { statements: migrations.reconciled.length, extra: migrations.extra },
+    })
   }
   if (migrations.extra.length > 0) {
     app.log.info({ objects: migrations.extra }, 'database holds objects no migration creates')
@@ -127,9 +150,29 @@ async function main(): Promise<void> {
 
   if (isUnconfigured(db)) {
     app.log.warn('no configuration yet — open the Config screen and write a charter and at least one outlet')
+    logEvent(db, {
+      level: 'warn',
+      code: 'DESK_UNCONFIGURED',
+      message: 'the desk has no charter and no outlet yet, so nothing can be placed',
+    })
   }
 
   setSetting(db, 'last_boot', new Date().toISOString())
+
+  // The anchor every other row is read against: without it, "did it restart?"
+  // is a question the log cannot answer, and a gap in the timeline looks the
+  // same whether the desk was down or merely quiet.
+  logEvent(db, {
+    level: 'info',
+    code: 'DESK_STARTED',
+    message: `the desk started, running ${VERSION}`,
+    detail: {
+      version: VERSION,
+      adoptedBaseline: migrations.adoptedBaseline,
+      reconciled: migrations.reconciled.length,
+      extra: migrations.extra.length,
+    },
+  })
 
   queue.start()
 

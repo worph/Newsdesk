@@ -321,3 +321,104 @@ export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
 })
+
+/**
+ * What the configuration was, immediately before each write that changed it.
+ *
+ * `writeConfig` deletes and re-upserts outlets, voices, stringers and
+ * endpoints in one transaction, so without this a bad save — by hand or
+ * proposed by the assistant — has no way back. The snapshot is taken inside
+ * that same transaction, before the first delete: taken outside it, there is a
+ * window at exactly the moment a crash is likeliest.
+ *
+ * The whole document rather than a diff. It is a few kilobytes, and a diff
+ * chain is only as good as every link in it — which is the wrong property for
+ * the one table whose entire job is to work when something has gone wrong.
+ *
+ * Note what is deliberately NOT here: `mcp_endpoints.auth`. The OAuth token is
+ * not part of the configuration surface (`readConfig` projects id/name/url),
+ * and putting it here would copy the one credential the desk holds into a
+ * second, historical, never-pruned table. The consequence — that restoring
+ * over a deleted endpoint cannot bring its connection back — is surfaced as a
+ * warning on the restore preview instead.
+ */
+export const configVersions = sqliteTable(
+  'config_versions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    at: text('at').notNull().default(now),
+    /** ui | config.yaml | assistant | restore — who asked for the write this precedes. */
+    author: text('author').notNull(),
+    /** Why, in a sentence: "before assistant remedy 12 — disable the failing outlet". */
+    reason: text('reason'),
+    /** The document as it stood BEFORE the write. */
+    yaml: text('yaml').notNull(),
+    sha256: text('sha256').notNull(),
+    /** Set when this snapshot was itself taken ahead of a restore. */
+    restoredFromId: integer('restored_from_id'),
+  },
+  (t) => [index('config_versions_at_idx').on(t.at)],
+)
+
+/**
+ * One run of the error assistant against one event.
+ *
+ * Stored rather than kept in the browser, which is the opposite of the tip
+ * desk and for one reason: a tip desk answer is a note the human already owns,
+ * while this produces proposals that change desk state minutes later. If the
+ * remedies lived only in the client, applying one would mean the server
+ * accepting a model-authored payload from a request body — and "a model's
+ * output becomes a database row, never an action" would be enforced nowhere.
+ * Persisting inverts it: apply takes an id and re-reads what the server itself
+ * validated.
+ *
+ * The second reason is invariant 7. A diagnosis that evaporates on refresh is
+ * useless in exactly the situation this screen exists for.
+ */
+export const assistSessions = sqliteTable(
+  'assist_sessions',
+  {
+    id: text('id').primaryKey(),
+    /** Integer, because `events.id` is an autoincrement primary key. */
+    eventId: integer('event_id')
+      .notNull()
+      .references(() => events.id),
+    at: text('at').notNull().default(now),
+    status: text('status').notNull(), // OK | FAILED
+    diagnosis: text('diagnosis'),
+    confidence: text('confidence'), // high | medium | low
+    /** Hash of the context it saw, so a second run over changed state is distinguishable. */
+    bundleSha: text('bundle_sha'),
+    /** JSON: proposals the server refused after the model returned them, and why. */
+    rejected: text('rejected'),
+    error: text('error'),
+  },
+  (t) => [index('assist_sessions_event_idx').on(t.eventId)],
+)
+
+/** A single proposal. Applied by id, never by payload. */
+export const remedies = sqliteTable(
+  'remedies',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => assistSessions.id),
+    kind: text('kind').notNull(),
+    /**
+     * safe | high — derived server-side from the kind and the fields it
+     * touches, never read from the model or the browser.
+     */
+    risk: text('risk').notNull().default('safe'),
+    title: text('title').notNull(),
+    rationale: text('rationale').notNull(),
+    /** JSON, already validated against the schema for this kind. */
+    payload: text('payload').notNull(),
+    status: text('status').notNull().default('PROPOSED'), // PROPOSED|APPLIED|DISMISSED|FAILED
+    appliedAt: text('applied_at'),
+    /** The log row this remedy's own apply wrote. The audit trail in one column. */
+    appliedEventId: integer('applied_event_id').references(() => events.id),
+    error: text('error'),
+  },
+  (t) => [index('remedies_session_idx').on(t.sessionId), index('remedies_status_idx').on(t.status)],
+)

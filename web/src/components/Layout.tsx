@@ -20,7 +20,7 @@ const NAV = [
   { group: 'Tuning', items: [{ to: '/config', label: 'Configuration', ready: true }] },
   { group: 'Operations', items: [
     { to: '/wire', label: 'Wire', ready: true },
-    { to: '/log', label: 'Log', ready: false },
+    { to: '/log', label: 'Log', ready: true },
     { to: '/settings', label: 'Settings', ready: true },
   ] },
 ]

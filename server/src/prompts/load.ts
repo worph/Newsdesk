@@ -17,6 +17,8 @@ export type PromptName =
   | 'reporter-file'
   /** Helping an editor shape a tip before it is filed. */
   | 'tip-desk'
+  /** Diagnosing one logged failure and proposing remedies for it. */
+  | 'assist'
 
 export function loadPrompt(name: PromptName): string {
   const cached = cache.get(name)

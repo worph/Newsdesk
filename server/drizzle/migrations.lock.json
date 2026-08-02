@@ -15,6 +15,16 @@
       "tag": "0002_familiar_peter_quill",
       "when": 1785663224046,
       "sha256": "d21db7629176aa858afc849be99304cd64bc4e4bbec26d2da400717ea5bd5986"
+    },
+    {
+      "tag": "0003_red_masked_marvel",
+      "when": 1785671739946,
+      "sha256": "24cd040be5f33de87381a8ee945a6a1ded1949864688932c2404d1b2b4a5e289"
+    },
+    {
+      "tag": "0004_nervous_victor_mancha",
+      "when": 1785672405363,
+      "sha256": "6a4fafe6982d334edcf9ab14a56b4e6e4d09b99182328d776898318a84b3ee45"
     }
   ]
 }

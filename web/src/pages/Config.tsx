@@ -7,6 +7,7 @@ import {
   SourcesForm,
   VoicesForm,
 } from '../components/ConfigForms'
+import { ConfigHistory } from '../components/ConfigHistory'
 
 /**
  * One configuration, two ways in: forms for the parts that are prose, and the
@@ -235,6 +236,8 @@ export function Config() {
       )}
 
       {issues !== null && <IssueList issues={issues} tone={issues.length ? 'error' : 'ok'} />}
+
+      <ConfigHistory />
 
       <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-desk-200 bg-desk-50/95 py-3 backdrop-blur dark:border-desk-800 dark:bg-desk-950/95">
         <button

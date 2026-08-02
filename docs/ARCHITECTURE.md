@@ -166,8 +166,20 @@ tool: telegram-mcp__send_message
 args:
   chatId: "-5333649854"                                       # literal — always pin, see below
   disablePreview: true                                        # works, though absent from the advertised schema
-  text: { slot: markdown, label: Post, max: 4096, primary: true }
+  parseMode: HTML                                             # literal — the only mode that can carry written copy
+  text: { slot: markdown, label: Post, max: 4096, primary: true, format: telegram-html }
 ```
+
+**`format` is the fourth thing a slot can say, and it exists because a destination may have its own
+markup grammar.** Telegram parses the message against `parseMode` and rejects the *whole send* when
+it cannot — `Markdown` and `MarkdownV2` make every `_ * ` [` a delimiter that must be closed, so one
+`AUTH_HASH` in a body is a 400, and there is no way to say "escape this text but keep that
+formatting" once prose and markup share a string. `HTML` is the mode where escaping is total and
+orthogonal, so the desk parses the writer's markdown itself and emits the tags Telegram documents,
+degrading everything else to escaped text. The conversion runs in `mergePayload`, *before* approval
+freezes the payload — so it is the converted bytes the editor reviews and the converted bytes that
+go out, which is the rule below rather than an exception to it. `parseMode` and `format` are one
+decision written twice, and validation refuses to save them out of step.
 
 ⚠️ **Both tools treat their destination argument as optional** — `channelId` and `chatId` are not in
 their `required` lists, so an omitted destination silently falls back to whatever default the bridge

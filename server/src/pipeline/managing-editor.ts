@@ -285,6 +285,15 @@ export function applyManagingEditorResult(
 
   // Events after the transaction: the log is authoritative, but a logging
   // failure must not roll back work that actually happened.
+  //
+  // Names, not ids: the log is read by whoever is on the desk, and "→ #news,
+  // Nextcloud Talk" says what "→ discord-news, nc-internal" does not.
+  const outletNames = new Map(
+    db.select({ id: schema.outlets.id, name: schema.outlets.name }).from(schema.outlets).all()
+      .map((outlet) => [outlet.id, outlet.name] as const),
+  )
+  const nameOf = (outletId: string) => outletNames.get(outletId) ?? outletId
+
   for (const [index, story] of result.stories.entries()) {
     const id = storyIds[index]
     if (!id) continue
@@ -310,7 +319,7 @@ export function applyManagingEditorResult(
         level: 'info',
         code: 'STORY_OPENED',
         storyId: id,
-        message: `"${story.title}" → ${story.placements.map((r) => r.outlet_id).join(', ') || 'held'}`,
+        message: `"${story.title}" → ${story.placements.map((r) => nameOf(r.outlet_id)).join(', ') || 'held'}`,
         detail: { verdict: story.verdict, placements: story.placements },
       })
     }

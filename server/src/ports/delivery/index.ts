@@ -204,7 +204,22 @@ export async function deliverPublication(db: Db, publicationId: string): Promise
       code: 'PUBLISH_FAILED',
       storyId: publication.storyId,
       publicationId,
-      message: `could not send to ${outlet.name}: ${message}`,
+      message: `could not send to ${outlet.name}`,
+      // Everything needed to tell a wrong tool name from an expired token from
+      // an outlet that moved, without opening a shell on the box. This is the
+      // failure the desk is asked about most, and until now it recorded none
+      // of it.
+      detail: {
+        outletId: outlet.id,
+        outletName: outlet.name,
+        driver: outlet.driver,
+        tool: outlet.tool,
+        endpointId: outlet.endpointId,
+        ...(err instanceof McpError && err.status !== undefined ? { httpStatus: err.status } : {}),
+        ...(err instanceof McpError ? { needsAuth: err.needsAuth, retryable: err.retryable } : {}),
+        error: message,
+        ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
+      },
     })
     throw err
   }
@@ -229,6 +244,8 @@ export function publishHandler() {
         status: schema.publications.status,
         payload: schema.publications.payload,
         storyId: schema.publications.storyId,
+        outletId: schema.publications.outletId,
+        scheduledFor: schema.publications.scheduledFor,
       })
       .from(schema.publications)
       .where(eq(schema.publications.id, refId))
@@ -246,5 +263,43 @@ export function publishHandler() {
     }
 
     await deliverPublication(db, refId)
+
+    /**
+     * Approval commits to a time, so a send that lands well after it is a
+     * fact about this desk the operator should not have to reconstruct.
+     *
+     * Logged after delivery rather than before, and only on the late side:
+     * the queue claims a job whose time has come, so early is impossible and
+     * a few seconds of worker latency is not news. A gap of minutes means the
+     * desk was down or the queue was saturated.
+     */
+    if (publication?.scheduledFor) {
+      const due = Date.parse(publication.scheduledFor)
+      const lateBySeconds = Math.round((Date.now() - due) / 1000)
+      if (Number.isFinite(due) && lateBySeconds >= LATE_THRESHOLD_SECONDS) {
+        logEvent(db, {
+          level: 'warn',
+          code: 'PUBLISH_LATE',
+          storyId: publication.storyId,
+          publicationId: refId,
+          message: `this went out ${describeDelay(lateBySeconds)} after the time it was approved for`,
+          detail: {
+            outletId: publication.outletId,
+            scheduledFor: publication.scheduledFor,
+            sentAt: new Date().toISOString(),
+            lateBySeconds,
+          },
+        })
+      }
+    }
   }
+}
+
+/** Below this, the difference is worker latency rather than something worth saying. */
+const LATE_THRESHOLD_SECONDS = 120
+
+function describeDelay(seconds: number): string {
+  if (seconds < 3600) return `${Math.round(seconds / 60)} minutes`
+  if (seconds < 86_400) return `${Math.round(seconds / 3600)} hours`
+  return `${Math.round(seconds / 86_400)} days`
 }

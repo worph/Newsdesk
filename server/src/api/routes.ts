@@ -13,11 +13,13 @@ import {
 import {
   ConfigRejected,
   configToYaml,
+  listConfigVersions,
   readConfig,
   writeConfig,
   yamlToConfig,
 } from '../config/store.js'
 import type { Db } from '../db/index.js'
+import { logEvent } from '../events.js'
 import { checkHealth } from '../health.js'
 import {
   getOrCreateVapidKeys,
@@ -29,7 +31,9 @@ import {
 import { DEFAULT_TIMEZONE, getSetting, getOrCreateSecret, getTimezone, SETTING, setSetting } from '../settings.js'
 import { registerCalendarRoutes } from './calendar.js'
 import { registerComposeRoutes } from './compose.js'
+import { registerConfigVersionRoutes } from './config-versions.js'
 import { registerIngestRoutes } from './ingest.js'
+import { registerLogRoutes } from './log.js'
 import { registerMcpRoutes } from './mcp.js'
 import { registerPublicationRoutes } from './publications.js'
 import { registerStoryRoutes } from './stories.js'
@@ -68,10 +72,28 @@ function candidateFrom(body: z.infer<typeof configBody>): unknown {
   return 'yaml' in body ? yamlToConfig(body.yaml) : body.config
 }
 
+/** What changed, in the shape a human scanning the log wants: counts, not a diff. */
+function configSummary(config: ReturnType<typeof readConfig>): string {
+  const parts = [
+    `${config.outlets.length} outlet${config.outlets.length === 1 ? '' : 's'}`,
+    `${config.stringers.length} stringer${config.stringers.length === 1 ? '' : 's'}`,
+    `${config.voices.length} voice${config.voices.length === 1 ? '' : 's'}`,
+    `${config.mcp_endpoints.length} endpoint${config.mcp_endpoints.length === 1 ? '' : 's'}`,
+  ]
+  return parts.join(', ')
+}
+
 export interface PlacementOptions extends ReceiveOptions {
   enqueuePublish?: (publicationId: string, runAfter?: Date) => void
   enqueueWriter?: (publicationId: string) => void
   driver?: () => InferenceDriver
+  /**
+   * Stop the process, for the restart remedy. Injected rather than called
+   * directly so a test can prove the path without exiting the test runner.
+   */
+  restart?: () => void
+  /** Overridden in tests so the suite does not wait on real network timeouts. */
+  probeTimeoutMs?: number
   /** Public origin, for the OAuth redirect URI. */
   publicUrl?: string
 }
@@ -88,6 +110,17 @@ export function registerRoutes(
   registerCalendarRoutes(app, db)
   registerComposeRoutes(app, db)
   registerMcpRoutes(app, db, receiveOptions.publicUrl)
+  registerLogRoutes(app, db, {
+    driver: receiveOptions.driver,
+    enqueuePublish: receiveOptions.enqueuePublish,
+    enqueueManagingEditor: receiveOptions.enqueueManagingEditor,
+    enqueueReporter: receiveOptions.enqueueReporter,
+    restart: receiveOptions.restart,
+    ...(receiveOptions.probeTimeoutMs !== undefined
+      ? { probeTimeoutMs: receiveOptions.probeTimeoutMs }
+      : {}),
+  })
+  registerConfigVersionRoutes(app, db)
 
   // ── push ──────────────────────────────────────────────────────────────────
   // The public key is needed by the service worker before it can subscribe.
@@ -158,6 +191,14 @@ export function registerRoutes(
 
     if (!(await checkPassword(db, parsed.data.password))) {
       request.log.warn({ ip: request.ip }, 'failed login')
+      // Also to the desk's own log: pino goes to container stdout, which is
+      // exactly what is unavailable to someone reading the app's screens.
+      logEvent(db, {
+        level: 'warn',
+        code: 'AUTH_LOGIN_FAILED',
+        message: 'someone tried to sign in with the wrong password',
+        detail: { ip: request.ip },
+      })
       return reply.code(401).send({ error: 'invalid password' })
     }
     issueSession(reply)
@@ -192,6 +233,12 @@ export function registerRoutes(
         return reply.code(401).send({ error: 'invalid password' })
       }
       await setPassword(db, parsed.data.next)
+      logEvent(db, {
+        level: 'info',
+        actor: 'human',
+        code: 'AUTH_PASSWORD_CHANGED',
+        message: 'the desk password was changed',
+      })
       return { ok: true }
     },
   )
@@ -231,6 +278,20 @@ export function registerRoutes(
     if (!parsed.success) return reply.code(400).send({ error: 'yaml or config required' })
     try {
       const config = writeConfig(db, candidateFrom(parsed.data), 'ui')
+      // The restore point taken immediately before this write, so the log row
+      // and the way back from it are the same click apart.
+      const restorePoint = listConfigVersions(db, 1)[0]
+      logEvent(db, {
+        level: 'info',
+        actor: 'human',
+        code: 'CONFIG_CHANGED',
+        message: 'you saved the configuration',
+        detail: {
+          author: 'ui',
+          summary: configSummary(config),
+          ...(restorePoint ? { versionId: restorePoint.id } : {}),
+        },
+      })
       return { ok: true, yaml: configToYaml(config), config }
     } catch (err) {
       if (err instanceof ConfigRejected) return reply.code(422).send(issuesReply(err.issues))
@@ -260,7 +321,17 @@ export function registerRoutes(
         .send({ error: `"${parsed.data.timezone}" is not a timezone this desk knows — use an IANA name like "Europe/Paris"` })
     }
 
+    const previous = getTimezone(db)
     setSetting(db, SETTING.timezone, parsed.data.timezone)
+    logEvent(db, {
+      level: 'info',
+      actor: 'human',
+      code: 'TIMEZONE_CHANGED',
+      // Said plainly because it moves every slot the calendar has already
+      // proposed, which is not obvious from the Settings screen.
+      message: `the desk timezone is now ${parsed.data.timezone} — posting windows shift with it`,
+      detail: { from: previous, to: parsed.data.timezone },
+    })
     return { timezone: parsed.data.timezone }
   })
 
@@ -269,6 +340,16 @@ export function registerRoutes(
     const { randomBytes } = await import('node:crypto')
     const token = randomBytes(32).toString('base64url')
     setSetting(db, SETTING.ingestToken, token)
+    // Warn, not info: every stringer still holding the old token starts
+    // getting 401s the moment this returns, and the workflows that break are
+    // in n8n where nobody is watching this screen.
+    logEvent(db, {
+      level: 'warn',
+      actor: 'human',
+      code: 'CONFIG_TOKEN_ROTATED',
+      message: 'the ingest token was rotated — every stringer must be given the new one',
+      detail: {},
+    })
     return reply.send({ ingestToken: token })
   })
 }

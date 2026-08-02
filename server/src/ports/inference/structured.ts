@@ -107,7 +107,7 @@ function logCall(
 }
 
 export interface StructuredRequest<T> {
-  purpose: 'managing-editor' | 'writer' | 'copy-desk' | 'reporter' | 'tip-desk'
+  purpose: 'managing-editor' | 'writer' | 'copy-desk' | 'reporter' | 'tip-desk' | 'assist'
   refId?: string
   prompt: string
   /**

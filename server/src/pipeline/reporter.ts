@@ -461,8 +461,12 @@ export function reporterHandler(
       logEvent(db, {
         level: 'error',
         code: 'REPORTING_FAILED',
-        message: `reporting failed, filing handed on unreported: ${message}`,
-        detail: { filingId, error: message },
+        message: 'reporting failed — the filing was handed on unreported',
+        detail: {
+          filingId,
+          error: message,
+          ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
+        },
       })
       handOn(`reporting failed (${message}) — queued for the managing editor unreported`)
     }

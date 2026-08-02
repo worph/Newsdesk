@@ -186,8 +186,8 @@ export async function notifyAll(db: Db, notification: Notification): Promise<Pus
         logEvent(db, {
           level: 'warn',
           code: 'PUSH_FAILED',
-          message: `push to a subscription failed: ${detail}`,
-          detail: { status, endpoint: row.endpoint },
+          message: 'a notification could not be delivered to one registered device',
+          detail: { status, endpoint: row.endpoint, error: detail },
         })
       }
     }),
