@@ -16,6 +16,11 @@
 > phase-1 items needed no changes to that container after all (see the note there). Autonomous
 > outlets and model-assisted navigation remain design only, and configuration refuses the first of
 > them at save time rather than half-supporting it.
+>
+> Updated 2026-08-03, working the first destination that files a *new page* rather than filling a
+> composer (Docmost). Three things changed: `hover:` became a step verb (§3), the read-back learned
+> to tell a form field from a block editor and compares each on its own terms (§2), and the sidecar
+> gained two hard requirements on the browser image (§12).
 
 ---
 
@@ -50,6 +55,21 @@ elsewhere in the desk: the desk holds the resource, the model supplies only a co
 no capability the browser container does not already have — `POST /api/action` fills, `POST
 /api/evaluate` reads back.
 
+**What "byte-compares" means depends on the field, and the difference is worth stating.** A
+`<textarea>` hands back the string it was given, so the comparison is exact. A block editor does
+not: it parses what it is given into a document and renders *that* back, so Docmost returns a
+paragraph break where the payload had a single newline. Comparing those raw fails on every rich
+field over a difference that is not in the copy. The read therefore reports which kind of field it
+read, and a rich one is compared with blank lines dropped from both sides — leaving the claim as
+*every line of the approved text is on the page, in order, unaltered*, and dropping only paragraph
+spacing, which that editor was never storing. Plain fields keep the exact comparison. The trace row
+records which of the two it was, so the ledger never implies more than was checked.
+
+**One consequence for configuration:** filling in one insertion is what makes the comparison
+possible, and it is also why the editor's input rules never fire. Markdown typed this way is stored
+as its own characters — `## Heading` becomes a paragraph reading `## Heading`. A rich destination
+therefore wants a `text` slot and a hint saying so, not a `markdown` one.
+
 ## 3. The cookbook
 
 A recipe is **plain text, edited like any other prose in the desk**, with assistant help. It is not
@@ -74,9 +94,15 @@ timestamp link on the first card.
 | Section | Meaning |
 |---|---|
 | `## Signed out` | optional. `when:` selectors that exist **only** on a login page — see §8. |
-| `## Stage` | everything up to a filled composer. The agent may act here. |
+| `## Stage` | everything up to a filled composer. The agent may act here. Takes `wait:`, `hover:`, `click:`, `fill:`. |
 | `## Hand over` | where the agent stops and what the human is expected to do. **Its presence is what makes an outlet human-click.** |
-| `## Verify` | optional. Absent means the desk cannot confirm the send — see §5. |
+| `## Verify` | optional. Takes `wait:` and `read:`. Absent means the desk cannot confirm the send — see §5. |
+
+`hover:` looks like a convenience and is not. Row-level controls — a page tree's "new child page"
+button, a list row's menu — are routinely `visibility: hidden` until the pointer is on them, and
+Playwright will not click what it cannot see. Without a hover step such a destination is not
+awkward to write, it is unreachable: the click waits out its timeout for a button that never
+becomes visible. Hover the row, then click what appeared, which is what a person does anyway.
 
 **Where a recipe is edited:** it is a field on the outlet, so it lives with the rest of
 configuration — the **Advanced (YAML) editor** on the Configuration screen, or the assistant. The
@@ -314,6 +340,17 @@ sidecar turns them on.
 The lease therefore lives in Newsdesk (`ports/delivery/browser/lease.ts`) rather than in the
 container — correct rather than expedient, because the sidecar is Newsdesk's own and the desk is
 single-instance by invariant 9.
+
+**`browser-mcp` 1.1.5 is the floor**, established while wiring Docmost up (2026-08-03). Three
+things the sidecar needs, none of them in `1.1.4`:
+
+- **`/api/pages`, the tab registry.** The desk opens a tab of its own for every publish, so a build
+  without it fails at the first stage.
+- **`hover`.** See §3 — without it, any control that appears under the pointer is unreachable.
+- **the per-tab screencast**, which §6's viewer prefers over noVNC.
+
+That is also why the shared `browsermcp` on yunderalabs cannot stand in for this container: it runs
+`1.1.4`, so the answer is not merely "it is busy".
 
 **Still worth doing in `browser-mcp` itself, for the shared instance:**
 

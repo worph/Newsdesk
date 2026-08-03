@@ -52,6 +52,11 @@ interface StubPage {
   attributes: Map<string, string>
   /** Corrupt what a read-back returns, to stand in for a composer that mangles input. */
   mangle: ((value: string) => string) | null
+  /**
+   * Answer as a block editor rather than a form field — the desk compares the
+   * two differently, so which one the stub claims to be is part of the fixture.
+   */
+  rich: boolean
   fail: string | null
 }
 
@@ -131,7 +136,9 @@ async function startStub(page: StubPage): Promise<{ apiBase: string; close: () =
         }
         const stored = page.fields.get(selector!)
         if (stored === undefined) return reply({ result: null })
-        return reply({ result: page.mangle ? page.mangle(stored) : stored })
+        return reply({
+          result: { value: page.mangle ? page.mangle(stored) : stored, rich: page.rich },
+        })
       }
 
       if (req.url?.startsWith('/api/screenshot')) {
@@ -227,6 +234,7 @@ describe('browser publishing', () => {
       fields: new Map(),
       attributes: new Map(),
       mangle: null,
+      rich: false,
       fail: null,
     }
     stub = await startStub(page)
@@ -394,6 +402,32 @@ ${RECIPE}`
       page.mangle = (value) => `${value.replace(/\n/g, '\r\n')}\n`
 
       await expect(stage(db, id)).resolves.toMatchObject({ outletName: 'LinkedIn' })
+    })
+
+    it('tolerates the paragraph spacing a block editor invents', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = seedBrowserPublication(db, stub.apiBase)
+      // Docmost's ProseMirror makes every line a node and reads them back with
+      // its own spacing — a blank line where the payload had none, and several
+      // where it had one. Nothing in the copy changed.
+      page.rich = true
+      page.mangle = (value) => value.replace(/\n/g, '\n\n\n')
+
+      await expect(stage(db, id)).resolves.toMatchObject({ outletName: 'LinkedIn' })
+    })
+
+    it('still catches altered copy in a block editor, where spacing is forgiven', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = seedBrowserPublication(db, stub.apiBase)
+      // The looser comparison forgives the editor's spacing and nothing else:
+      // a word that changed is still a word that changed.
+      page.rich = true
+      page.mangle = (value) => value.replace(/\n/g, '\n\n').replace('smaller', 'bigger')
+
+      await expect(stage(db, id)).rejects.toThrow(/not what was approved/)
+      expect(db.select().from(schema.publications).where(eqId(id)).get()?.status).toBe('FAILED')
     })
 
     it('lets one publish hold the browser at a time', async () => {

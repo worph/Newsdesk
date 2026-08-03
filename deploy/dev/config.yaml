@@ -144,22 +144,43 @@ outlets:
   # A real destination behind a real login. Docmost has an API, but driving it
   # through the browser is the point here: it exercises the sign-in handoff,
   # which is the part of browser publishing that needs a person.
-  - id: docmost
-    name: Docmost — yunderalabs
+  #
+  # Verified end to end against Docmost 0.70.3 on 2026-08-03: hover, create the
+  # child page, fill both editors, byte-compare, read the permalink back.
+  - id: docmost-news
+    name: Docmost — News
     description: |
-      The internal knowledge base. Notes and write-ups for the team, not for an
-      outside reader.
+      The News page of the internal knowledge base. Each story that runs here
+      becomes its own page filed underneath it — a written-up note for the team,
+      longer than a Discord post and kept for reference, not an announcement.
     role: publish
     driver: browser
     voice: alicia
     engine: sidecar
     args:
-      url: "https://docmost-yunderalabs.nsl.sh/home"
+      # The parent page, pinned. The desk navigates here itself and files the
+      # new page underneath it; the recipe never names it, because a destination
+      # in prose is a destination a model or an assistant could quietly move.
+      url: "https://docmost-yunderalabs.nsl.sh/s/general/p/news-ivnqzhLjY1"
+      title:
+        slot: text
+        label: Headline
+        # Becomes the page title, and Docmost builds the page's slug from it.
+        max: 200
       body:
-        slot: markdown
+        slot: text
         label: Note
         max: 8000
         primary: true
+        # `text`, not `markdown`, and the hint is why. The desk fills the editor
+        # with the frozen bytes in one insertion, which is what keeps invariant 2
+        # provable — but it also means ProseMirror's input rules never fire, so
+        # "## Heading" is stored as a paragraph reading "## Heading". Markdown
+        # here would publish its own syntax to the reader. Verified 2026-08-03.
+        hint: |
+          Plain prose in paragraphs. No markdown syntax — no #, no *, no -
+          bullets: this destination stores what it is given literally, so the
+          characters would show up on the page.
     recipe: |
       ## Signed out
       Docmost bounces an unauthenticated visit to /login, where the email field
@@ -167,14 +188,35 @@ outlets:
       when: input#email[type="email"]
 
       ## Stage
-      TODO: verified only as far as the login page. Docmost's editor is
-      ProseMirror-based, so this is the shape it should take — check the
-      selectors against the real editor once the browser is signed in.
-      wait: div.ProseMirror[contenteditable="true"]
-      fill: div.ProseMirror[contenteditable="true"] <- body
+      The desk lands on the News page, whose row in the sidebar tree is the
+      selected one. That row's buttons are `visibility: hidden` until the
+      pointer is on it, so the hover is not decoration — without it the click
+      waits for a button that never becomes visible. The + files a fresh child
+      page under News and opens it.
+
+      Docmost renders two ProseMirror editors on a page, the title and the body,
+      identical but for their containers — hence `.page-title` and
+      `.editor-container` rather than the bare `.ProseMirror` a first reading
+      suggests, which would put the note in the title.
+      wait:  a.isSelected
+      hover: a.isSelected
+      click: a.isSelected button:has(svg.tabler-icon-plus)
+      wait:  .page-title .ProseMirror[contenteditable="true"]
+      fill:  .page-title .ProseMirror[contenteditable="true"] <- title
+      fill:  .editor-container .ProseMirror[contenteditable="true"] <- body
 
       ## Hand over
-      Read the note, then publish it in Docmost.
+      Docmost has no publish button — it saves as the desk types, so this page
+      is already live under News. Read it, fix anything you want to fix, and
+      confirm here.
+
+      Note: staging creates the page. If it fails partway you may find an
+      "untitled" page under News; delete it.
+
+      ## Verify
+      Once filed, the selected row in the tree is the new page, and its href is
+      the permalink — Docmost rebuilds the slug from the headline.
+      read: a.isSelected -> url
 
 # ── Reporting ───────────────────────────────────────────────────────────────
 # Switched OFF in dev: the phase needs a search endpoint the dev stack can

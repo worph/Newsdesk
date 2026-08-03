@@ -105,9 +105,11 @@ services:
   # the only way in — this is unauthenticated browser control over every site
   # the profile is signed into.
   browser:
-    # Local build while browser-mcp 1.1 is unreleased; back to :latest once the
-    # image is published.
-    image: ${BROWSER_IMAGE:-browser-mcp:dev}
+    # The released image again: 1.1.5 is the first with the tab registry,
+    # `hover` and the screencast, so a local `browser-mcp:dev` build is no
+    # longer a prerequisite for running this stack. Override BROWSER_IMAGE when
+    # working on the container itself.
+    image: ${BROWSER_IMAGE:-ghcr.io/worph/browser-mcp:1.1.5}
     container_name: newsdesk-dev-browser
     shm_size: "2gb"
     environment:

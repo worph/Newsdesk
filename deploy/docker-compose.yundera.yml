@@ -52,7 +52,12 @@ services:
   # On the pcs network so it can reach the Beacon aggregator by service name
   # for both the inference port and mcp-driver delivery outlets.
   newsdesk-backend:
-    image: ghcr.io/worph/newsdesk:0.1.0
+    # A commit tag, because no semver image exists: the v1.0.0 git tag was
+    # pushed before the workflow watched tags, so ghcr carries `latest` and one
+    # tag per commit and nothing else. `latest` on a store app would move under
+    # an install without anyone asking for it, so this pins the commit and the
+    # upgrade stays a deliberate edit. Cut a `v*` tag and this becomes a version.
+    image: ghcr.io/worph/newsdesk:0007960
     container_name: newsdesk-backend
     restart: unless-stopped
     # Unprivileged, as the platform's 1000:1000. The data dir is created and
@@ -104,7 +109,13 @@ services:
   # is an unauthenticated browser-control API in front of every destination the
   # profile is signed into. See docs/browser-publishing.md section 12.
   newsdesk-browser:
-    image: ghcr.io/worph/browser-mcp:latest
+    # 1.1.5 is the floor, not a preference. It is the first release with the tab
+    # registry (`/api/pages`) the desk opens a tab through, with `hover` — which
+    # a recipe needs to reach any control that appears under the pointer — and
+    # with the per-tab screencast the live view prefers. `1.1.4` has none of the
+    # three, which is also why the shared `browsermcp` on this box cannot stand
+    # in for this container.
+    image: ghcr.io/worph/browser-mcp:1.1.5
     container_name: newsdesk-browser
     restart: unless-stopped
     shm_size: "2gb"
@@ -114,6 +125,11 @@ services:
       # Logins live in the volume below, so reaping Chrome costs a cold start
       # and nothing else. Most of the day this container holds no browser.
       IDLE_TTL_MS: "900000"
+      # Sweep tabs nobody owns. The desk closes its own on release, so anything
+      # still here after half an hour is a leak — and a tab left on a signed-in
+      # destination is the thing this container should be least casual about.
+      PAGE_COLLECTOR: "on"
+      PAGE_TTL_MS: "1800000"
       TZ: $TZ
     volumes:
       # The signed-in sessions. The one thing here that is expensive to rebuild.

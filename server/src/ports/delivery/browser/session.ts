@@ -262,6 +262,29 @@ function absolute(value: string, base: string): string {
  * comparison is made on a normalised form — and the *typed* bytes are still
  * exactly the frozen ones, which is the property that matters.
  */
+/**
+ * The same comparison, for an editor that keeps a document rather than a string.
+ *
+ * A block editor has no concept of a blank line: every line it is given becomes
+ * a node, and reading it back renders those nodes with its own spacing. Docmost
+ * returns a paragraph break where the payload had a single newline, and several
+ * where the payload had a blank one — so a strict comparison fails on every rich
+ * field, over a difference that is not in the copy at all.
+ *
+ * Blank lines are therefore dropped from both sides, which leaves the check
+ * where it belongs: **every line of the approved text is on the page, in order,
+ * unaltered.** What it stops proving is paragraph spacing inside a rich editor,
+ * which that editor was never storing to begin with. Plain fields keep the
+ * strict comparison below, where the bytes really are the bytes.
+ */
+function comparableRich(value: string): string {
+  return comparable(value)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+    .join('\n')
+}
+
 function comparable(value: string): string {
   return value.replace(/\r\n/g, '\n').replace(/ /g, ' ').replace(/[ \t]+$/gm, '').trim()
 }
@@ -281,6 +304,11 @@ async function runStep(
       case 'wait':
         await browser.waitFor(engine, step.selector, undefined, pageId)
         trace(db, id, { phase, action: 'wait', selector: step.selector, ok: true })
+        return undefined
+
+      case 'hover':
+        await browser.hover(engine, step.selector, pageId)
+        trace(db, id, { phase, action: 'hover', selector: step.selector, ok: true })
         return undefined
 
       case 'click':
@@ -398,8 +426,12 @@ export async function stage(db: Db, publicationId: string): Promise<StagedPage> 
 
     for (const step of loaded.recipe.stage.filter((s) => s.verb === 'fill')) {
       const expected = String(loaded.payload[step.key!] ?? '')
-      const actual = await browser.readValue(loaded.engine, step.selector, pageId)
-      const matches = comparable(expected) === comparable(actual)
+      const field = await browser.readValue(loaded.engine, step.selector, pageId)
+      // How the field stores text decides how strictly it can be compared —
+      // the reader knows which kind it read, so the choice is made from that
+      // rather than from anything the recipe claims.
+      const normalise = field.rich ? comparableRich : comparable
+      const matches = normalise(expected) === normalise(field.value)
 
       trace(db, publicationId, {
         phase: 'stage',
@@ -409,13 +441,15 @@ export async function stage(db: Db, publicationId: string): Promise<StagedPage> 
         // The evidence that invariant 2 held: what was approved, and what the
         // page actually holds. Hashes rather than the copy itself — the copy is
         // already on the publication row, and duplicating it here would put the
-        // same text in two places that could drift.
+        // same text in two places that could drift. `rich` is recorded because
+        // it says which comparison the row is evidence of.
         detail: {
           key: step.key,
-          approved: hash(comparable(expected)),
-          onPage: hash(comparable(actual)),
+          rich: field.rich,
+          approved: hash(normalise(expected)),
+          onPage: hash(normalise(field.value)),
           approvedChars: expected.length,
-          onPageChars: actual.length,
+          onPageChars: field.value.length,
         },
       })
 

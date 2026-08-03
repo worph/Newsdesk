@@ -26,7 +26,14 @@
  * See docs/browser-publishing.md sections 2 and 3.
  */
 
-export const RECIPE_VERBS = ['wait', 'click', 'fill', 'read', 'when'] as const
+/**
+ * `hover` earns its place because a control that only exists under the pointer
+ * is not an edge case: a page tree reveals its "new child" button on hover, and
+ * so do most row-level actions on most apps. Playwright refuses to click what
+ * is `visibility: hidden`, so without this verb such a destination is not
+ * merely awkward to write — it cannot be reached at all.
+ */
+export const RECIPE_VERBS = ['wait', 'hover', 'click', 'fill', 'read', 'when'] as const
 export type RecipeVerb = (typeof RECIPE_VERBS)[number]
 
 export interface RecipeStep {
@@ -77,7 +84,7 @@ export interface ParsedRecipe {
 /** Which verbs make sense where. A `read` while staging would find nothing yet. */
 const ALLOWED: Record<RecipeSection, readonly RecipeVerb[]> = {
   signedout: ['when'],
-  stage: ['wait', 'click', 'fill'],
+  stage: ['wait', 'hover', 'click', 'fill'],
   handover: [],
   verify: ['wait', 'read'],
 }

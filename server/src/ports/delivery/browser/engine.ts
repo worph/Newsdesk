@@ -83,6 +83,18 @@ export interface BrowserStatus {
   title?: string
 }
 
+/**
+ * What a field holds, and how faithfully it can be expected to hold it.
+ *
+ * `rich` marks a contenteditable — an editor that parses what it is given into
+ * its own document model and renders that back. The bytes typed in are still
+ * exactly the frozen ones; what comes out is the editor's rendering of them.
+ */
+export interface FieldValue {
+  value: string
+  rich: boolean
+}
+
 export const browser = {
   async status(engine: BrowserEngineRef): Promise<BrowserStatus> {
     const response = await request(engine, '/api/status', { timeoutMs: 10_000 })
@@ -95,6 +107,17 @@ export const browser = {
 
   async waitFor(engine: BrowserEngineRef, selector: string, timeoutMs = 15_000, pageId?: string): Promise<void> {
     await post(engine, '/api/action', { action: 'waitFor', selector, timeout: timeoutMs, pageId }, timeoutMs + 5_000)
+  },
+
+  /**
+   * Put the pointer on something, so what it reveals can be clicked.
+   *
+   * Not a nicety: a control hidden until hover is `visibility: hidden`, and a
+   * click on that waits for a visibility that never arrives. Hovering the row
+   * first is what a person does, and it is what makes the next step possible.
+   */
+  async hover(engine: BrowserEngineRef, selector: string, pageId?: string): Promise<void> {
+    await post(engine, '/api/action', { action: 'hover', selector, pageId })
   },
 
   async click(engine: BrowserEngineRef, selector: string, pageId?: string): Promise<void> {
@@ -125,23 +148,29 @@ export const browser = {
    * newlines as elements. Reading the value the way the page itself would is
    * the only comparison worth making against the bytes we typed.
    */
-  async readValue(engine: BrowserEngineRef, selector: string, pageId?: string): Promise<string> {
+  async readValue(engine: BrowserEngineRef, selector: string, pageId?: string): Promise<FieldValue> {
     // An immediately-invoked expression, not a function declaration: the
     // container hands the string to `page.evaluate`, which evaluates a string
     // as an *expression*. A bare `() => {…}` therefore evaluates to a function
     // object rather than to the field, and comes back as nothing at all.
+    //
+    // `rich` travels with the value because the two kinds of field keep text
+    // differently, and only the reader knows which one it read. A textarea
+    // returns the bytes; a block editor returns its own rendering of them.
     const script = `(() => {
       const el = document.querySelector(${JSON.stringify(selector)})
       if (!el) return null
-      if ('value' in el && typeof el.value === 'string') return el.value
-      return el.innerText ?? el.textContent ?? ''
+      if ('value' in el && typeof el.value === 'string') return { value: el.value, rich: false }
+      return { value: el.innerText ?? el.textContent ?? '', rich: true }
     })()`
-    const result = (await post(engine, '/api/evaluate', { script, pageId })) as { result?: unknown }
-    const value = result?.result
-    if (value === null || value === undefined) {
+    const result = (await post(engine, '/api/evaluate', { script, pageId })) as {
+      result?: { value?: unknown; rich?: unknown } | null
+    }
+    const field = result?.result
+    if (field === null || field === undefined) {
       throw new McpError(`nothing matches "${selector}" on the page`, false)
     }
-    return String(value)
+    return { value: String(field.value ?? ''), rich: field.rich === true }
   },
 
   /**
