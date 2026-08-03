@@ -105,18 +105,29 @@ services:
   # the only way in — this is unauthenticated browser control over every site
   # the profile is signed into.
   browser:
-    image: ghcr.io/worph/browser-mcp:latest
+    # Local build while browser-mcp 1.1 is unreleased; back to :latest once the
+    # image is published.
+    image: ${BROWSER_IMAGE:-browser-mcp:dev}
     container_name: newsdesk-dev-browser
     shm_size: "2gb"
     environment:
-      VNC_RESOLUTION: "1440x900x24"
+      # Smaller than a real screen on purpose: the viewer scales this desktop
+      # into a frame, so every pixel above what the frame can show is text made
+      # smaller for nothing.
+      VNC_RESOLUTION: "${BROWSER_RESOLUTION:-1280x800x24}"
       MCP_PORT: "9746"
       # Short in dev: Chrome restarts lazily and the logins live in the volume.
       IDLE_TTL_MS: "${BROWSER_IDLE_TTL_MS:-900000}"
+      # Nothing is closed in `log` mode — it just names tabs it would collect,
+      # which is how we find out whether anything actually leaks here.
+      PAGE_COLLECTOR: "${BROWSER_PAGE_COLLECTOR:-log}"
+      PAGE_TTL_MS: "${BROWSER_PAGE_TTL_MS:-1800000}"
+      # Above 1 renders larger, so the viewer is not scaling small text down.
+      CHROME_DEVICE_SCALE_FACTOR: "${BROWSER_SCALE:-1}"
     volumes:
       # Sessions survive a restart of the container. Losing them means logging
       # every destination back in by hand through the viewer.
-      - dev-browser-profile:/tmp/chrome-profile
+      - dev-browser-profile:/data/chrome-profile
     restart: unless-stopped
 
   # A stand-in destination: a composer and a publish button, which is the shape

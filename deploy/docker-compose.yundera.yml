@@ -117,7 +117,7 @@ services:
       TZ: $TZ
     volumes:
       # The signed-in sessions. The one thing here that is expensive to rebuild.
-      - /DATA/AppData/newsdesk/browser-profile/:/tmp/chrome-profile
+      - /DATA/AppData/newsdesk/browser-profile/:/data/chrome-profile
     networks:
       - pcs
     deploy:

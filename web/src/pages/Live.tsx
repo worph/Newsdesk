@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError, type StagedPage } from '../api'
+import { BrowserViewer } from '../components/BrowserViewer'
 import { Badge } from '../components/StoryCard'
 
 /**
@@ -180,7 +181,7 @@ export function Live() {
    */
   if (status === 'NEEDS_AUTH') {
     return (
-      <div className="mx-auto max-w-5xl space-y-4 px-4 pb-16 md:px-6">
+      <div className="mx-auto max-w-7xl space-y-4 px-4 pb-16 md:px-6">
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => navigate('/queue')} className="text-sm text-desk-500 hover:text-desk-700">
             ← the queue
@@ -221,14 +222,11 @@ export function Live() {
 
         {opened &&
           (viewerInfo.data?.kind === 'novnc' && viewerInfo.data.url ? (
-            <div className="overflow-hidden rounded-lg border border-desk-200 dark:border-desk-800">
-              <iframe
-                src={viewerInfo.data.url}
-                title={`sign in to ${outlet.name}`}
-                className="h-[70vh] w-full bg-black"
-                sandbox="allow-scripts allow-same-origin allow-forms"
-              />
-            </div>
+            <BrowserViewer
+              url={viewerInfo.data.url}
+              title={`sign in to ${outlet.name}`}
+              hint="Your password goes straight into their login form. The desk drives this browser but never reads its cookies."
+            />
           ) : (
             <p className="text-sm text-desk-600 dark:text-desk-400">
               This engine has no viewer — sign in using the browser directly, then press the button
@@ -271,7 +269,7 @@ export function Live() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 px-4 pb-16 md:px-6">
+    <div className="mx-auto max-w-7xl space-y-4 px-4 pb-16 md:px-6">
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => navigate(`/review/${id}`)} className="text-sm text-desk-500 hover:text-desk-700">
           ← the draft
@@ -335,16 +333,10 @@ export function Live() {
           </div>
 
           {viewerInfo.data?.kind === 'novnc' && viewerInfo.data.url ? (
-            <div className="overflow-hidden rounded-lg border border-desk-200 dark:border-desk-800">
-              <iframe
-                src={viewerInfo.data.url}
-                title={`${outlet.name} in the desk's browser`}
-                className="h-[70vh] w-full bg-black"
-                // The browser holds live sessions; nothing in this frame should
-                // be able to reach back out into the desk.
-                sandbox="allow-scripts allow-same-origin allow-forms"
-              />
-            </div>
+            <BrowserViewer
+              url={viewerInfo.data.url}
+              title={`${outlet.name} in the desk's browser`}
+            />
           ) : (
             <div className="space-y-3 rounded-lg border border-desk-200 p-4 dark:border-desk-800">
               <p className="text-sm text-desk-600 dark:text-desk-400">

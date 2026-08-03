@@ -43,7 +43,7 @@ services:
     volumes:
       # The logged-in sessions. Without this every image update signs the
       # browser out of every destination — the one expensive thing here.
-      - browser-profile:/tmp/chrome-profile
+      - browser-profile:/data/chrome-profile
 
 volumes:
   browser-profile:
