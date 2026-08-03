@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <!--
+    The Android notification badge — the small glyph in the status bar.
+
+    Android throws away every colour here and keeps only the alpha channel, so
+    this is deliberately a solid white silhouette on transparent: the mark
+    reduced to a page and a tick, at the one size where nothing finer survives.
+    Handing it the app icon instead produces a filled blob, which is what the
+    desk used to show.
+  -->
+  <g fill="#FFFFFF">
+    <path d="M24 14h34l16 16v52a4 4 0 0 1-4 4H24a4 4 0 0 1-4-4V18a4 4 0 0 1 4-4z"
+          fill-opacity="0.35"/>
+    <rect x="30" y="30" width="24" height="7" rx="3.5"/>
+    <rect x="30" y="45" width="36" height="6" rx="3"/>
+    <rect x="30" y="57" width="36" height="6" rx="3"/>
+    <rect x="30" y="69" width="22" height="6" rx="3"/>
+    <circle cx="71" cy="69" r="17" fill="#000000" fill-opacity="0"/>
+    <path d="M71 52a17 17 0 1 0 0 34 17 17 0 0 0 0-34zm8.6 12.4L70 74a3.2 3.2 0 0 1-4.5 0l-4.6-4.6a3.2 3.2 0 1 1 4.5-4.5l2.4 2.3 7.3-7.3a3.2 3.2 0 0 1 4.5 4.5z"/>
+  </g>
+</svg>

@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { api, type OAuthSummary } from '../api'
+import { InstallButton } from '../components/InstallButton'
+import { useInstallState } from '../install'
 import { deviceRegistration, pushSupported, subscribeToPush, unsubscribeFromPush } from '../push'
 
 const CONNECTION_LABEL: Record<OAuthSummary['status'], string> = {
@@ -226,6 +228,42 @@ function TimezoneSection() {
   )
 }
 
+/**
+ * Install, said in whatever terms this browser actually supports.
+ *
+ * The button only exists where `beforeinstallprompt` fired, so this section has
+ * to carry the other three cases too: already installed, iOS (share sheet, and
+ * only from Safari), and a browser that will not install a web app at all. The
+ * old copy told everyone to go and find a menu item, which is wrong in three of
+ * the four.
+ */
+function InstallSection() {
+  const state = useInstallState()
+
+  return (
+    <section className="space-y-2 rounded-lg border border-desk-200 px-4 py-3.5 dark:border-desk-800">
+      <h2 className="text-sm font-medium">Install</h2>
+      <p className="text-sm text-desk-500">
+        Installed, the desk gets its own icon and window, and appears in the Android share sheet —
+        sharing a link files it as a tip.
+      </p>
+
+      {state === 'installed' ? (
+        <p className="text-sm text-emerald-700 dark:text-emerald-400">
+          You are using the installed app.
+        </p>
+      ) : state === 'unavailable' ? (
+        <p className="text-sm text-desk-500">
+          This browser has not offered an install. Chrome, Edge and Samsung Internet do, over HTTPS;
+          Firefox on desktop does not.
+        </p>
+      ) : (
+        <InstallButton />
+      )}
+    </section>
+  )
+}
+
 export function Settings() {
   const [registration, setRegistration] = useState<{ registered: boolean; stale: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -367,13 +405,7 @@ export function Settings() {
 
       <TimezoneSection />
 
-      <section className="space-y-2 rounded-lg border border-desk-200 px-4 py-3.5 dark:border-desk-800">
-        <h2 className="text-sm font-medium">Install</h2>
-        <p className="text-sm text-desk-500">
-          Use your browser’s “Install app” or “Add to home screen”. Once installed, Newsdesk appears
-          in the Android share sheet — sharing a link files it as a tip.
-        </p>
-      </section>
+      <InstallSection />
 
       <section className="space-y-2 rounded-lg border border-desk-200 px-4 py-3.5 dark:border-desk-800">
         <h2 className="text-sm font-medium">Inference and delivery</h2>

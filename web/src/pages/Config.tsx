@@ -239,7 +239,8 @@ export function Config() {
 
       <ConfigHistory />
 
-      <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-desk-200 bg-desk-50/95 py-3 backdrop-blur dark:border-desk-800 dark:bg-desk-950/95">
+      {/* Above the phone's tab bar, which is fixed to the bottom of the window. */}
+      <div className="sticky bottom-[var(--nd-tabbar)] flex flex-wrap items-center gap-2 border-t border-desk-200 bg-desk-50/95 py-3 backdrop-blur md:bottom-0 dark:border-desk-800 dark:bg-desk-950/95">
         <button
           onClick={() => validate.mutate()}
           disabled={busy}

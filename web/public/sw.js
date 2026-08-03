@@ -27,8 +27,11 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(payload.title, {
       body: payload.body,
-      icon: '/icon.svg',
-      badge: '/icon-maskable.svg',
+      // PNG on both: Android will not rasterise an SVG for a notification, and
+      // the badge is reduced to its alpha channel, so it needs the monochrome
+      // glyph rather than the app icon.
+      icon: '/icon-192.png',
+      badge: '/badge-96.png',
       data: { url: payload.url },
       // Collapse repeats: three drafts arriving should not stack three chimes.
       tag: 'newsdesk-queue',

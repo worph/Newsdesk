@@ -14,6 +14,22 @@
   --color-desk-950: oklch(0.12 0.008 250);
 }
 
+/**
+ * The phone's own furniture, named once.
+ *
+ * `viewport-fit=cover` in index.html puts the page under the status bar and the
+ * home indicator, which is what makes an installed desk look like an app rather
+ * than a web page in a frame — but it means every fixed edge has to pay the
+ * inset back. The fallbacks matter: `env()` is empty on desktop, and a
+ * `calc()` containing an empty term is invalid, not zero.
+ */
+:root {
+  --nd-safe-top: env(safe-area-inset-top, 0px);
+  --nd-safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Height of the mobile tab bar, including the inset it sits on. */
+  --nd-tabbar: calc(3.5rem + var(--nd-safe-bottom));
+}
+
 html,
 body,
 #root {

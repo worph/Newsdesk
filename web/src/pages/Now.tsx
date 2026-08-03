@@ -45,7 +45,13 @@ function Row({ action, onOpen }: { action: DeskAction; onOpen: () => void }) {
         </span>
 
         <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium">{action.title}</span>
+          {/*
+            Two lines on a phone, one on a desk. A headline cut to "Browser
+            publishing: how th…" is not enough to recognise the thing you were
+            notified about, and this row exists to be recognised.
+          */}
+          {/* No `block`: line-clamp needs `display: -webkit-box` and the two collide. */}
+          <span className="line-clamp-2 font-medium md:block md:truncate">{action.title}</span>
           <span className="block truncate text-xs text-desk-600 dark:text-desk-400">
             {action.because}
             {action.since && <span className="text-desk-500"> · {when(action.since)}</span>}

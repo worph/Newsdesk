@@ -6,9 +6,17 @@
     <meta name="color-scheme" content="light dark" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="/icon.svg" />
-    <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#1c1917" media="(prefers-color-scheme: dark)" />
+    <!-- For anything that will not take an SVG favicon, which still includes some Android launchers. -->
+    <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192" />
+    <!-- Safari ignores an SVG here and falls back to a screenshot of the page, so this one has to be a PNG. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+    <meta name="apple-mobile-web-app-title" content="Newsdesk" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <!-- desk-50 and desk-950 from index.css: the status bar has to match the page it sits above. -->
+    <meta name="theme-color" content="#f9fafb" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#040608" media="(prefers-color-scheme: dark)" />
     <title>Newsdesk</title>
   </head>
   <body>

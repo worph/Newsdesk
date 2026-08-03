@@ -1,7 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Newsdesk">
-  <rect width="64" height="64" fill="#1c1917"/>
-  <rect x="19" y="23" width="20" height="3.5" rx="1.75" fill="#fafaf9"/>
-  <rect x="19" y="31" width="26" height="2.5" rx="1.25" fill="#a8a29e"/>
-  <rect x="19" y="38" width="26" height="2.5" rx="1.25" fill="#a8a29e"/>
-  <circle cx="43" cy="24" r="4" fill="#10b981"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!--
+    The same mark as icon.svg, prepared for an adaptive launcher.
+
+    Two differences, both required by the maskable contract: the background is
+    full-bleed and square (the launcher supplies the corner radius — baking one
+    in shows as a dark ring inside a circular mask), and the artwork is scaled
+    to 78% about the centre so all of it sits inside the safe circle a maskable
+    icon promises. Chrome's own preview crops to that circle, so the check mark
+    surviving it is the whole point.
+  -->
+  <rect width="512" height="512" fill="#1B2A41"/>
+
+  <g transform="translate(56.32 56.32) scale(0.78)">
+    <!-- the stack: a second sheet behind, so it reads as "the wire", not one page -->
+    <g transform="rotate(-8 256 256)">
+      <rect x="132" y="126" width="248" height="252" rx="16" fill="#7E93B0"/>
+    </g>
+
+    <!-- the page on the desk -->
+    <rect x="136" y="120" width="240" height="272" rx="16" fill="#FFFFFF"/>
+
+    <!-- masthead -->
+    <rect x="162" y="148" width="188" height="26" rx="7" fill="#1B2A41"/>
+
+    <!-- lead art + column -->
+    <rect x="162" y="192" width="86" height="66" rx="8" fill="#C6D2E1"/>
+    <rect x="262" y="194" width="88" height="12" rx="6" fill="#B7C4D6"/>
+    <rect x="262" y="218" width="88" height="12" rx="6" fill="#B7C4D6"/>
+    <rect x="262" y="242" width="66" height="12" rx="6" fill="#B7C4D6"/>
+
+    <!-- body copy -->
+    <rect x="162" y="278" width="188" height="12" rx="6" fill="#B7C4D6"/>
+    <rect x="162" y="302" width="188" height="12" rx="6" fill="#B7C4D6"/>
+    <rect x="162" y="326" width="124" height="12" rx="6" fill="#B7C4D6"/>
+
+    <!-- the approval gate: nothing publishes without this -->
+    <circle cx="372" cy="372" r="72" fill="#1B2A41"/>
+    <circle cx="372" cy="372" r="60" fill="#2FBF71"/>
+    <path d="M344 372 L365 393 L402 350" fill="none" stroke="#FFFFFF" stroke-width="18"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 </svg>

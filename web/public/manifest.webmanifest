@@ -2,13 +2,18 @@
   "name": "Newsdesk",
   "short_name": "Newsdesk",
   "description": "A self-hosted editorial desk for automated news.",
+  "id": "/queue",
   "start_url": "/queue",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#fafaf9",
-  "theme_color": "#fafaf9",
+  "background_color": "#f9fafb",
+  "theme_color": "#f9fafb",
   "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     { "src": "/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
   ],
   "share_target": {
