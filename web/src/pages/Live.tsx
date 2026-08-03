@@ -33,6 +33,75 @@ function Stat({ label, children }: { label: string; children: React.ReactNode })
   )
 }
 
+
+/**
+ * The live view, or the reason there is not one.
+ *
+ * Screencast is the normal path — one tab, reflows on a phone, no browser
+ * chrome. noVNC is kept behind a toggle for what a per-tab stream structurally
+ * cannot show: Chrome's own UI, native dialogs, a file picker.
+ */
+function Viewer({
+  viewer,
+  title,
+  hint,
+  focusSelector,
+  onLost,
+}: {
+  viewer: import('../api').ViewerInfo | undefined
+  title: string
+  hint?: string
+  focusSelector?: string
+  onLost?: () => void
+}) {
+  const [breakGlass, setBreakGlass] = useState(false)
+
+  if (!viewer) return null
+
+  if (viewer.kind === 'screencast' && viewer.socket && viewer.frame && !breakGlass) {
+    return (
+      <BrowserViewer
+        target={{ socket: viewer.socket, frame: viewer.frame }}
+        title={title}
+        hint={hint}
+        focusSelector={focusSelector}
+        onLost={onLost}
+        onBreakGlass={viewer.novnc ? () => setBreakGlass(true) : undefined}
+      />
+    )
+  }
+
+  const url = viewer.novnc?.url
+  if (!url) {
+    return (
+      <p className="text-sm text-desk-600 dark:text-desk-400">
+        This engine has no viewer — the page is open in the browser you are already in front of.
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs text-desk-500">
+        <span>Showing the whole desktop, for the things a single tab cannot.</span>
+        {viewer.kind === 'screencast' && (
+          <button onClick={() => setBreakGlass(false)} className="underline underline-offset-2">
+            back to the tab
+          </button>
+        )}
+      </div>
+      <div className="overflow-hidden rounded-lg border border-desk-200 dark:border-desk-800">
+        <iframe
+          src={url}
+          title={title}
+          className="h-[78vh] w-full border-0 bg-black"
+          sandbox="allow-scripts allow-same-origin allow-forms"
+        />
+      </div>
+    </div>
+  )
+}
+
 export function Live() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -220,19 +289,18 @@ export function Live() {
           </div>
         )}
 
-        {opened &&
-          (viewerInfo.data?.kind === 'novnc' && viewerInfo.data.url ? (
-            <BrowserViewer
-              url={viewerInfo.data.url}
-              title={`sign in to ${outlet.name}`}
-              hint="Your password goes straight into their login form. The desk drives this browser but never reads its cookies."
-            />
-          ) : (
-            <p className="text-sm text-desk-600 dark:text-desk-400">
-              This engine has no viewer — sign in using the browser directly, then press the button
-              below.
-            </p>
-          ))}
+        {opened && (
+          <Viewer
+            viewer={viewerInfo.data}
+            onLost={() => {
+              setOpened(false)
+              openSignIn.reset()
+            }}
+            title={`sign in to ${outlet.name}`}
+            focusSelector='input[type="email"],input[type="text"],input[name="email"],input'
+            hint="Your password goes straight into their login form. The desk drives this browser but never reads its cookies."
+          />
+        )}
 
         <div className="flex flex-wrap items-center gap-3">
           <button
@@ -332,25 +400,11 @@ export function Live() {
             </div>
           </div>
 
-          {viewerInfo.data?.kind === 'novnc' && viewerInfo.data.url ? (
-            <BrowserViewer
-              url={viewerInfo.data.url}
-              title={`${outlet.name} in the desk's browser`}
-            />
-          ) : (
-            <div className="space-y-3 rounded-lg border border-desk-200 p-4 dark:border-desk-800">
-              <p className="text-sm text-desk-600 dark:text-desk-400">
-                This engine has no viewer — the page is open in the browser you are already in front of.
-              </p>
-              {staged.screenshotPath && (
-                <img
-                  src={`/api/v1/browser/screenshot/${staged.screenshotPath}`}
-                  alt="the composed page"
-                  className="w-full rounded border border-desk-200 dark:border-desk-800"
-                />
-              )}
-            </div>
-          )}
+          <Viewer
+            viewer={viewerInfo.data}
+            title={`${outlet.name} in the desk's browser`}
+            onLost={() => setStaged(null)}
+          />
 
           <div className="flex flex-wrap items-center gap-3">
             <button

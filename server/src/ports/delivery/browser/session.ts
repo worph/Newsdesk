@@ -14,7 +14,7 @@ import { schema } from '../../../db/index.js'
 import { logEvent } from '../../../events.js'
 import { McpError } from '../../mcp/client.js'
 import { browser, loadEngine, type BrowserEngineRef } from './engine.js'
-import { acquire, BrowserBusy, release, renew, type Lease } from './lease.js'
+import { acquire, attachPage, BrowserBusy, holder, release, renew, type Lease } from './lease.js'
 
 /**
  * Publishing through a browser, one publication at a time.
@@ -271,6 +271,7 @@ async function runStep(
   loaded: Loaded,
   step: RecipeStep,
   phase: 'stage' | 'verify',
+  pageId?: string,
 ): Promise<string | undefined> {
   const { engine } = loaded
   const id = loaded.publication.id
@@ -278,12 +279,12 @@ async function runStep(
   try {
     switch (step.verb) {
       case 'wait':
-        await browser.waitFor(engine, step.selector)
+        await browser.waitFor(engine, step.selector, undefined, pageId)
         trace(db, id, { phase, action: 'wait', selector: step.selector, ok: true })
         return undefined
 
       case 'click':
-        await browser.click(engine, step.selector)
+        await browser.click(engine, step.selector, pageId)
         trace(db, id, { phase, action: 'click', selector: step.selector, ok: true })
         return undefined
 
@@ -295,7 +296,7 @@ async function runStep(
             false,
           )
         }
-        await browser.fill(engine, step.selector, value)
+        await browser.fill(engine, step.selector, value, pageId)
         trace(db, id, {
           phase,
           action: 'fill',
@@ -308,8 +309,8 @@ async function runStep(
 
       case 'read': {
         // A permalink is nearly always an href rather than text.
-        const attribute = await browser.readAttribute(engine, step.selector, 'href')
-        const raw = attribute ?? (await browser.getText(engine, step.selector))
+        const attribute = await browser.readAttribute(engine, step.selector, 'href', pageId)
+        const raw = attribute ?? (await browser.getText(engine, step.selector, pageId))
         // Pages write their own links relative — `/post/1` — and a bare path
         // stored as an external url is not a link anyone can follow back from
         // the ledger. Resolved against the page we pinned, never against
@@ -332,9 +333,14 @@ async function runStep(
   }
 }
 
-async function screenshot(db: Db, loaded: Loaded, phase: 'stage' | 'verify'): Promise<string | null> {
+async function screenshot(
+  db: Db,
+  loaded: Loaded,
+  phase: 'stage' | 'verify',
+  pageId?: string,
+): Promise<string | null> {
   try {
-    const image = await browser.screenshot(loaded.engine)
+    const image = await browser.screenshot(loaded.engine, pageId)
     mkdirSync(traceDir, { recursive: true })
     const name = `${loaded.publication.id}-${phase}-${Date.now()}.png`
     writeFileSync(join(traceDir, name), image)
@@ -380,18 +386,19 @@ export async function stage(db: Db, publicationId: string): Promise<StagedPage> 
   const lease = acquire(loaded.engine.id, publicationId, loaded.outlet.name)
 
   try {
+    const pageId = await ownTab(loaded, publicationId)
     const url = destinationUrl(loaded)
-    await browser.navigate(loaded.engine, url)
-    trace(db, publicationId, { phase: 'stage', action: 'navigate', url, ok: true })
+    await browser.navigate(loaded.engine, url, pageId)
+    trace(db, publicationId, { phase: 'stage', action: 'navigate', url, ok: true, detail: { pageId } })
 
     for (const step of loaded.recipe.stage) {
-      await runStep(db, loaded, step, 'stage')
+      await runStep(db, loaded, step, 'stage', pageId)
       renew(loaded.engine.id, publicationId)
     }
 
     for (const step of loaded.recipe.stage.filter((s) => s.verb === 'fill')) {
       const expected = String(loaded.payload[step.key!] ?? '')
-      const actual = await browser.readValue(loaded.engine, step.selector)
+      const actual = await browser.readValue(loaded.engine, step.selector, pageId)
       const matches = comparable(expected) === comparable(actual)
 
       trace(db, publicationId, {
@@ -420,7 +427,7 @@ export async function stage(db: Db, publicationId: string): Promise<StagedPage> 
       }
     }
 
-    const shot = await screenshot(db, loaded, 'stage')
+    const shot = await screenshot(db, loaded, 'stage', pageId)
     const stagedAt = new Date().toISOString()
 
     db.update(schema.publications)
@@ -447,8 +454,8 @@ export async function stage(db: Db, publicationId: string): Promise<StagedPage> 
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    await screenshot(db, loaded, 'stage')
-    release(loaded.engine.id, publicationId)
+    await screenshot(db, loaded, 'stage', holder(loaded.engine.id)?.pageId)
+    await releaseTab(loaded, publicationId)
 
     db.update(schema.publications)
       .set({ status: 'FAILED', error: message })
@@ -499,8 +506,9 @@ export async function attest(db: Db, publicationId: string): Promise<Attestation
 
   if (loaded.recipe.verify.length > 0) {
     try {
+      const pageId = holder(loaded.engine.id)?.pageId
       for (const step of loaded.recipe.verify) {
-        const value = await runStep(db, loaded, step, 'verify')
+        const value = await runStep(db, loaded, step, 'verify', pageId)
         if (step.verb !== 'read' || !value) continue
         if (step.key === 'url') externalUrl = value
         if (step.key === 'id') externalId = value
@@ -521,7 +529,7 @@ export async function attest(db: Db, publicationId: string): Promise<Attestation
         detail: { error: err instanceof Error ? err.message : String(err) },
       })
     }
-    await screenshot(db, loaded, 'verify')
+    await screenshot(db, loaded, 'verify', holder(loaded.engine.id)?.pageId)
   }
 
   db.update(schema.publications)
@@ -536,7 +544,7 @@ export async function attest(db: Db, publicationId: string): Promise<Attestation
     .where(eq(schema.publications.id, publicationId))
     .run()
 
-  release(loaded.engine.id, publicationId)
+  await releaseTab(loaded, publicationId)
 
   logEvent(db, {
     level: 'info',
@@ -561,9 +569,9 @@ export async function attest(db: Db, publicationId: string): Promise<Attestation
  * AWAITING_SEND, and the reminders keep their schedule. Only the browser is
  * given back, so someone else can use it.
  */
-export function abandon(db: Db, publicationId: string): void {
+export async function abandon(db: Db, publicationId: string): Promise<void> {
   const loaded = load(db, publicationId)
-  release(loaded.engine.id, publicationId)
+  await releaseTab(loaded, publicationId)
 
   /**
    * Only a row still waiting is reopened. The live view releases the browser on
@@ -593,6 +601,38 @@ export function abandon(db: Db, publicationId: string): void {
  * took the browser mid-login would navigate away while someone was typing a
  * password into it.
  */
+/**
+ * The tab this publication owns, opening one if the lease has none yet.
+ *
+ * Owning a tab rather than driving whatever is first is what makes the live
+ * view point at *our* page, and what tells the container's collector that this
+ * one is in use.
+ */
+async function ownTab(loaded: Loaded, publicationId: string): Promise<string> {
+  const existing = holder(loaded.engine.id)
+  /**
+   * A remembered tab is only worth reusing if it is still open. The browser
+   * restarts — reaped when idle, recreated with the container — and takes
+   * every tab with it, so a lease outliving one would wedge the publication
+   * on a page that no longer exists until the lease itself expired.
+   */
+  if (existing?.publicationId === publicationId && existing.pageId) {
+    if (await browser.hasPage(loaded.engine, existing.pageId)) return existing.pageId
+  }
+
+  const pageId = await browser.openPage(loaded.engine, `newsdesk:${loaded.outlet.id}`)
+  attachPage(loaded.engine.id, publicationId, pageId)
+  return pageId
+}
+
+/** Give the tab back with the browser; a tab per abandoned publish would leak. */
+async function releaseTab(loaded: Loaded, publicationId: string): Promise<void> {
+  const lease = holder(loaded.engine.id)
+  const pageId = lease?.publicationId === publicationId ? lease.pageId : undefined
+  release(loaded.engine.id, publicationId)
+  if (pageId) await browser.closePage(loaded.engine, pageId).catch(() => undefined)
+}
+
 export async function beginSignIn(db: Db, publicationId: string): Promise<{ url: string; lease: Lease }> {
   const loaded = load(db, publicationId)
   if (loaded.publication.status !== 'NEEDS_AUTH') {
@@ -606,11 +646,12 @@ export async function beginSignIn(db: Db, publicationId: string): Promise<{ url:
   const url = destinationUrl(loaded)
 
   try {
-    await browser.navigate(loaded.engine, url)
-    trace(db, publicationId, { phase: 'signin', action: 'navigate', url, ok: true })
+    const pageId = await ownTab(loaded, publicationId)
+    await browser.navigate(loaded.engine, url, pageId)
+    trace(db, publicationId, { phase: 'signin', action: 'navigate', url, ok: true, detail: { pageId } })
     return { url, lease }
   } catch (err) {
-    release(loaded.engine.id, publicationId)
+    await releaseTab(loaded, publicationId)
     trace(db, publicationId, {
       phase: 'signin',
       action: 'navigate',

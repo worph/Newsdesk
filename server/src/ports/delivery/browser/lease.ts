@@ -24,6 +24,15 @@ export interface Lease {
   label: string
   takenAt: number
   expiresAt: number
+  /**
+   * The tab this publication is working in.
+   *
+   * Held here rather than on the row because it is worth exactly as long as
+   * the lease is: a tab does not survive the browser, and the desk is a single
+   * instance. It is also what the viewer points at — a live view of "whatever
+   * is first" would show the operator somebody else's page.
+   */
+  pageId?: string
 }
 
 export class BrowserBusy extends Error {
@@ -77,6 +86,9 @@ export function acquire(
     label,
     takenAt: existing?.takenAt ?? now,
     expiresAt: now + ttl,
+    // Carried across a re-entrant take, or the caller opens a second tab every
+    // time an operator reloads the live page — one leaked tab per reload.
+    pageId: existing?.pageId,
   }
   held.set(engineId, lease)
   return lease
@@ -93,6 +105,12 @@ export function renew(
   if (!lease || lease.publicationId !== publicationId) return undefined
   lease.expiresAt = now + (options.ttlMs ?? LEASE_TTL_MS)
   return lease
+}
+
+/** Remember which tab this lease is working in. */
+export function attachPage(engineId: string, publicationId: string, pageId: string): void {
+  const lease = held.get(engineId)
+  if (lease && lease.publicationId === publicationId) lease.pageId = pageId
 }
 
 /** Give the browser back. Releasing a lease someone else holds is a no-op. */

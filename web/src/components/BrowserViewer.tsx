@@ -1,48 +1,229 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 /**
- * The desk's browser, embedded.
+ * The desk's browser, live, one tab at a time.
  *
- * Two things make this usable rather than merely present, and both come from
- * the same fact: the remote desktop is a fixed size and this frame is not.
+ * A canvas fed by a per-tab screencast rather than a remote desktop, because
+ * the desktop was answering a question nobody asked: it showed whichever window
+ * happened to be raised, wrapped the destination in Chrome's own tab strip and
+ * address bar, and on a phone put the login form somewhere off-screen to the
+ * right of a 1280×800 framebuffer.
  *
- *   **fit** scales the whole desktop into the frame. Nothing is cut off, and
- *   text is small in proportion to how much bigger the desktop is.
- *   **actual size** shows real pixels and scrolls. Text is exactly as legible
- *   as it is on a normal screen, which is what you want when reading a post or
- *   typing a password.
- *
- * Full screen is the other half of it: at 70% of a laptop window a 1440-wide
- * desktop is always going to be small, and the browser's own full-screen mode
- * costs nothing and fixes it outright.
+ * Clicking here is not a lesser kind of clicking. A tap on this canvas and a
+ * click inside a VNC session arrive at the page as the same
+ * `Input.dispatchMouseEvent` — so what the viewer owes the operator is
+ * *seeing*, and that is what the controls below are for.
  */
 
-export type ViewerFit = 'fit' | 'actual'
+export interface ScreencastTarget {
+  /** Where the frames come from and the input goes back. */
+  socket: string
+  /** Where to ask for an element's bounds, so we can point the view at it. */
+  frame: string
+}
+
+interface Metadata {
+  pageWidth: number
+  pageHeight: number
+  scrollOffsetX: number
+  scrollOffsetY: number
+}
 
 /**
- * noVNC reads its options from the query string. `resize=scale` fits the
- * desktop to the frame; `resize=off` with clipping gives real pixels and
- * scrollbars.
+ * Canvas coordinates to page coordinates.
+ *
+ * The one piece of arithmetic that has to be right: get it wrong and every
+ * click lands somewhere the operator did not press. Exported so it can be
+ * tested without a browser.
  */
-export function viewerUrl(base: string, fit: ViewerFit): string {
-  const url = new URL(base, window.location.origin)
-  url.searchParams.set('resize', fit === 'fit' ? 'scale' : 'off')
-  url.searchParams.set('view_clip', fit === 'fit' ? 'false' : 'true')
-  return `${url.pathname}${url.search}`
+export function toPageCoords(
+  point: { x: number; y: number },
+  canvas: { width: number; height: number },
+  page: { width: number; height: number },
+): { x: number; y: number } {
+  if (canvas.width === 0 || canvas.height === 0) return { x: 0, y: 0 }
+  return {
+    x: (point.x / canvas.width) * page.width,
+    y: (point.y / canvas.height) * page.height,
+  }
 }
 
 export function BrowserViewer({
-  url,
+  target,
   title,
   hint,
+  focusSelector = 'input,textarea,[contenteditable="true"]',
+  onBreakGlass,
+  onLost,
 }: {
-  url: string
+  target: ScreencastTarget
   title: string
-  /** What this frame is for, said once above it. */
   hint?: string
+  /**
+   * What "Find the field" should look for. The caller knows better than this
+   * component does — the sign-in view wants the login form, a staged post
+   * wants the composer — and a wrong guess sends the view somewhere useless.
+   */
+  focusSelector?: string
+  /** Offered, not taken: the desktop still exists for what a tab cannot show. */
+  onBreakGlass?: () => void
+  /**
+   * The tab went while we were watching it — reaped, or taken by a browser
+   * restart. Told so the page can open a fresh one rather than leaving stale
+   * pixels on screen with nothing behind them.
+   */
+  onLost?: () => void
 }) {
-  const [fit, setFit] = useState<ViewerFit>('actual')
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const socketRef = useRef<WebSocket | null>(null)
+  const metaRef = useRef<Metadata | null>(null)
+  const keyboardRef = useRef<HTMLInputElement>(null)
   const shell = useRef<HTMLDivElement>(null)
+  /** Whether we have asked the page to lay itself out for this screen yet. */
+  const sizedRef = useRef(false)
+
+  const [status, setStatus] = useState<'connecting' | 'live' | 'gone'>('connecting')
+
+  useEffect(() => {
+    const url = new URL(target.socket, window.location.origin)
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    const socket = new WebSocket(url.toString())
+    socket.binaryType = 'arraybuffer'
+    socketRef.current = socket
+
+    sizedRef.current = false
+    socket.onopen = () => setStatus('live')
+    socket.onclose = (event) => {
+      setStatus('gone')
+      // 4410 is this server saying the tab is no longer open; any close after
+      // frames were flowing means the same thing in practice.
+      if (event.code === 4410 || sizedRef.current) onLost?.()
+    }
+    socket.onerror = () => setStatus('gone')
+
+    socket.onmessage = async (event) => {
+      // Text is metadata, binary is a frame. Metadata arrives only when it
+      // changes, so it is cheap to keep and never worth redrawing on.
+      if (typeof event.data === 'string') {
+        const meta = JSON.parse(event.data) as Metadata & { type: string }
+        metaRef.current = meta
+        return
+      }
+
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const bitmap = await createImageBitmap(new Blob([event.data], { type: 'image/jpeg' }))
+      if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+        canvas.width = bitmap.width
+        canvas.height = bitmap.height
+      }
+      canvas.getContext('2d')?.drawImage(bitmap, 0, 0)
+      bitmap.close()
+
+      /**
+       * Ask for our layout once the canvas has a real size.
+       *
+       * `onopen` is too early — the element has no height until something has
+       * been drawn into it — and a ResizeObserver does not reliably fire for a
+       * width that never changed. The first frame is the first moment the
+       * measurement is worth taking, so take it then.
+       */
+      if (!sizedRef.current) {
+        sizedRef.current = true
+        reportViewport()
+      }
+    }
+
+    return () => socket.close()
+  }, [target.socket])
+
+  /**
+   * Tell the page how big the screen looking at it is.
+   *
+   * This is what makes the view responsive rather than merely small: the
+   * destination lays itself out for a phone, so its own mobile styles apply,
+   * fields become finger-sized and the frame comes back at 1:1. Without it a
+   * 1280-wide page scaled into 350 leaves a 36px input about ten pixels tall,
+   * and aiming at it is luck.
+   */
+  const reportViewport = () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    if (rect.width < 1) return
+    /**
+     * Width from the canvas, height from the window — never from the canvas.
+     * The canvas has no height until a frame arrives, and the frame's height
+     * comes from the viewport we asked for, so taking both from the element
+     * feeds back on itself and settles on whatever the first guess was.
+     */
+    const available = document.fullscreenElement
+      ? window.innerHeight
+      : Math.round(window.innerHeight * 0.72)
+    send({
+      type: 'viewport',
+      width: Math.round(rect.width),
+      height: Math.max(360, available),
+      deviceScaleFactor: window.devicePixelRatio || 1,
+      mobile: window.matchMedia('(pointer: coarse)').matches,
+    })
+  }
+
+  // Rotate the phone, or drag the window, and the page should follow.
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => reportViewport())
+    observer.observe(canvas)
+    return () => observer.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target.socket])
+
+  /** Where on the page did that land? */
+  const pagePoint = (event: { clientX: number; clientY: number }) => {
+    const canvas = canvasRef.current
+    const meta = metaRef.current
+    if (!canvas || !meta) return null
+    const rect = canvas.getBoundingClientRect()
+    return toPageCoords(
+      { x: event.clientX - rect.left, y: event.clientY - rect.top },
+      { width: rect.width, height: rect.height },
+      { width: meta.pageWidth, height: meta.pageHeight },
+    )
+  }
+
+  const send = (message: unknown) => {
+    const socket = socketRef.current
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message))
+  }
+
+  const onPointer = (action: 'mousePressed' | 'mouseReleased' | 'mouseMoved') => (
+    event: React.PointerEvent<HTMLCanvasElement>,
+  ) => {
+    const point = pagePoint(event)
+    if (!point) return
+    if (action === 'mousePressed') {
+      // Focus the hidden input so a phone raises its keyboard; a canvas alone
+      // never will, which is why typing into a remote page usually cannot be
+      // done from a phone at all.
+      keyboardRef.current?.focus()
+    }
+    send({ type: 'mouse', action, ...point })
+  }
+
+  /** Point the view at something, by asking the desk where it is. */
+  const zoomTo = async (selector: string) => {
+    const response = await fetch(target.frame, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ selector }),
+    })
+    if (!response.ok) return
+    const box = (await response.json()) as { x: number; y: number; width: number; height: number }
+    // Scroll the page so the element is in view; the frame is already 1:1.
+    send({ type: 'wheel', x: 10, y: 10, deltaX: 0, deltaY: box.y - 80 })
+  }
 
   const expand = () => {
     const node = shell.current
@@ -54,22 +235,6 @@ export function BrowserViewer({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <div className="inline-flex overflow-hidden rounded-md border border-desk-300 dark:border-desk-700">
-          {(['actual', 'fit'] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setFit(mode)}
-              className={`px-2.5 py-1 ${
-                fit === mode
-                  ? 'bg-desk-900 text-white dark:bg-desk-100 dark:text-desk-900'
-                  : 'text-desk-600 hover:bg-desk-100 dark:text-desk-400 dark:hover:bg-desk-800'
-              }`}
-            >
-              {mode === 'actual' ? 'Actual size' : 'Fit'}
-            </button>
-          ))}
-        </div>
-
         <button
           onClick={expand}
           className="rounded-md border border-desk-300 px-2.5 py-1 text-desk-600 hover:bg-desk-100 dark:border-desk-700 dark:text-desk-400 dark:hover:bg-desk-800"
@@ -78,31 +243,104 @@ export function BrowserViewer({
         </button>
 
         {/*
-          Nothing crosses from your clipboard into a remote desktop by itself —
-          the frame is a picture, and ⌘V lands in your own browser. noVNC's
-          clipboard panel is the way across, and nobody finds it unprompted.
+          Only possible because the desk drives this browser as well as showing
+          it: ask where a thing is, then put it on screen. On a phone that is
+          the difference between reading a post and hunting for it.
         */}
-        <span className="text-desk-500">
-          To paste: open the noVNC toolbar (the tab on the left edge of the frame) → Clipboard →
-          paste there → then press Ctrl+V in the page.
+        <button
+          onClick={() => void zoomTo(focusSelector)}
+          className="rounded-md border border-desk-300 px-2.5 py-1 text-desk-600 hover:bg-desk-100 dark:border-desk-700 dark:text-desk-400 dark:hover:bg-desk-800"
+        >
+          Find the field
+        </button>
+
+        <span className={status === 'gone' ? 'text-amber-700 dark:text-amber-400' : 'text-desk-500'}>
+          {status === 'live'
+            ? 'live'
+            : status === 'connecting'
+              ? 'connecting…'
+              : 'the tab went — reopening'}
         </span>
+
+        {onBreakGlass && (
+          <button onClick={onBreakGlass} className="ml-auto text-desk-500 underline underline-offset-2">
+            Something looks wrong
+          </button>
+        )}
       </div>
 
       {hint && <p className="text-xs text-desk-500">{hint}</p>}
 
       <div
         ref={shell}
-        className="overflow-hidden rounded-lg border border-desk-200 bg-black dark:border-desk-800"
+        className="overflow-auto rounded-lg border border-desk-200 bg-black dark:border-desk-800"
       >
-        <iframe
-          // Remounts on a fit change so noVNC re-reads its settings.
-          key={fit}
-          src={viewerUrl(url, fit)}
-          title={title}
-          className="h-[78vh] w-full border-0 bg-black"
-          sandbox="allow-scripts allow-same-origin allow-forms"
+        <canvas
+          ref={canvasRef}
+          aria-label={title}
+          /**
+           * A real mousedown moves focus as its default action, and a canvas
+           * is not focusable — so the browser was blurring the hidden input we
+           * had just focused and dropping focus on `body`. Clicks still
+           * reached the page; every keystroke after them went nowhere, which
+           * is indistinguishable from a keyboard that does not transmit.
+           *
+           * Synthetic events carry no default action, which is why this only
+           * ever failed for real people.
+           */
+          onMouseDown={(event) => event.preventDefault()}
+          onPointerDown={onPointer('mousePressed')}
+          onPointerUp={onPointer('mouseReleased')}
+          onPointerMove={(event) => {
+            if (event.buttons === 0) return
+            onPointer('mouseMoved')(event)
+          }}
+          onWheel={(event) => {
+            const point = pagePoint(event)
+            if (point) send({ type: 'wheel', ...point, deltaX: event.deltaX, deltaY: event.deltaY })
+          }}
+          className="block h-auto w-full touch-none"
         />
       </div>
+
+      {/*
+        Off-screen rather than hidden: a display:none input cannot be focused,
+        and focus is the only thing that summons a phone's keyboard.
+      */}
+      <input
+        ref={keyboardRef}
+        aria-label={`type into ${title}`}
+        className="absolute left-[-9999px] h-px w-px opacity-0"
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+        onKeyDown={(event) => {
+          // Let the browser handle its own paste shortcut — it arrives as a
+          // paste event below, with the clipboard attached. Forwarding the
+          // keystroke instead would type a literal "v".
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v') return
+          event.preventDefault()
+
+          const printable = event.key.length === 1 && !event.metaKey && !event.ctrlKey
+          const modifiers =
+            (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0)
+          send({
+            type: 'key',
+            action: printable ? 'char' : 'keyDown',
+            key: event.key,
+            code: event.code,
+            text: printable ? event.key : undefined,
+            modifiers,
+          })
+        }}
+        onPaste={(event) => {
+          // One insert rather than a character each: it is what the page's own
+          // paste handling expects, and it keeps newlines.
+          event.preventDefault()
+          const text = event.clipboardData.getData('text')
+          if (text) send({ type: 'text', text })
+        }}
+      />
     </div>
   )
 }

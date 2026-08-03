@@ -89,16 +89,16 @@ export const browser = {
     return (await response.json().catch(() => ({}))) as BrowserStatus
   },
 
-  async navigate(engine: BrowserEngineRef, url: string): Promise<void> {
-    await post(engine, '/api/navigate', { url }, 60_000)
+  async navigate(engine: BrowserEngineRef, url: string, pageId?: string): Promise<void> {
+    await post(engine, '/api/navigate', { url, pageId }, 60_000)
   },
 
-  async waitFor(engine: BrowserEngineRef, selector: string, timeoutMs = 15_000): Promise<void> {
-    await post(engine, '/api/action', { action: 'waitFor', selector, timeout: timeoutMs }, timeoutMs + 5_000)
+  async waitFor(engine: BrowserEngineRef, selector: string, timeoutMs = 15_000, pageId?: string): Promise<void> {
+    await post(engine, '/api/action', { action: 'waitFor', selector, timeout: timeoutMs, pageId }, timeoutMs + 5_000)
   },
 
-  async click(engine: BrowserEngineRef, selector: string): Promise<void> {
-    await post(engine, '/api/action', { action: 'click', selector })
+  async click(engine: BrowserEngineRef, selector: string, pageId?: string): Promise<void> {
+    await post(engine, '/api/action', { action: 'click', selector, pageId })
   },
 
   /**
@@ -108,12 +108,12 @@ export const browser = {
    * this function is the only place published copy enters the browser, and it
    * never looks at what it is carrying.
    */
-  async fill(engine: BrowserEngineRef, selector: string, text: string): Promise<void> {
-    await post(engine, '/api/action', { action: 'type', selector, text }, 60_000)
+  async fill(engine: BrowserEngineRef, selector: string, text: string, pageId?: string): Promise<void> {
+    await post(engine, '/api/action', { action: 'type', selector, text, pageId }, 60_000)
   },
 
-  async getText(engine: BrowserEngineRef, selector: string): Promise<string> {
-    const result = (await post(engine, '/api/action', { action: 'getText', selector })) as unknown
+  async getText(engine: BrowserEngineRef, selector: string, pageId?: string): Promise<string> {
+    const result = (await post(engine, '/api/action', { action: 'getText', selector, pageId })) as unknown
     return readString(result)
   },
 
@@ -125,7 +125,7 @@ export const browser = {
    * newlines as elements. Reading the value the way the page itself would is
    * the only comparison worth making against the bytes we typed.
    */
-  async readValue(engine: BrowserEngineRef, selector: string): Promise<string> {
+  async readValue(engine: BrowserEngineRef, selector: string, pageId?: string): Promise<string> {
     // An immediately-invoked expression, not a function declaration: the
     // container hands the string to `page.evaluate`, which evaluates a string
     // as an *expression*. A bare `() => {…}` therefore evaluates to a function
@@ -136,7 +136,7 @@ export const browser = {
       if ('value' in el && typeof el.value === 'string') return el.value
       return el.innerText ?? el.textContent ?? ''
     })()`
-    const result = (await post(engine, '/api/evaluate', { script })) as { result?: unknown }
+    const result = (await post(engine, '/api/evaluate', { script, pageId })) as { result?: unknown }
     const value = result?.result
     if (value === null || value === undefined) {
       throw new McpError(`nothing matches "${selector}" on the page`, false)
@@ -151,9 +151,9 @@ export const browser = {
    * the normal case, and waiting for something that should not be there would
    * add its timeout to every healthy publish.
    */
-  async exists(engine: BrowserEngineRef, selector: string): Promise<boolean> {
+  async exists(engine: BrowserEngineRef, selector: string, pageId?: string): Promise<boolean> {
     const script = `(() => document.querySelector(${JSON.stringify(selector)}) !== null)()`
-    const result = (await post(engine, '/api/evaluate', { script })) as { result?: unknown }
+    const result = (await post(engine, '/api/evaluate', { script, pageId })) as { result?: unknown }
     return result?.result === true
   },
 
@@ -162,20 +162,47 @@ export const browser = {
     engine: BrowserEngineRef,
     selector: string,
     attribute: string,
+    pageId?: string,
   ): Promise<string | null> {
     const script = `(() => {
       const el = document.querySelector(${JSON.stringify(selector)})
       if (!el) return null
       return el.getAttribute(${JSON.stringify(attribute)})
     })()`
-    const result = (await post(engine, '/api/evaluate', { script })) as { result?: unknown }
+    const result = (await post(engine, '/api/evaluate', { script, pageId })) as { result?: unknown }
     const value = result?.result
     return value === null || value === undefined ? null : String(value)
   },
 
-  async screenshot(engine: BrowserEngineRef): Promise<Buffer> {
-    const response = await request(engine, '/api/screenshot', { timeoutMs: 30_000 })
+  async screenshot(engine: BrowserEngineRef, pageId?: string): Promise<Buffer> {
+    const response = await request(engine, `/api/screenshot${pageId ? `?pageId=${encodeURIComponent(pageId)}` : ''}`, { timeoutMs: 30_000 })
     return Buffer.from(await response.arrayBuffer())
+  },
+
+  /**
+   * Open a tab of this publication's own.
+   *
+   * Driving "whatever is first" is safe only while nothing else uses the
+   * browser; it also gives the viewer nothing specific to point at. An owned
+   * tab fixes both, and tells the container's collector not to reap it.
+   */
+  async openPage(engine: BrowserEngineRef, owner: string, url?: string): Promise<string> {
+    const body = (await post(engine, '/api/pages', { owner, url })) as { pageId?: string }
+    if (!body.pageId) throw new McpError(`browser "${engine.name}" did not return a page id`, false)
+    return body.pageId
+  },
+
+  /** Is that tab still there? A browser restart takes every tab with it. */
+  async hasPage(engine: BrowserEngineRef, pageId: string): Promise<boolean> {
+    const response = await request(engine, '/api/pages', { timeoutMs: 10_000 })
+    const body = (await response.json().catch(() => ({}))) as { pages?: Array<{ pageId: string }> }
+    return (body.pages ?? []).some((page) => page.pageId === pageId)
+  },
+
+  async closePage(engine: BrowserEngineRef, pageId: string): Promise<void> {
+    await request(engine, `/api/pages/${encodeURIComponent(pageId)}`, { method: 'DELETE', timeoutMs: 15_000 }).catch(
+      () => undefined,
+    )
   },
 
   /**

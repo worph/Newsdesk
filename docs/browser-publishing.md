@@ -153,24 +153,36 @@ screenshot, and a human decides. On a human-initiated retry:
 
 ## 6. The viewport
 
-On the server the live view is **noVNC, iframed inside the desk under the desk's own session auth**.
-The browser container already serves it: `/vnc` (assets) and `/vnc/websockify` (proxied socket) on
-its API port, with `/api/vnc-password` handing out the per-boot password. Newsdesk fetches the
-password server-side and proxies the whole surface, so the container itself is never reachable.
+The live view is a **per-tab screencast**, not a remote desktop: `Page.startScreencast` streams the
+target Newsdesk is working in, and taps come back as `Input.dispatch*` on that same tab.
 
-The view is **interactive, not read-only**. Clicking the destination's real button is the point of
-the feature, and CDP/X-dispatched input arrives at the page as a trusted event — the click is
-genuinely a human's, merely transported.
+That distinction is not cosmetic. x11vnc serves a *screen*, so on a browser other clients also use,
+an operator saw whichever window was raised — silently the wrong page. And on a phone the desktop
+was unusable: at 390px, "actual size" showed the top-left corner of a 1280x800 framebuffer — tab
+strip, address bar, a `--no-sandbox` warning — with the login form off-screen to the right.
 
-Locally, where the operator is sitting in front of the browser, there is no viewport: the engine is
-`chrome-devtools` MCP against a real Chrome and the desk skips the iframe. The engine is
-configuration, and the local path is an option that must never dictate the design.
+**Clicking here is not a lesser kind of clicking.** A tap on the canvas and a click inside a VNC
+session reach the page as the same `Input.dispatchMouseEvent`, so nothing about the human-presses-
+the-button property changes. What the viewer owes the operator is *seeing*, and a tab reflows into
+a phone where a desktop never could.
+
+Because the desk drives this browser as well as watching it, the viewer can ask **where** something
+is — `POST /frame` returns an element's page-space bounds — and put it on screen. "Find the field"
+beats panning around a desktop hunting for a login form, and no generic remote desktop can offer it.
+
+**noVNC survives as break-glass**, behind a "something looks wrong" toggle, for what a single tab
+structurally cannot show: Chrome's own UI, native dialogs, a file picker. Passkeys remain impossible
+through any of it — a platform authenticator is bound to its device — which is why routine sign-in
+wants a different answer than a viewer.
 
 | | server | local |
 |---|---|---|
-| driving | sidecar `browser-mcp` `/mcp` | `chrome-devtools` MCP |
-| fill + read-back | `/api/action`, `/api/evaluate` | CDP |
-| viewport | noVNC, proxied | none needed |
+| driving | sidecar `browser-mcp` REST | `chrome-devtools` MCP |
+| fill + read-back | `/api/action` + `/api/evaluate` | CDP |
+| viewport | per-tab screencast, proxied under the desk's session | none needed |
+
+Chrome stays **headful on Xvfb**. `--headless=new` is close to a real browser but not identical,
+and this publishes to real destinations; the display simply stopped being the interface.
 
 ## 7. Concurrency — one lane, queued
 

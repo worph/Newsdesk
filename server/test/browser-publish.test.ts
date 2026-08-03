@@ -45,6 +45,9 @@ read: a.permalink -> url
 /** A page that remembers what was typed into it, and can be told to lie. */
 interface StubPage {
   navigatedTo: string | null
+  /** Tabs the desk opened, and how many it has asked for. */
+  opened: number
+  openPages: Set<string>
   fields: Map<string, string>
   attributes: Map<string, string>
   /** Corrupt what a read-back returns, to stand in for a composer that mangles input. */
@@ -69,6 +72,22 @@ async function startStub(page: StubPage): Promise<{ apiBase: string; close: () =
       }
 
       if (page.fail && req.url?.includes(page.fail)) return reply({ error: 'stub failure' }, 500)
+
+      // The desk now opens a tab of its own and names it on every call. The
+      // stub keeps one page and simply hands out ids, which is enough to prove
+      // the desk asks for a tab and gives it back.
+      if (req.url === '/api/pages' && req.method === 'POST') {
+        const pageId = `stub-page-${++page.opened}`
+        page.openPages.add(pageId)
+        return reply({ pageId, url: body.url ?? 'about:blank', title: 'stub' }, 201)
+      }
+      if (req.url === '/api/pages' && req.method === 'GET') {
+        return reply({ pages: [...page.openPages].map((pageId) => ({ pageId, owner: 'newsdesk' })) })
+      }
+      if (req.url?.startsWith('/api/pages/') && req.method === 'DELETE') {
+        page.openPages.delete(decodeURIComponent(req.url.slice('/api/pages/'.length)))
+        return reply({ closed: true })
+      }
 
       if (req.url === '/api/navigate') {
         page.navigatedTo = body.url ?? null
@@ -115,7 +134,7 @@ async function startStub(page: StubPage): Promise<{ apiBase: string; close: () =
         return reply({ result: page.mangle ? page.mangle(stored) : stored })
       }
 
-      if (req.url === '/api/screenshot') {
+      if (req.url?.startsWith('/api/screenshot')) {
         res.writeHead(200, { 'content-type': 'image/png' })
         return res.end(Buffer.from('89504e470d0a1a0a', 'hex'))
       }
@@ -201,7 +220,15 @@ describe('browser publishing', () => {
 
   beforeEach(async () => {
     resetLeases()
-    page = { navigatedTo: null, fields: new Map(), attributes: new Map(), mangle: null, fail: null }
+    page = {
+      navigatedTo: null,
+      opened: 0,
+      openPages: new Set(),
+      fields: new Map(),
+      attributes: new Map(),
+      mangle: null,
+      fail: null,
+    }
     stub = await startStub(page)
     traceDir = mkdtempSync(join(tmpdir(), 'newsdesk-traces-'))
     setTraceDir(traceDir)
@@ -404,6 +431,34 @@ ${RECIPE}`
       await expect(stage(db, second)).rejects.toBeInstanceOf(BrowserBusy)
       // And the refusal says who has it, so the next person is not left guessing.
       await expect(stage(db, second)).rejects.toThrow(/LinkedIn/)
+    })
+
+    it('reuses its tab when the same publication takes the browser again', async () => {
+      // An operator reloading the live page must not leak a tab per reload.
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = seedBrowserPublication(db, stub.apiBase)
+
+      await stage(db, id)
+      await stage(db, id)
+
+      expect(page.opened).toBe(1)
+      expect(page.openPages.size).toBe(1)
+    })
+
+    it('opens a fresh tab when the remembered one has gone', async () => {
+      // The browser is reaped when idle and recreated with the container,
+      // taking every tab with it. A lease outliving one would otherwise wedge
+      // the publication on a page that no longer exists.
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = seedBrowserPublication(db, stub.apiBase)
+
+      await stage(db, id)
+      page.openPages.clear() // the browser restarted under us
+
+      await expect(stage(db, id)).resolves.toMatchObject({ outletName: 'LinkedIn' })
+      expect(page.opened).toBe(2)
     })
 
     it('will not stage something that is not waiting to be sent', async () => {

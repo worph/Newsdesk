@@ -29,6 +29,12 @@ import { McpError } from '../ports/mcp/client.js'
  */
 
 const VNC_PREFIX = '/api/v1/browser/vnc'
+/**
+ * Everything about a live tab, proxied under one prefix: the frames socket at
+ * `<prefix>/<pageId>/screencast` and the element-framing call at
+ * `<prefix>/<pageId>/frame`. One registration covers both.
+ */
+const LIVE_PREFIX = '/api/v1/browser/live'
 
 function failure(err: unknown): { code: number; body: Record<string, unknown> } {
   if (err instanceof BrowserBusy) {
@@ -135,7 +141,7 @@ export function registerBrowserRoutes(app: FastifyInstance, db: Db, traceDir: st
   app.post('/api/v1/publications/:id/not-sent', { preHandler: requireSession }, async (request, reply) => {
     const { id } = request.params as { id: string }
     try {
-      abandon(db, id)
+      await abandon(db, id)
       return { ok: true }
     } catch (err) {
       const { code, body } = failure(err)
@@ -192,18 +198,57 @@ export function registerBrowserRoutes(app: FastifyInstance, db: Db, traceDir: st
     const { id } = request.params as { id: string }
     const engine = engineFor(db, id)
     if (!engine) return reply.code(404).send({ error: 'this outlet does not publish through a browser' })
-    if (engine.viewer !== 'novnc') return { kind: 'none' }
+
+    const held = holder(engine.id)
+    const remembered = held?.publicationId === id ? held.pageId : undefined
+
+    /**
+     * A remembered tab is only worth offering if it is still open.
+     *
+     * The browser is reaped when idle and dies with its container, and the
+     * lease outlives both. Handing out a dead tab gives the operator a socket
+     * that attaches to nothing: stale pixels on screen, every click and
+     * keystroke going nowhere, and no sign that anything is wrong — which is
+     * indistinguishable from a page that ignores you.
+     */
+    const pageId =
+      remembered && (await browser.hasPage(engine, remembered).catch(() => false))
+        ? remembered
+        : undefined
+
+    /**
+     * The live view of *this* publication's tab.
+     *
+     * Per tab rather than per screen: a desktop stream shows whichever window
+     * is raised, which on a browser other things also use is silently the
+     * wrong page. It also reflows on a phone, where the desktop never could.
+     */
+    const screencast = pageId
+      ? {
+          kind: 'screencast' as const,
+          pageId,
+          socket: `${LIVE_PREFIX}/${encodeURIComponent(pageId)}/screencast`,
+          frame: `${LIVE_PREFIX}/${encodeURIComponent(pageId)}/frame`,
+        }
+      : null
+
+    if (engine.viewer !== 'novnc') return screencast ?? { kind: 'none' }
 
     try {
       const password = await browser.vncPassword(engine)
-      const held = holder(engine.id)
       return {
-        kind: 'novnc',
+        ...(screencast ?? {}),
+        kind: screencast ? 'screencast' : 'novnc',
+        // Kept alongside for break-glass: the things that live outside the
+        // page — Chrome's own UI, native dialogs — which a per-tab stream
+        // structurally cannot show.
+        novnc: {
         // noVNC's own page, proxied under this origin. `path` is where its
         // client opens the socket, relative to the page it was served from.
-        url: `${VNC_PREFIX}/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=${encodeURIComponent(
-          `${VNC_PREFIX.slice(1)}/websockify`,
-        )}${password ? `&password=${encodeURIComponent(password)}` : ''}`,
+          url: `${VNC_PREFIX}/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=${encodeURIComponent(
+            `${VNC_PREFIX.slice(1)}/websockify`,
+          )}${password ? `&password=${encodeURIComponent(password)}` : ''}`,
+        },
         heldBy: held?.publicationId === id ? null : (held?.label ?? null),
       }
     } catch (err) {
@@ -227,15 +272,36 @@ export function registerBrowserRoutes(app: FastifyInstance, db: Db, traceDir: st
  */
 export async function registerVncProxy(app: FastifyInstance, db: Db): Promise<void> {
   const engine = db.select().from(schema.browserEngines).limit(1).get()
-  if (!engine || engine.viewer !== 'novnc') return
+  if (!engine) return
 
   // Imported here rather than at the top of the file so a desk with no browser
   // never pays to load a proxy stack it will not register — which is every
   // deployment that does not run the sidecar, and every test that boots the app.
   const { default: httpProxy } = await import('@fastify/http-proxy')
 
+  const upstream = engine.apiBase.replace(/\/+$/, '')
+
+  /**
+   * The live view: one socket per tab, frames out and input in.
+   *
+   * The same gate as everything else here — the upgrade goes through Fastify's
+   * router, so `preHandler` runs on it, which is what stops this being
+   * unauthenticated remote control of a browser full of live sessions.
+   */
   await app.register(httpProxy, {
-    upstream: engine.apiBase.replace(/\/+$/, ''),
+    upstream,
+    prefix: LIVE_PREFIX,
+    rewritePrefix: '/api/pages',
+    websocket: true,
+    preHandler: requireSession,
+  })
+
+  // noVNC stays for break-glass — the things that live outside the page, which
+  // a per-tab screencast structurally cannot show.
+  if (engine.viewer !== 'novnc') return
+
+  await app.register(httpProxy, {
+    upstream,
     prefix: VNC_PREFIX,
     rewritePrefix: '/vnc',
     websocket: true,

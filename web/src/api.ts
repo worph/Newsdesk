@@ -505,8 +505,14 @@ export interface BrowserBusyInfo {
 }
 
 export interface ViewerInfo {
-  kind: 'novnc' | 'none'
-  url?: string
+  kind: 'screencast' | 'novnc' | 'none'
+  /** screencast: where frames come from and where input goes back. */
+  socket?: string
+  /** screencast: where to ask an element's bounds, to point the view at it. */
+  frame?: string
+  pageId?: string
+  /** Kept for break-glass — what a per-tab stream structurally cannot show. */
+  novnc?: { url: string }
   /** Set when someone else's publish holds the browser. */
   heldBy?: string | null
 }
