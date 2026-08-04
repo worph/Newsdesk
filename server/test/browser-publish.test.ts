@@ -7,15 +7,17 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Db } from '../src/db/index.js'
 import { handoverFollowupHandler } from '../src/ports/delivery/browser/handover.js'
-import { BrowserBusy, resetLeases } from '../src/ports/delivery/browser/lease.js'
+import { acquire, BrowserBusy, holder, resetLeases } from '../src/ports/delivery/browser/lease.js'
 import {
   abandon,
   attest,
   confirmSignedIn,
+  probeSignedIn,
   setSignInSettleMs,
   setTraceDir,
   stage,
 } from '../src/ports/delivery/browser/session.js'
+import { Deferred } from '../src/pipeline/queue.js'
 import { deliverPublication } from '../src/ports/delivery/index.js'
 import { openTestDb, schema, seedDesk } from './helpers.js'
 
@@ -45,6 +47,14 @@ read: a.permalink -> url
 /** A page that remembers what was typed into it, and can be told to lie. */
 interface StubPage {
   navigatedTo: string | null
+  /**
+   * Every action the desk asked for, in order.
+   *
+   * Ordering is the whole point of one test in here — a publish whose read-back
+   * disagreed with the payload must never reach the click that sends — and an
+   * assertion about *what* happened cannot catch that. Only *when* can.
+   */
+  calls: string[]
   /** Tabs the desk opened, and how many it has asked for. */
   opened: number
   openPages: Set<string>
@@ -110,10 +120,12 @@ async function startStub(page: StubPage): Promise<{ apiBase: string; close: () =
 
       if (req.url === '/api/navigate') {
         page.navigatedTo = body.url ?? null
+        page.calls.push(`navigate:${body.url ?? ''}`)
         return reply({ ok: true })
       }
 
       if (req.url === '/api/action') {
+        page.calls.push(`${body.action}:${body.selector ?? ''}`)
         switch (body.action) {
           case 'waitFor':
           case 'click':
@@ -265,6 +277,7 @@ describe('browser publishing', () => {
     resetLeases()
     page = {
       navigatedTo: null,
+      calls: [],
       opened: 0,
       openPages: new Set(),
       fields: new Map(),
@@ -596,7 +609,7 @@ ${RECIPE}`
       seedDesk(db)
       const id = seedBrowserPublication(db, stub.apiBase, { status: 'PUBLISHED' })
 
-      await expect(stage(db, id)).rejects.toThrow(/only an approved publication can be staged/)
+      await expect(stage(db, id)).rejects.toThrow(/only a publication waiting to be sent can be staged/)
     })
   })
 
@@ -751,6 +764,245 @@ ${RECIPE}`
       await handoverFollowupHandler({ now: () => Date.now() + 24 * 60 * 60_000 })(db, id)
 
       expect(db.select().from(schema.publications).where(eqId(id)).get()?.status).toBe('PUBLISHED')
+    })
+  })
+
+  describe('the lease, while checking a sign-in', () => {
+    it('does not hand the browser away from a publish that is holding it', async () => {
+      /**
+       * `acquire` is re-entrant for the same publication and `release` is not
+       * refcounted, so a sign-in check called from inside a held lease used to
+       * release it — leaving the publish that was mid-flight without the browser
+       * it thought it had. Which is why staging checks the markers on its own
+       * tab rather than calling the probe.
+       */
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = seedBrowserPublication(db, stub.apiBase, {
+        recipe: `## Signed out\nwhen: input#email\n${RECIPE}`,
+      })
+
+      acquire('sidecar', id, 'LinkedIn')
+      await probeSignedIn(db, id)
+
+      expect(holder('sidecar')?.publicationId).toBe(id)
+    })
+  })
+
+  /**
+   * Publishing with nobody watching.
+   *
+   * The load-bearing test in here is the ordering one. Everything else is
+   * behaviour that would be caught by a person the first time it went wrong; a
+   * commit click that fires before the byte-compare would go wrong silently, and
+   * correctly, on every run where the page happened to agree.
+   */
+  describe('publishing itself', () => {
+    const AUTO_RECIPE = `## Stage
+wait:  button.compose
+click: button.compose
+fill:  div.editor <- body
+
+## Commit
+click: button.send
+
+## Verify
+read: a.permalink -> url
+`
+
+    const autoRow = (db: Db, options: Record<string, unknown> = {}) =>
+      seedBrowserPublication(db, stub.apiBase, {
+        status: 'SCHEDULED',
+        recipe: AUTO_RECIPE,
+        publish: 'auto',
+        scheduledFor: new Date(Date.now() - 60_000).toISOString(),
+        ...options,
+      })
+
+    it('composes, proves the bytes, presses send and reads back where it went', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      page.attributes.set('a.permalink|href', 'https://example.test/posts/9')
+      const id = autoRow(db)
+
+      await deliverPublication(db, id)
+
+      const row = db.select().from(schema.publications).where(eqId(id)).get()
+      expect(row?.status).toBe('PUBLISHED')
+      expect(row?.evidence).toBe('verified')
+      expect(row?.externalUrl).toBe('https://example.test/posts/9')
+      // Nobody was asked anything: it never passed through the waiting state.
+      expect(page.fields.get('div.editor')).toBe(BODY)
+
+      const commit = db.select().from(schema.publishTraces).all().find((t) => t.action === 'commit')
+      expect(commit?.selector).toBe('button.send')
+    })
+
+    it('never reaches the send button when the page disagrees with the payload', async () => {
+      /**
+       * The reason `## Commit` is a section of its own.
+       *
+       * Put the sending click at the end of `## Stage` and it runs *before* the
+       * comparison it is supposed to be gated on — so a composer that mangled
+       * the copy would publish the mangled version and only then be caught. The
+       * assertion is about order, not outcome: a `FAILED` row proves nothing on
+       * its own if the message already went out.
+       */
+      const { db } = openTestDb()
+      seedDesk(db)
+      page.mangle = (value) => value.replace('smaller', 'bigger')
+      const id = autoRow(db)
+
+      await expect(deliverPublication(db, id)).rejects.toThrow(/not what was approved/)
+
+      expect(page.calls).not.toContain('click:button.send')
+      const row = db.select().from(schema.publications).where(eqId(id)).get()
+      expect(row?.status).toBe('FAILED')
+      expect(row?.publishedAt).toBeNull()
+    })
+
+    it('waits for a busy browser instead of failing, and does not spend an attempt', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = autoRow(db)
+
+      // Somebody else is mid-publish. Nothing is wrong; the lane is simply taken.
+      acquire('sidecar', 'someone-else', 'Docmost — News')
+
+      await expect(deliverPublication(db, id)).rejects.toBeInstanceOf(Deferred)
+
+      const row = db.select().from(schema.publications).where(eqId(id)).get()
+      expect(row?.status).toBe('SCHEDULED')
+      expect(page.calls).toEqual([])
+    })
+
+    it('declines to send something too stale to go out unwatched', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = autoRow(db, {
+        urgency: 'breaking',
+        scheduledFor: new Date(Date.now() - 6 * 60 * 60_000).toISOString(),
+      })
+
+      await deliverPublication(db, id)
+
+      const row = db.select().from(schema.publications).where(eqId(id)).get()
+      expect(row?.status).toBe('EXPIRED')
+      // Not spiked and not rewritten — what it lost is the slot, and the
+      // judgement it wants back is one only a person can make.
+      expect(row?.payload).not.toBeNull()
+      expect(page.calls).toEqual([])
+
+      const codes = db.select().from(schema.events).all().map((e) => e.code)
+      expect(codes).toContain('SEND_EXPIRED')
+    })
+
+    it('queues the send again once somebody signs the browser back in', async () => {
+      /**
+       * The gap that would have parked every signed-out `auto` row forever: the
+       * hand-over path leaves the row waiting because its operator is standing
+       * on the live view, and an auto row has no operator standing anywhere.
+       */
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = autoRow(db, { recipe: `## Signed out\nwhen: input#email\n${AUTO_RECIPE}` })
+      page.fields.set('input#email', '')
+
+      await deliverPublication(db, id)
+      expect(db.select().from(schema.publications).where(eqId(id)).get()?.status).toBe('NEEDS_AUTH')
+
+      page.fields.delete('input#email')
+      db.delete(schema.jobs).run()
+      expect(await confirmSignedIn(db, id)).toBe(true)
+
+      // Back to approved, with the send queued — not left waiting for a person.
+      const row = db.select().from(schema.publications).where(eqId(id)).get()
+      expect(row?.status).toBe('SCHEDULED')
+      expect(db.select().from(schema.jobs).all().map((j) => j.kind)).toContain('publish')
+    })
+  })
+
+  /**
+   * Filing a draft and letting go.
+   *
+   * One guard matters more than the rest of this file put together: staging a
+   * detached row creates something real at the destination, so doing it twice
+   * does not retry anything — it files a duplicate, silently, at a place the
+   * desk cannot clean up.
+   */
+  describe('filing a draft and letting go', () => {
+    const detachedRow = (db: Db, options: Record<string, unknown> = {}) =>
+      seedBrowserPublication(db, stub.apiBase, {
+        status: 'SCHEDULED',
+        publish: 'detached',
+        scheduledFor: new Date(Date.now() - 60_000).toISOString(),
+        ...options,
+      })
+
+    it('stages at the slot, records the link and gives the browser back', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      page.attributes.set('a.permalink|href', 'https://example.test/p/news-child')
+      const id = detachedRow(db)
+
+      await deliverPublication(db, id)
+
+      const row = db.select().from(schema.publications).where(eqId(id)).get()
+      expect(row?.status).toBe('AWAITING_SEND')
+      expect(row?.draftUrl).toBe('https://example.test/p/news-child')
+      expect(row?.stagedAt).not.toBeNull()
+      // Nothing is held while the operator works — that is the whole difference.
+      expect(holder('sidecar')).toBeUndefined()
+      expect(page.openPages.size).toBe(0)
+    })
+
+    it('refuses to file a second copy, whatever asks it to', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = detachedRow(db, { status: 'AWAITING_SEND', draftUrl: 'https://example.test/p/already' })
+
+      await expect(stage(db, id)).rejects.toThrow(/already filed/)
+
+      // Not "it failed cleanly" — it never touched the browser at all. A guard
+      // that ran after opening a tab would still have created the page.
+      expect(page.opened).toBe(0)
+      expect(page.calls).toEqual([])
+      expect(db.select().from(schema.publications).where(eqId(id)).get()?.draftUrl).toBe(
+        'https://example.test/p/already',
+      )
+    })
+
+    it('checks that before it checks anything else, even a busy browser', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = detachedRow(db, { status: 'AWAITING_SEND', draftUrl: 'https://example.test/p/already' })
+      acquire('sidecar', 'someone-else', 'LinkedIn')
+
+      // If the lease were taken first, a busy browser would mask the duplicate
+      // with a retryable-looking error and the next attempt would file one.
+      await expect(stage(db, id)).rejects.toThrow(/already filed/)
+    })
+
+    it('leaves the draft on the row when the operator closes the screen', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = detachedRow(db, {
+        status: 'AWAITING_SEND',
+        draftUrl: 'https://example.test/p/already',
+      })
+      db.update(schema.publications)
+        .set({ stagedAt: new Date().toISOString() })
+        .where(eqId(id))
+        .run()
+
+      await abandon(db, id)
+
+      // `abandon` clears `staged_at` for a tethered row, which is right: nothing
+      // was composed anywhere. Here it would erase the only record that a real
+      // page exists under News.
+      const row = db.select().from(schema.publications).where(eqId(id)).get()
+      expect(row?.stagedAt).not.toBeNull()
+      expect(row?.draftUrl).toBe('https://example.test/p/already')
     })
   })
 })

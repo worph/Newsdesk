@@ -208,12 +208,22 @@ export function Live() {
     }
   }, [id, opened])
 
-  // Compose on arrival, but only for a row that is actually waiting to be sent.
+  /**
+   * Compose on arrival — but only for a row that has nothing composed yet.
+   *
+   * `draftUrl` is the thing that must be checked, not the mode: it says the desk
+   * already filed a page at the destination, and staging again would not retry
+   * anything, it would file a second copy. The server refuses that outright, so
+   * this is the second of the guards rather than the only one; what it buys is
+   * that the operator never sees an error for merely opening a screen.
+   */
+  const filed = Boolean(detail.data?.publication.draftUrl)
+
   useEffect(() => {
-    if (!id || status !== 'AWAITING_SEND') return
+    if (!id || status !== 'AWAITING_SEND' || filed) return
     if (staged || stage.isPending || busy || failed) return
     stage.mutate()
-  }, [id, status, staged, stage, busy, failed])
+  }, [id, status, filed, staged, stage, busy, failed])
 
   // Hold the browser while this screen is open, and give it back on the way out
   // rather than making the next person wait for the lease to time out.
@@ -338,6 +348,69 @@ export function Live() {
     )
   }
 
+  /**
+   * Already filed at the destination, so there is no browser work left to do.
+   *
+   * The page exists and the desk let the browser go the moment it was written.
+   * Opening a viewer here would be theatre at best; at worst it invites the one
+   * action that must never happen twice. So this screen is the link, and the
+   * two endings the row actually has.
+   */
+  if (filed) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-4 px-4 pb-16 md:px-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => navigate(`/review/${id}`)} className="text-sm text-desk-500 hover:text-desk-700">
+            ← the draft
+          </button>
+          <span className="text-desk-300 dark:text-desk-700">·</span>
+          <Badge tone="bg-desk-900 text-white dark:bg-desk-100 dark:text-desk-900">{outlet.name}</Badge>
+          <Badge>filed — yours to finish</Badge>
+        </div>
+
+        <h1 className="text-lg font-medium text-desk-900 dark:text-desk-100">{story.title}</h1>
+
+        <div className="space-y-3 rounded-lg border border-desk-200 p-4 text-sm dark:border-desk-800">
+          <p>
+            The desk wrote the approved copy into a new page on {outlet.name} and checked it back, then let
+            the browser go. Finish it there — in your own browser, taking as long as you like — and tell the
+            desk when you are done.
+          </p>
+          <a
+            href={publication.draftUrl ?? '#'}
+            target="_blank"
+            rel="noreferrer"
+            className="block truncate font-mono text-xs text-desk-700 underline underline-offset-2 dark:text-desk-300"
+          >
+            {publication.draftUrl}
+          </a>
+          <p className="text-xs text-desk-500">
+            The desk will not open this page again — doing so would file a second copy of it.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => sent.mutate()}
+            disabled={sent.isPending}
+            className="rounded-md bg-desk-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40 dark:bg-desk-100 dark:text-desk-900"
+          >
+            {sent.isPending ? 'Checking…' : "It's done"}
+          </button>
+          <button
+            onClick={() => navigate('/now')}
+            className="rounded-md border border-desk-300 px-3 py-1.5 text-sm dark:border-desk-700"
+          >
+            Not yet
+          </button>
+        </div>
+        {sent.error && (
+          <p className="text-sm text-red-700 dark:text-red-300">{(sent.error as Error).message}</p>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto max-w-7xl space-y-4 px-4 pb-16 md:px-6">
       <div className="flex flex-wrap items-center gap-2">
@@ -410,9 +483,17 @@ export function Live() {
             </div>
           </div>
 
+          {/*
+            When the recipe names the button, put it on screen. The desk does not
+            press it — that is the entire point of this mode — but reading prose
+            on a phone and then hunting for the control it describes is the part
+            of a hand-over a screencast makes worse, and the recipe already knows
+            the answer.
+          */}
           <Viewer
             viewer={viewerInfo.data}
             title={`${outlet.name} in the desk's browser`}
+            focusSelector={staged.commitSelector ?? undefined}
             onLost={() => setStaged(null)}
           />
 

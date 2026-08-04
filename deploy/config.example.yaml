@@ -175,8 +175,22 @@ outlets:
   # ── an outlet with no API ─────────────────────────────────────────────────
   # Some destinations have no MCP bridge and no webhook, and some forbid
   # automated posting outright. A browser outlet publishes the way a person
-  # would: the desk opens the page, types the copy you approved, checks it byte
-  # for byte, and then stops — you press the destination's own publish button.
+  # would: the desk opens the page, types the copy you approved, and checks it
+  # byte for byte before anything is clicked.
+  #
+  # `publish` says who finishes it, and it is the field on this whole file worth
+  # reading twice:
+  #
+  #   auto      the desk runs `## Commit` itself and verifies. Nobody is asked.
+  #   tethered  it composes, stops, and you press the destination's own button
+  #             in the viewer. This is the default when the field is absent.
+  #   detached  it files a durable draft, hands you the link, and lets go — you
+  #             finish it in your own browser, whenever.
+  #
+  # `requires_human: true` refuses `auto` for this outlet permanently, which is
+  # what a destination whose *terms* need a person should carry. The mode is one
+  # word; that line is the thing that makes flipping it a decision rather than
+  # a typo.
   #
   # Needs the `browser` compose profile running. See docs/browser-publishing.md.
   #
@@ -187,6 +201,9 @@ outlets:
   #   driver: browser
   #   voice: alicia
   #   engine: sidecar
+  #   # LinkedIn is in scope precisely *because* a human presses the button.
+  #   publish: tethered
+  #   requires_human: true
   #   args:
   #     # The page, pinned. The desk navigates here itself and the recipe never
   #     # names it — a destination in prose an assistant helps edit is exactly

@@ -90,6 +90,8 @@ interface PublicationRow {
   outletName: string | null
   outletId: string
   slots: string | null
+  /** Set only once something has actually been filed at the destination. */
+  draftUrl: string | null
   createdAt: string | null
   scheduledFor: string | null
 }
@@ -123,14 +125,30 @@ function publicationAction(row: PublicationRow): DeskAction {
         overdue: true,
       }
     case 'AWAITING_SEND':
-      return {
-        ...base,
-        kind: 'publish',
-        verb: 'Publish it',
-        because: `approved and due — ${where} needs you to press their button`,
-        href: `/review/${row.id}/live`,
-        overdue: true,
-      }
+      /**
+       * Two quite different jobs wear this status, and sending someone to the
+       * wrong one is not a wording problem. A tethered row wants the live view,
+       * where opening the screen is what composes the page. A detached row is
+       * already filed — its page exists at the destination — and `/live` would
+       * try to compose it a second time.
+       */
+      return row.draftUrl
+        ? {
+            ...base,
+            kind: 'publish',
+            verb: 'Confirm it',
+            because: `filed on ${where} and waiting for you to finish it`,
+            href: `/review/${row.id}`,
+            overdue: true,
+          }
+        : {
+            ...base,
+            kind: 'publish',
+            verb: 'Publish it',
+            because: `approved and due — ${where} needs you to press their button`,
+            href: `/review/${row.id}/live`,
+            overdue: true,
+          }
     case 'FAILED':
       return {
         ...base,
@@ -172,6 +190,7 @@ export function listActions(db: Db, limit = 100): DeskAction[] {
       outletName: schema.outlets.name,
       storyOrigin: schema.stories.origin,
       slots: schema.publications.slots,
+      draftUrl: schema.publications.draftUrl,
       scheduledFor: schema.publications.scheduledFor,
       createdAt: schema.stories.createdAt,
     })

@@ -137,11 +137,14 @@ export async function probeSignedIn(db: Db, publicationId: string): Promise<bool
    * here would send an operator to sign in to something that is already fine,
    * and staging checks again anyway.
    *
-   * ⚠️ Only call this from *outside* a lease. `release` is not refcounted while
-   * `acquire` is re-entrant, so calling it from within one gives the browser
-   * away mid-publish — which is why the actual looking lives in
-   * `signedOutMarkerFound`, and why staging calls that instead of this.
+   * ⚠️ It gives the browser back only if it took it. `acquire` is re-entrant for
+   * the same publication and `release` is not refcounted, so a probe called from
+   * inside a lease — which is exactly what `confirmSignedIn` does, with the
+   * operator sitting on the sign-in screen holding one — used to hand the
+   * browser away from the thing still using it.
    */
+  const alreadyOurs = holder(loaded.engine.id)?.publicationId === publicationId
+
   try {
     acquire(loaded.engine.id, publicationId, loaded.outlet.name, { ttlMs: 60_000 })
   } catch (err) {
@@ -151,10 +154,13 @@ export async function probeSignedIn(db: Db, publicationId: string): Promise<bool
 
   try {
     const url = destinationUrl(loaded)
-    await browser.navigate(loaded.engine, url)
-    return !(await signedOutMarkerFound(db, loaded, undefined, url))
+    // On our own tab when we already had one, so the answer is about the page
+    // the publish is actually working in rather than about page 0.
+    const pageId = alreadyOurs ? holder(loaded.engine.id)?.pageId : undefined
+    await browser.navigate(loaded.engine, url, pageId)
+    return !(await signedOutMarkerFound(db, loaded, pageId, url))
   } finally {
-    release(loaded.engine.id, publicationId)
+    if (!alreadyOurs) release(loaded.engine.id, publicationId)
   }
 }
 
@@ -498,19 +504,26 @@ export async function stage(db: Db, publicationId: string): Promise<StagedPage> 
   }
 
   /**
-   * Who may ask for a stage depends on who finishes.
+   * Who may ask for a stage depends on who finishes, and the two answers are
+   * deliberately different rather than one permissive list.
    *
-   * A hand-over row is staged when its operator opens it, so it is already
-   * waiting. An `auto` row is staged by delivery the moment its slot fires, so
-   * it is still `APPROVED` or `SCHEDULED` — and a `FAILED` one is a human
-   * pressing retry on either.
+   * An `auto` row is staged by delivery the moment its slot fires, so it is
+   * still `APPROVED` or `SCHEDULED`. A hand-over row is staged when its operator
+   * opens it, by which time the slot has already put it in `AWAITING_SEND` —
+   * letting it stage from `APPROVED` would let a caller compose a page ahead of
+   * a slot the desk committed to, which is the scheduling promise quietly not
+   * being kept. `FAILED` is a human pressing retry on either.
    */
-  const STAGEABLE = ['AWAITING_SEND', 'APPROVED', 'SCHEDULED', 'FAILED']
-  if (!STAGEABLE.includes(loaded.publication.status)) {
+  const stageable =
+    mode === 'auto' ? ['APPROVED', 'SCHEDULED', 'AWAITING_SEND', 'FAILED'] : ['AWAITING_SEND', 'FAILED']
+
+  if (!stageable.includes(loaded.publication.status)) {
     throw new McpError(
       loaded.publication.status === 'NEEDS_AUTH'
         ? 'the browser is signed out of this destination — sign it back in first'
-        : `this is ${loaded.publication.status.toLowerCase()} — only an approved publication can be staged`,
+        : mode === 'auto'
+          ? `this is ${loaded.publication.status.toLowerCase()} — only an approved publication can be staged`
+          : `this is ${loaded.publication.status.toLowerCase()} — only a publication waiting to be sent can be staged`,
       false,
     )
   }

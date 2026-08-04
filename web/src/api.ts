@@ -65,14 +65,24 @@ export interface Outlet {
   name: string
   description: string
   role: 'publish' | 'notify'
-  driver: 'mcp' | 'webhook' | 'builtin'
+  driver: 'mcp' | 'webhook' | 'builtin' | 'browser'
   enabled: boolean
   voice?: string
   endpoint?: string
   tool?: string
   destination_key?: string
   args: Record<string, unknown>
+  /** browser driver only. */
+  engine?: string
+  recipe?: string
+  /** How a publish here finishes. Absent reads as `tethered`. */
+  publish?: PublishMode
+  /** This destination's terms require a person; `auto` is refused for it. */
+  requires_human?: boolean
 }
+
+/** Mirrors PUBLISH_MODES in @newsdesk/shared — see docs/browser-publishing.md §4.1. */
+export type PublishMode = 'auto' | 'tethered' | 'detached'
 
 export interface AppConfig {
   charter: string
@@ -414,6 +424,11 @@ export interface PublicationDetail {
     scheduledFor: string | null
     urgency: string | null
     publishedAt: string | null
+    /** Set once a `detached` publish has filed something at the destination. */
+    draftUrl: string | null
+    /** verified | attested | edited — how the desk knows it went out. */
+    evidence: string | null
+    stagedAt: string | null
   }
   story: {
     id: string
@@ -423,7 +438,17 @@ export interface PublicationDetail {
     dedupVerdict: string
     origin: string
   }
-  outlet: { id: string; name: string; description: string; role: string; driver: string; tool: string | null }
+  outlet: {
+    id: string
+    name: string
+    description: string
+    role: string
+    driver: string
+    tool: string | null
+    /** Null for every non-browser driver. */
+    publish: PublishMode | null
+    requiresHuman: boolean
+  }
   slotSpec: Record<string, SlotDef>
   preview: PayloadPreview
   siblings: Sibling[]
@@ -443,8 +468,14 @@ export interface CalendarEntry {
   storyTitle: string | null
   outletId: string
   outletName: string | null
-  /** `browser` means the slot is a hand-over time, not a send time. */
   driver: string | null
+  /**
+   * For a browser outlet, what its slot means: `auto` is a send time like any
+   * other, the hand-over modes are when it is put in front of a person. Null for
+   * every other driver. Resolved on the server — the web app cannot read the
+   * shared defaults.
+   */
+  mode: PublishMode | null
   status: string
   urgency: string | null
   scheduledFor: string | null
@@ -520,6 +551,12 @@ export interface StagedPage {
   publicationId: string
   outletName: string
   handover: string
+  mode: PublishMode
+  /**
+   * The button the operator is being asked to press, when the recipe names one.
+   * Advisory: the desk clicks it only under `auto`.
+   */
+  commitSelector: string | null
   screenshotPath: string | null
   stagedAt: string
   lease: { expiresAt: string }

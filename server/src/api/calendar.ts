@@ -1,3 +1,4 @@
+import { publishModeOf, type PublishMode } from '@newsdesk/shared'
 import { and, eq, gte, lte, or } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
@@ -51,12 +52,16 @@ export function registerCalendarRoutes(app: FastifyInstance, db: Db): void {
         outletId: schema.publications.outletId,
         outletName: schema.outlets.name,
         /**
-         * A browser outlet's slot is not when the post goes out — it is when it
-         * is put in front of an operator, who presses the destination's own
-         * button whenever they get to it. Two entries that mean different
-         * things must not look alike, so the driver travels with the entry.
+         * What a browser slot *means* depends on how the outlet finishes, and
+         * there are three answers rather than two. Under `auto` it is a send
+         * time like any other. Under a hand-over mode it is when the post is put
+         * in front of a person, who publishes it whenever they get to it — which
+         * may be hours later. Entries that mean different things must not look
+         * alike, so both travel with the entry and the mode is resolved here
+         * rather than in the web app, which cannot read the shared defaults.
          */
         driver: schema.outlets.driver,
+        publish: schema.outlets.publish,
         status: schema.publications.status,
         urgency: schema.publications.urgency,
         scheduledFor: schema.publications.scheduledFor,
@@ -81,7 +86,14 @@ export function registerCalendarRoutes(app: FastifyInstance, db: Db): void {
      * that quietly disagrees with the outlet is worse than no calendar.
      */
     const entries = rows
-      .map((row) => ({ ...row, at: row.publishedAt ?? row.scheduledFor }))
+      .map(({ publish, ...row }) => ({
+        ...row,
+        mode:
+          row.driver === 'browser'
+            ? publishModeOf({ publish: (publish ?? undefined) as PublishMode | undefined })
+            : null,
+        at: row.publishedAt ?? row.scheduledFor,
+      }))
       .filter((row): row is typeof row & { at: string } => Boolean(row.at))
       // A post scheduled inside the range but sent just outside it lands on the
       // day it was sent, which may be the next month. Re-filter so the answer

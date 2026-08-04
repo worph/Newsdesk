@@ -118,6 +118,10 @@ outlets:
     driver: browser
     voice: alicia
     engine: sidecar
+    # The desk composes the page and stops; you press their button in the
+    # viewer. Written out rather than left to the default, because this outlet
+    # exists to demonstrate the mode.
+    publish: tethered
     args:
       # The page, pinned. The desk navigates here itself; the recipe never
       # names it, because a destination in prose is a destination a model or an
@@ -157,6 +161,19 @@ outlets:
     driver: browser
     voice: alicia
     engine: sidecar
+    # `auto`, and Docmost is the outlet that forced the whole mode to exist.
+    #
+    # It has no publish button — it saves as the desk types — so the page is live
+    # the moment the body is filled. The desk used to compose it, make it live,
+    # and then ask you to confirm you had sent it: a confirmation that confirmed
+    # nothing, recorded in the ledger as `attested`, "on the operator's word",
+    # for something the desk had done entirely by itself.
+    #
+    # Now it files the page, reads the permalink back, and tells you afterwards
+    # with the link. Nothing about the risk changed — the page went live at the
+    # slot either way. What changed is that the desk stopped pretending it
+    # needed you. Edit the page whenever you like; it is a wiki.
+    publish: auto
     args:
       # The parent page, pinned. The desk navigates here itself and files the
       # new page underneath it; the recipe never names it, because a destination
@@ -214,18 +231,84 @@ outlets:
       fill:  .page-title .ProseMirror[contenteditable="true"] <- title
       fill:  .editor-container .ProseMirror[contenteditable="true"] <- body
 
-      ## Hand over
-      Docmost has no publish button — it saves as the desk types, so this page
-      is already live under News. Read it, fix anything you want to fix, and
-      confirm here.
+      There is no `## Commit` section and no `## Hand over` one, and both
+      absences are the destination speaking. Nothing here needs pressing — the
+      fills above are the publish. And nobody is asked afterwards, because there
+      would be nothing to ask.
 
       Note: staging creates the page. If it fails partway you may find an
-      "untitled" page under News; delete it.
+      "untitled" page under News; delete it. A destination that saves as you
+      type has no dry run, and the desk does not pretend otherwise.
 
       ## Verify
       Once filed, the selected row in the tree is the new page, and its href is
       the permalink — Docmost rebuilds the slug from the headline.
       read: a.isSelected -> url
+
+  # The destination with a real send button, which Docmost and the composer
+  # fixture between them do not demonstrate. It exists to show `## Commit`:
+  # everything above the compare is staging, the click below it is the send, and
+  # the ordering between the two is the whole reason the section exists.
+  #
+  # Switch `publish` between `auto` and `tethered` and nothing else changes. On
+  # `auto` the desk presses send itself; on `tethered` it composes, stops, and
+  # points you at the same button — the commit steps are read by the viewer and
+  # never executed. One recipe, two levels of trust, one word between them.
+  #
+  # ⚠️ Selectors are illustrative — Telegram Web's DOM is not stable enough to
+  # ship a recipe for it untested. Point this at a test chat and fix the
+  # selectors against the real page before trusting it with anything.
+  - id: telegram-broadcast
+    name: Telegram — test channel
+    description: |
+      A Telegram channel, published the way a person would rather than through
+      the bot API. Short posts, sent as they are approved.
+    role: publish
+    driver: browser
+    voice: alicia
+    engine: sidecar
+    publish: tethered
+    args:
+      url: "https://web.telegram.org/a/#-1000000000000"
+      body:
+        slot: text
+        label: Post
+        max: 4096
+        primary: true
+        hint: |
+          Plain prose. This is filled in one insertion, so no markdown — the
+          characters would be published literally.
+    recipe: |
+      ## Signed out
+      Telegram Web shows the QR sign-in page when there is no session, and its
+      country selector never appears on a logged-in client.
+      when: .qr-container
+
+      ## Stage
+      The message box is the composer at the foot of the open chat. Filling it
+      is not sending it — Telegram keeps an unsent draft per chat, server-side,
+      which is exactly why this destination can be tethered at all.
+      wait: div#editable-message-text
+      fill: div#editable-message-text <- body
+
+      ## Commit
+      The send button is only enabled once the box has content, so the wait is
+      not decoration — without it the click can land on a disabled control and
+      quietly do nothing, leaving a draft nobody sent.
+
+      Everything above has already been read back and compared against the
+      approved copy by the time this runs. That ordering is the point: a send
+      click among the stage steps would fire before the check that guards it.
+      wait:  button.send:not([disabled])
+      click: button.send
+
+      ## Hand over
+      Read the message in the viewer, then press the blue send arrow.
+
+      ## Verify
+      The message that just went appears last in the thread, and its own link is
+      on the timestamp.
+      read: div.message.own:last-of-type a.message-time -> url
 
 # ── Reporting ───────────────────────────────────────────────────────────────
 # Switched OFF in dev: the phase needs a search endpoint the dev stack can

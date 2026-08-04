@@ -57,25 +57,35 @@ function Chip({ entry, onOpen }: { entry: CalendarEntry; onOpen: () => void }) {
   })
 
   /**
-   * A browser slot is not a send time. It is the moment the desk stops and asks
-   * someone to publish it by hand, and the post goes out whenever they do —
-   * which may be an hour later. Marking it keeps the calendar honest about the
-   * difference rather than showing two unlike things as one.
+   * What the time on a browser entry means, which is three things rather than
+   * two. Under `auto` it is a send time like any other row on the grid. Under a
+   * hand-over mode it is when the post is put in front of a person, and it goes
+   * out whenever they get to it — which may be hours later, or tomorrow.
+   *
+   * `detached` is marked differently again: by its slot the page already exists
+   * at the destination, so the outstanding work is finishing it rather than
+   * publishing it. Showing three unlike things alike is the failure worth
+   * avoiding here.
    */
-  const byHand = entry.driver === 'browser' && entry.status !== 'PUBLISHED'
+  const pending = entry.status !== 'PUBLISHED'
+  const mark = !pending || entry.mode === 'auto' ? null : entry.mode === 'detached' ? '📝' : '✋'
+  const note =
+    mark === '✋'
+      ? ' — you publish this one by hand'
+      : mark === '📝'
+        ? ' — filed for you to finish'
+        : ''
 
   return (
     <button
       onClick={onOpen}
-      title={`${entry.storyTitle ?? entry.storyId} → ${entry.outletName ?? entry.outletId}${
-        byHand ? ' — you publish this one by hand' : ''
-      }`}
+      title={`${entry.storyTitle ?? entry.storyId} → ${entry.outletName ?? entry.outletId}${note}`}
       className={`block w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] ${
         TONE[entry.status] ?? 'bg-desk-200 text-desk-700 dark:bg-desk-800 dark:text-desk-300'
       }`}
     >
       <span className="font-mono opacity-70">{time}</span>
-      {byHand && <span aria-hidden> ✋</span>} {entry.storyTitle ?? entry.storyId}
+      {mark && <span aria-hidden> {mark}</span>} {entry.storyTitle ?? entry.storyId}
     </button>
   )
 }

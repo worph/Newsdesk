@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto'
 // Aliased: `slotsOf` imported from the approval module answers a different
 // question — the values a publication holds, not the slots its outlet declares.
-import { slotsOf as declaredSlots, type ArgsSpec } from '@newsdesk/shared'
+import {
+  publishModeOf,
+  slotsOf as declaredSlots,
+  type ArgsSpec,
+  type PublishMode,
+} from '@newsdesk/shared'
 import { asc, eq, inArray, sql } from 'drizzle-orm'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
@@ -11,6 +16,7 @@ import { schema } from '../db/index.js'
 import { logEvent } from '../events.js'
 import {
   approvePublication,
+  abandonDraft,
   closedReason,
   load,
   mergeContext,
@@ -190,6 +196,14 @@ export function registerPublicationRoutes(
         role: loaded.outlet.role,
         driver: loaded.outlet.driver,
         tool: loaded.outlet.tool,
+        // How this one finishes, resolved here — the review and live screens
+        // both describe what is about to happen, and they cannot describe it
+        // from the driver alone any more.
+        publish:
+          loaded.outlet.driver === 'browser'
+            ? publishModeOf({ publish: (loaded.outlet.publish ?? undefined) as PublishMode | undefined })
+            : null,
+        requiresHuman: Boolean(loaded.outlet.requiresHuman),
       },
       // Only the authoring slots are reviewable; literals and derived values
       // appear in the payload preview instead.
@@ -384,10 +398,32 @@ export function registerPublicationRoutes(
     if (loaded.publication.status === 'PUBLISHED') {
       return reply.code(409).send({ error: 'this has already been published' })
     }
+    /**
+     * A filed draft has nothing to retry. Re-running delivery would stage again
+     * — and staging a detached row is not an attempt at something, it is the
+     * creation of something, so a "retry" here files a second page.
+     */
+    if (loaded.publication.draftUrl) {
+      return reply.code(409).send({
+        error: `this is already filed on ${loaded.outlet.name} — finish it there, or mark the draft abandoned. Re-sending would file a second copy.`,
+        draftUrl: loaded.publication.draftUrl,
+      })
+    }
     if (!enqueuePublish) return reply.code(503).send({ error: 'no publisher is wired on this instance' })
 
     enqueuePublish(id)
     return reply.code(202).send({ queued: true })
+  })
+
+  /** Give up on a draft filed at a destination the desk cannot tidy up. */
+  app.post('/api/v1/publications/:id/abandon-draft', { preHandler: requireSession }, async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const body = z.object({ reason: z.string().max(500).optional() }).safeParse(request.body ?? {})
+    if (!body.success) return reply.code(400).send({ error: 'reason must be a short string' })
+
+    const result = abandonDraft(db, id, body.data.reason)
+    if (!result.ok) return reply.code(result.status).send({ error: result.error })
+    return { status: result.status }
   })
 
   /**

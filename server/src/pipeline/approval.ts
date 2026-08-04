@@ -104,6 +104,12 @@ export function closedReason(status: string): string | undefined {
       return 'this has already been published'
     case 'REJECTED':
       return 'this was spiked'
+    case 'EXPIRED':
+      // Reopenable, unlike everything else down here: the copy is untouched and
+      // still approved. What it lost was its slot.
+      return 'this went too stale to send unwatched — withdraw it to edit, or give it a new time'
+    case 'ABANDONED_DRAFT':
+      return 'a draft of this was left unfinished at the destination — only a person can resolve that'
     default:
       return `this is ${status.toLowerCase()}`
   }
@@ -335,7 +341,7 @@ export function withdrawPublication(db: Db, id: string): Outcome<{ status: 'AWAI
   const loaded = load(db, id)
   if (!loaded) return { ok: false, status: 404, error: 'no such publication' }
 
-  const withdrawable = ['SCHEDULED', 'AWAITING_SEND', 'NEEDS_AUTH']
+  const withdrawable = ['SCHEDULED', 'AWAITING_SEND', 'NEEDS_AUTH', 'EXPIRED']
   if (!withdrawable.includes(loaded.publication.status)) {
     return {
       ok: false,
@@ -344,6 +350,23 @@ export function withdrawPublication(db: Db, id: string): Outcome<{ status: 'AWAI
         loaded.publication.status === 'APPROVED'
           ? 'this was approved to send immediately — it is already on its way'
           : `only a scheduled or staged publication can be withdrawn — this is ${loaded.publication.status.toLowerCase()}`,
+    }
+  }
+
+  /**
+   * A draft exists at the destination, so "nothing external has happened" — the
+   * sentence this whole function is built on — is simply false.
+   *
+   * Resetting the row here would leave a real page at a real destination with
+   * nothing in the desk pointing at it, and the desk cannot tidy that up itself:
+   * deleting somebody's draft is not a thing it should ever do. So it refuses,
+   * and offers the one honest ending instead. See docs/browser-publishing.md §5.
+   */
+  if (loaded.publication.draftUrl) {
+    return {
+      ok: false,
+      status: 409,
+      error: `this is already filed on ${loaded.outlet.name} — withdrawing it here would leave that draft there with nothing pointing at it. Finish it, or mark the draft abandoned.`,
     }
   }
 
@@ -378,6 +401,53 @@ export function withdrawPublication(db: Db, id: string): Outcome<{ status: 'AWAI
   })
 
   return { ok: true, status: 'AWAITING_APPROVAL' }
+}
+
+/**
+ * Give up on a draft that was filed and never finished.
+ *
+ * The one ending a `detached` row has that is neither published nor withdrawn.
+ * Something real exists at the destination; the desk will not delete it and
+ * cannot pretend it is not there, so the row becomes a permanent note saying
+ * exactly that, with the link still on it. Only a person can resolve what is at
+ * the other end, and this is the desk saying so rather than tidying the evidence
+ * away. See docs/browser-publishing.md §5.
+ */
+export function abandonDraft(db: Db, id: string, reason?: string): Outcome<{ status: 'ABANDONED_DRAFT' }> {
+  const loaded = load(db, id)
+  if (!loaded) return { ok: false, status: 404, error: 'no such publication' }
+
+  const draftUrl = loaded.publication.draftUrl
+  if (!draftUrl) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'nothing was filed for this — withdraw it instead, which leaves nothing behind',
+    }
+  }
+  if (loaded.publication.status === 'PUBLISHED') {
+    return { ok: false, status: 409, error: 'this already went out' }
+  }
+
+  db.transaction((tx) => {
+    cancelPendingSend(tx, id)
+    tx.update(schema.publications)
+      .set({ status: 'ABANDONED_DRAFT', error: null })
+      .where(eq(schema.publications.id, id))
+      .run()
+  })
+
+  logEvent(db, {
+    level: 'warn',
+    actor: 'human',
+    code: 'DRAFT_ABANDONED',
+    storyId: loaded.publication.storyId,
+    publicationId: id,
+    message: `left unfinished on ${loaded.outlet.name} — the draft is still there`,
+    detail: { outletId: loaded.outlet.id, draftUrl, ...(reason ? { reason } : {}) },
+  })
+
+  return { ok: true, status: 'ABANDONED_DRAFT' }
 }
 
 /**

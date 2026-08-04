@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { AppConfig, ConfigIssue, Outlet, Stringer, StringerKind, Voice } from '../api'
+import type { AppConfig, ConfigIssue, Outlet, PublishMode, Stringer, StringerKind, Voice } from '../api'
 
 /**
  * The plain-prose half of the configuration: the charter, the voices, and who
@@ -604,6 +604,64 @@ function slotLabels(outlet: Outlet): string[] {
     .map((slot) => `${slot.label}${slot.primary ? ' ★' : ''}`)
 }
 
+/**
+ * How a browser destination finishes — the one decision on this screen that
+ * changes whether the desk sends without you.
+ *
+ * Worth a control rather than a line in the YAML editor for exactly that
+ * reason: it is a one-word change with a large consequence, and burying it in a
+ * document nobody reads end to end is how it gets flipped by accident. Each
+ * option says what it *does*, not what it is called.
+ *
+ * A destination marked `requires_human` cannot be set to `auto` at all — the
+ * option is shown, disabled, with the reason, because hiding it would make the
+ * constraint look like a missing feature.
+ */
+const PUBLISH_MODES: Array<{ id: PublishMode; label: string; because: string }> = [
+  { id: 'auto', label: 'The desk publishes it', because: 'composed, checked and sent at its slot — you are told afterwards' },
+  { id: 'tethered', label: 'You press their button', because: 'the desk composes the page and stops; you finish it in the viewer' },
+  { id: 'detached', label: 'The desk files a draft', because: 'filed at the destination with a link — finish it in your own browser' },
+]
+
+function PublishModePicker({
+  outlet,
+  onChange,
+}: {
+  outlet: Outlet
+  onChange: (mode: PublishMode) => void
+}) {
+  const current = outlet.publish ?? 'tethered'
+
+  return (
+    <div className="space-y-1.5">
+      {PUBLISH_MODES.map((mode) => {
+        const forbidden = mode.id === 'auto' && Boolean(outlet.requires_human)
+        return (
+          <label
+            key={mode.id}
+            className={`flex gap-2 text-sm ${forbidden ? 'opacity-45' : 'cursor-pointer'}`}
+          >
+            <input
+              type="radio"
+              name={`publish-${outlet.id}`}
+              checked={current === mode.id}
+              disabled={forbidden}
+              onChange={() => onChange(mode.id)}
+              className="mt-1"
+            />
+            <span>
+              <span className="font-medium">{mode.label}</span>
+              <span className="block text-xs text-desk-500">
+                {forbidden ? 'this destination is marked as requiring a person' : mode.because}
+              </span>
+            </span>
+          </label>
+        )
+      })}
+    </div>
+  )
+}
+
 export function DestinationsForm({
   config,
   onChange,
@@ -615,8 +673,8 @@ export function DestinationsForm({
   return (
     <div className="space-y-4">
       <p className="text-sm text-desk-500">
-        Where the desk can send a story. You can switch one off here; adding or rewiring one still
-        happens in{' '}
+        Where the desk can send a story. You can switch one off here, and choose how a browser
+        destination finishes; adding or rewiring one still happens in{' '}
         <button type="button" onClick={onOpenAdvanced} className="underline underline-offset-2">
           Advanced
         </button>{' '}
@@ -670,6 +728,20 @@ export function DestinationsForm({
                 <>
                   <dt className="text-xs text-desk-500 uppercase">You review</dt>
                   <dd>{slots.join(', ')}</dd>
+                </>
+              )}
+
+              {outlet.driver === 'browser' && (
+                <>
+                  <dt className="text-xs text-desk-500 uppercase">Finishing</dt>
+                  <dd>
+                    <PublishModePicker
+                      outlet={outlet}
+                      onChange={(publish) =>
+                        setOutlets(config.outlets.map((o, i) => (i === index ? { ...o, publish } : o)))
+                      }
+                    />
+                  </dd>
                 </>
               )}
             </dl>

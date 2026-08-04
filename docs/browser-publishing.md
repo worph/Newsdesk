@@ -30,7 +30,25 @@
 > publish finishes is a field on the outlet, not an inference from which sections the recipe happens
 > to have**, and there are three ways it can finish rather than two (§4.1). §2 narrows what the
 > byte-compare claims once a person is allowed to edit; §4.5 rebuilds nagging and expiry around how
-> the desk is actually used. Design only: nothing marked `auto`, `tethered` or `detached` is built.
+> the desk is actually used.
+>
+> **Shipped 2026-08-04.** All three modes, `## Commit`, `requires_human`, the autonomous path and the
+> never-file-twice guard are in the working tree with tests. Five things the implementation corrected
+> in the design above, each marked ⓘ where it appears:
+>
+> 1. **`detached` requires `## Verify` too**, not only `auto` — the permalink it reads is the only
+>    record that a draft exists, and therefore the only thing the duplicate guard can key on.
+> 2. **`edited` is `tethered`-only for now.** Under `detached` the lane is long gone by the time
+>    anyone confirms, and re-reading the fields means navigating back and running the fill selectors
+>    as reads — composing again in all but name. Recorded as not-re-read rather than assumed unchanged.
+> 3. **An expired `auto` row goes to `EXPIRED`, not back to `APPROVED`.** `APPROVED` means *queued to
+>    send*, which is the one thing it is not.
+> 4. **`publish` is optional rather than defaulted**, so a document does not grow the field on every
+>    outlet that never wanted one. `publishModeOf` owns the default.
+> 5. **Three bugs surfaced in code that already shipped**, listed in §14.
+>
+> Deferred, unchanged from the plan: lane depth 2 / stage-one-ahead, the per-story override, and the
+> Configuration-screen work beyond the mode picker (recipe editor, trial run, Add destination).
 
 ---
 
@@ -114,6 +132,13 @@ more and stores what actually shipped**, alongside a diff against the frozen pay
 those differ is graded `edited` (§5) and the ledger holds the artifact rather than a payload the
 destination stopped matching half an hour ago. Without that read-back the desk would keep a record
 that is merely plausible, which is the failure mode this whole document exists to avoid.
+
+ⓘ **Shipped for `tethered` only.** Under `detached` the lane was released the moment the draft was
+filed and the tab is long gone, so re-reading means navigating back and running the `## Stage` fill
+selectors as reads — which takes the lane and is composing again in everything but name. Those rows
+record `reread: false` in the trace instead. That is deliberately not the same as recording "it was
+unchanged": claiming a comparison that never happened is the precise sin this section exists to
+correct, and it would be an odd place to commit it.
 
 ## 3. The cookbook
 
@@ -243,7 +268,14 @@ Rules the validator enforces:
   over`**, because prose telling an operator what to press under an outlet that presses it itself is
   a contradiction rather than a harmless leftover.
 - **The hand-over modes require `## Hand over`.** There has to be something to tell the person.
-- **`requires_human: true` refuses `publish: auto`**, whatever the recipe says.
+- ⓘ **`detached` requires `## Verify` as well.** Not in the first draft of this design, and the
+  omission mattered: the permalink that section reads is what `draft_url` is set from, and
+  `draft_url` is the single predicate that stops a reopened row filing a second page. A detached
+  outlet that cannot say where its draft went has no hand-over *and* no guard — strictly worse than
+  a tethered one.
+- **`requires_human: true` refuses `publish: auto`**, whatever the recipe says. Checked again in
+  `resolveMode` at the moment of use, not only at save time: validation covers configuration written
+  through the desk, and the duplication covers a row written round it.
 
 ## 4. Flow — three ways a publish finishes
 
@@ -330,9 +362,9 @@ slot fires
    └► PUBLISHED (verified) ──► push "sent to Telegram — <link>"
 ```
 
-**Docmost — `driver: browser`, `publish: detached`, no `## Commit`.** The destination that started
-all this. Filling *is* committing, so there is no button and no gate; what the desk hands over is a
-finished page and a link.
+**Docmost — `driver: browser`, `publish: auto`, no `## Commit` and no `## Hand over`.** The
+destination that started all this. Filling *is* committing, so there is no button, no gate, and —
+this is the part that changed — nobody to ask.
 
 ```
 slot fires
@@ -343,14 +375,22 @@ slot fires
    ├► COMPARE     └─ mismatch ──► FAILED, **and the page exists anyway**: the row says so,
    │                              and names the untitled page to go and delete
    ├► ## Verify   read the new page's permalink
-   ├► release the lane entirely
-   └► push "filed on Docmost — <link>"          ◆ HUMAN edits it whenever, wherever
-                                                ◆ HUMAN confirms here → PUBLISHED (verified | edited)
+   ├► PUBLISHED (verified) · release the lane
+   └► push "Published on Docmost"               ◆ HUMAN edits the page whenever — it is a wiki
 ```
+
+ⓘ *The design first put Docmost on `detached`, and that was still one confirmation too many.*
+`detached` asks a person to come back and say the draft is finished; on a page that was live and
+complete the moment it was written, there is nothing for them to finish and nothing to confirm.
+Docmost ended up `auto` — which was the original complaint, stated plainly: *it can clearly publish
+without me, yet it still asks*.
 
 The compare here runs *after* the destination has been written. It proves what is on the page; it
 cannot prevent it being there. That was already true before this rewrite — the only thing that
 changes is that the desk stops implying otherwise with a button labelled *Sent*.
+
+`detached` therefore ships with no destination using it. Its guards are tested and unexercised until
+Medium is wired up, and that is worth knowing when the first one goes live.
 
 **LinkedIn — `driver: browser`, `publish: tethered`, `requires_human: true`.**
 
@@ -386,7 +426,8 @@ frozen there.** What the viewer is for is the *page*.
 |---|---|---|---|---|---|
 | Telegram · mcp | ✔ | — | — | — | — |
 | Telegram · browser `auto` | ✔ | ✔ | desk | **desk** (`## Commit`) | — |
-| Docmost · `detached` | ✔ | ✔ | desk | n/a — autosave | ✔ |
+| Docmost · `auto` | ✔ | ✔ | desk | n/a — autosave | — |
+| *(Medium · `detached`)* | ✔ | ✔ | desk | n/a — you finish the draft | ✔ |
 | LinkedIn · `tethered` | ✔ | ✔ | ✔ | ✔ | ✔ |
 
 **The calendar must say which of the three it is.** Under `auto` a browser slot is a real send time;
@@ -431,15 +472,20 @@ is not a bigger number. The reframe is:
 
 - **`auto` — a hard freshness window, taken from `urgency`.** The column is already on the row and is
   currently read only to propose a send time; breaking goes stale in hours, evergreen essentially
-  never. Past the window the desk does not send: back to `APPROVED`, and it asks. This is the case
-  that genuinely needs a deadline, because nobody is watching it fire.
+  never. Past the window the desk does not send, and it asks. This is the case that genuinely needs
+  a deadline, because nobody is watching it fire. ⓘ The row goes to a new status, **`EXPIRED`**, not
+  back to `APPROVED` as first written — `APPROVED` means *queued to send*, which is precisely what an
+  expired row is not, and three other places read it that way. `publications.status` is free text, so
+  the new value cost no migration.
 - **`tethered` and `detached` — no expiry at all.** Nothing can go out without a person looking at
   it, and that person can see the date. What they need is not eviction but **visible staleness**:
   "approved 3 days ago" on the row, oldest first, and a one-tap spike. Silently withdrawing a post
   somebody was about to publish is a worse failure than a cluttered list.
-- **Nags decay rather than stop.** Today: +30 min, +2 h, silence. Silence at two hours means a batch
-  approved on Friday is invisible by Monday. Better: +30 min, +2 h, then once a day, always
-  coalesced, never per row.
+- **Nags decay rather than stop.** Before: +30 min, +2 h, silence. Silence at two hours means a batch
+  approved on Friday is invisible by Monday. Now: +30 min, +2 h, then once a day, capped at 30 days —
+  past a month untouched, somebody is ignoring it on purpose and the desk is nagging into the void.
+  The wake schedule stays a pure function of how long the row has waited, so a job that ran late does
+  not drift the whole chain.
 - **Nothing with work in flight expires.** A `tethered` row holding a live lane, or a `detached` row
   whose draft exists at the destination, is work in progress. Evicting it would orphan something
   real.
@@ -775,3 +821,34 @@ the compare is what keeps that room open.
 - Whether `detached` should offer to re-open its draft in the desk's viewer at all, or always send
   you to your own browser. Your own browser is better for the hour-long formatting case and useless
   when the destination's session lives only in the sidecar profile.
+
+---
+
+## 14. Three bugs this found in code that had already shipped
+
+Designing the modes meant reading the delivery path closely enough to notice what was already wrong
+with it. All three are fixed; they are recorded because each one had been live and silent, and the
+shape of that silence is worth recognising next time.
+
+**`probeSignedIn` gave away a lease it did not take.** It called `acquire` and then `release` in a
+`finally`. `acquire` is re-entrant for the same publication, `release` is not refcounted — so a probe
+called from *inside* a held lease released it. `confirmSignedIn` does exactly that, with the operator
+sitting on the sign-in screen holding the browser. It now releases only if it acquired, and reads the
+caller's own tab when there is one. The general lesson is unglamorous: a take/release pair that is
+re-entrant on one side and not the other is not a lock, and a comment saying "only call this from
+outside a lease" is a bug waiting for someone who did not read it.
+
+**`confirmSignedIn` was a dead end for any outlet the desk finishes itself.** It set `AWAITING_SEND`
+and stopped — right when a person is standing on the live view and about to carry on, and a trap
+under `auto`, where there is nobody standing anywhere and no queued job. The row would have waited
+forever while `/now` offered *press their button* for a destination whose button the desk was always
+going to press. It now restores the pre-auth status and re-queues the send. This one is only visible
+if you ask "and then who continues?" of every state transition, which is a question worth asking of
+each of them.
+
+**`PUBLISH_LATE` logged sends that had not happened.** It fired on `scheduledFor` alone after
+`deliverPublication` returned, without checking the row had reached `PUBLISHED` — so every hand-over
+row that sat overnight eventually produced *"this went out 14 hours after the time it was approved
+for"* about something still sitting in a composer. Wrong since browser publishing existed, and about
+to become routine once a busy browser could defer a job. It now re-reads the row and logs only for a
+publication that actually went out.
