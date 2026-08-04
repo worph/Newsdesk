@@ -57,6 +57,12 @@ interface StubPage {
    * two differently, so which one the stub claims to be is part of the fixture.
    */
   rich: boolean
+  /**
+   * Fail the next N reads, then behave. Stands in for a single-page app
+   * redirecting under the poll: the context the read was issued into is gone,
+   * and the container answers 500 rather than an answer.
+   */
+  failReads: number
   fail: string | null
 }
 
@@ -112,6 +118,11 @@ async function startStub(page: StubPage): Promise<{ apiBase: string; close: () =
           default:
             return reply({ error: `unknown action ${body.action}` }, 400)
         }
+      }
+
+      if (req.url === '/api/evaluate' && page.failReads > 0) {
+        page.failReads -= 1
+        return reply({ error: 'Execution context was destroyed, most likely because of a navigation' }, 500)
       }
 
       if (req.url === '/api/evaluate') {
@@ -235,6 +246,7 @@ describe('browser publishing', () => {
       attributes: new Map(),
       mangle: null,
       rich: false,
+      failReads: 0,
       fail: null,
     }
     stub = await startStub(page)
@@ -330,6 +342,36 @@ ${RECIPE}`
       expect(await confirmSignedIn(db, id)).toBe(true)
       expect(db.select().from(schema.publications).where(eqId(id)).get()?.status).toBe('AWAITING_SEND')
       await expect(stage(db, id)).resolves.toMatchObject({ outletName: 'LinkedIn' })
+    })
+
+    it('keeps polling when the page redirects out from under the read', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = seedBrowserPublication(db, stub.apiBase, { status: 'SCHEDULED', recipe: GATED })
+      page.fields.set('input#email', '')
+      // The first reads land in a context the redirect destroys. Letting that
+      // propagate would report a crash instead of a signed-out browser.
+      page.failReads = 3
+      // A window that can actually outlast them — the point of the settle
+      // window is to cover exactly this, and 50ms of it covers nothing.
+      setSignInSettleMs(2_000)
+
+      await deliverPublication(db, id)
+
+      expect(db.select().from(schema.publications).where(eqId(id)).get()?.status).toBe('NEEDS_AUTH')
+      expect(db.select().from(schema.publications).where(eqId(id)).get()?.error).toBeNull()
+    })
+
+    it('still answers signed-in when the reads settle and no marker is there', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = seedBrowserPublication(db, stub.apiBase, { status: 'SCHEDULED', recipe: GATED })
+      page.failReads = 3
+      setSignInSettleMs(2_000)
+
+      await deliverPublication(db, id)
+
+      expect(db.select().from(schema.publications).where(eqId(id)).get()?.status).toBe('AWAITING_SEND')
     })
 
     it('does not check a destination that declares no markers', async () => {

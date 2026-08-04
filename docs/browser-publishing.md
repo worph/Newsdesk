@@ -269,6 +269,14 @@ later — so a check made the instant navigation resolves sees the signed-in pag
 being. The probe polls for the marker over a short window, which costs nothing on the signed-out
 path and a few seconds once per hand-over on the healthy one.
 
+And the poll must treat a read that *errors* as "not yet", not as a failure. The redirect does not
+merely change what a read returns; it destroys the context the read was issued into, so the
+container answers `500` instead of an answer. Measured against the live desk, that was one run in
+four. Letting it propagate turns "the browser is signed out" into "the publish crashed" — the one
+outcome this check exists to prevent — so the window is the only authority: if the marker never
+appears within it, the answer is a clean *signed in*, however many reads were swallowed getting
+there.
+
 `NEEDS_AUTH` is visible, nags on the same schedule as a hand-over, and gives its slot up the same
 way. It must never quietly consume one.
 
@@ -348,6 +356,16 @@ things the sidecar needs, none of them in `1.1.4`:
   without it fails at the first stage.
 - **`hover`.** See §3 — without it, any control that appears under the pointer is unreachable.
 - **the per-tab screencast**, which §6's viewer prefers over noVNC.
+- **a `navigate` that survives a single-page app redirecting on arrival** (added after 1.1.5, found
+  on the first real Docmost publish). Docmost serves the page and *then* bounces to `/login`, which
+  breaks the call three different ways depending on where the redirect lands: `page.goto` rejects
+  with "interrupted by another navigation", or with `net::ERR_ABORTED`, or it resolves and the
+  following `page.title()` throws "Execution context was destroyed". All three are one event — the
+  app went somewhere else — and all three used to surface as an HTTP 500 that parked the
+  publication `FAILED`. Intermittently: 4 of 12 on one run, 0 of 12 on another, which is what a
+  race looks like from the outside. The navigation is the result; the title is metadata about it
+  and must never fail the call. Genuine failures (DNS, refused, timeout) still error, and the
+  recipe's opening `wait:` remains the real check that the right page is up.
 
 That is also why the shared `browsermcp` on yunderalabs cannot stand in for this container: it runs
 `1.1.4`, so the answer is not merely "it is busy".

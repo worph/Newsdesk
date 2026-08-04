@@ -238,7 +238,25 @@ async function appearsWithin(
 ): Promise<boolean> {
   const deadline = Date.now() + windowMs
   for (;;) {
-    if (await browser.exists(engine, selector)) return true
+    /**
+     * A read that throws is "not yet", not a failure.
+     *
+     * This poll starts the instant a navigation resolves, which on a
+     * single-page app is precisely when it is about to navigate again — and a
+     * read issued into a context the redirect then destroys comes back as an
+     * error rather than an answer. Letting that propagate would turn "the
+     * browser is signed out" into "the publish crashed", which is the one
+     * outcome this check exists to prevent.
+     *
+     * The window is the authority: if the marker never appears within it, the
+     * answer is a clean `false`, however many reads were swallowed getting
+     * there.
+     */
+    try {
+      if (await browser.exists(engine, selector)) return true
+    } catch {
+      // fall through to the deadline check and poll again
+    }
     if (Date.now() >= deadline) return false
     await new Promise((done) => setTimeout(done, 300))
   }
