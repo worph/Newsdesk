@@ -84,6 +84,26 @@ export const outlets = sqliteTable('outlets', {
    */
   recipe: text('recipe'),
   /**
+   * browser driver: how a publish here finishes — auto | tethered | detached.
+   *
+   * Null reads as `tethered`, which is what every browser outlet did before this
+   * column existed, so an old row needs no backfill to keep behaving.
+   *
+   * It lives on the outlet rather than being inferred from the recipe's shape
+   * because the two questions the recipe used to answer — who commits the send,
+   * and when the browser gets involved — have different answers on a
+   * destination that saves as you type. See docs/browser-publishing.md §3.
+   */
+  publish: text('publish'),
+  /**
+   * browser driver: this destination's terms require a person to press send.
+   *
+   * Refuses `publish: auto` at save time, permanently. Nullable rather than
+   * defaulted so "never declared" stays distinguishable from "declared false" —
+   * the first is an outlet nobody has thought about, the second is a decision.
+   */
+  requiresHuman: integer('requires_human', { mode: 'boolean' }),
+  /**
    * JSON: the posting rhythm — window, days, spacing, daily cap. Read only by
    * the slot proposer, never by delivery, so an outlet without one still
    * publishes on demand exactly as before.
@@ -255,11 +275,32 @@ export const publications = sqliteTable(
      */
     stagedAt: text('staged_at'),
     /**
+     * Where a `detached` publish left its draft, read back from `## Verify` at
+     * the moment it was filed.
+     *
+     * Deliberately its own column rather than `externalUrl`: `attest` overwrites
+     * that one and `abandon` clears `stagedAt`, so neither can be trusted to
+     * answer the only question that matters here — *does something already exist
+     * at the destination?* `draftUrl !== null` is the one durable predicate no
+     * other path resets, and it is what stops a reopened row filing a second
+     * copy. See docs/browser-publishing.md §4.2.
+     */
+    draftUrl: text('draft_url'),
+    /**
+     * JSON: what the fields actually held when the operator confirmed.
+     *
+     * The frozen payload says what was approved; this says what the destination
+     * received after a person worked on it. Keeping both is what makes the
+     * `edited` grade a fact rather than a guess — see §2.
+     */
+    shipped: text('shipped'),
+    /**
      * How the desk knows this went out: `verified` when a verify step found the
      * post, `attested` when the operator said so and the recipe had no way to
-     * check. Both are legitimate; the two being indistinguishable would not be.
+     * check, `edited` when the re-read at confirmation differed from the frozen
+     * payload. All legitimate; any two being indistinguishable would not be.
      */
-    evidence: text('evidence'), // verified | attested
+    evidence: text('evidence'), // verified | attested | edited
     publishedAt: text('published_at'),
   },
   (t) => [

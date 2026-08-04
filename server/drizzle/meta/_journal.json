@@ -43,6 +43,13 @@
       "when": 1785679854249,
       "tag": "0005_far_amphibian",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1785863964448,
+      "tag": "0006_colorful_madame_web",
+      "breakpoints": true
     }
   ]
 }

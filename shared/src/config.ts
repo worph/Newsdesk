@@ -5,6 +5,7 @@ import {
   parseRecipe,
   readKeys,
   RECIPE_READ_KEYS,
+  type Recipe,
 } from './recipe.js'
 import {
   argsSpecSchema,
@@ -26,6 +27,24 @@ const idSchema = z
 export const STRINGER_KINDS = ['report', 'timeline', 'snapshot', 'tip'] as const
 export const OUTLET_ROLES = ['publish', 'notify'] as const
 export const OUTLET_DRIVERS = ['mcp', 'webhook', 'builtin', 'browser'] as const
+
+/**
+ * How a browser publish finishes.
+ *
+ * `auto`      the desk stages, proves the bytes, runs `## Commit` and verifies.
+ *             Nobody is asked.
+ * `tethered`  the desk stages when the operator opens it and holds the tab;
+ *             they press the destination's own button in the viewer.
+ * `detached`  the desk stages a durable draft, records its link and lets go;
+ *             the operator finishes it wherever they like.
+ *
+ * What separates the last two is not how long a person takes — assume that is
+ * unbounded — but *where the composed state lives*. Tethered holds it in a tab
+ * and can therefore compose again for free; detached put it at the destination
+ * and must never do so twice. See docs/browser-publishing.md §4.2.
+ */
+export const PUBLISH_MODES = ['auto', 'tethered', 'detached'] as const
+export type PublishMode = (typeof PUBLISH_MODES)[number]
 
 export const mcpEndpointSchema = z.object({
   id: idSchema,
@@ -115,6 +134,25 @@ export const outletSchema = z.object({
   engine: idSchema.optional(),
   /** browser driver: the cookbook. Prose plus step lines — see recipe.ts. */
   recipe: z.string().optional(),
+  /**
+   * browser driver: how a publish here finishes. Absent reads as `tethered`.
+   *
+   * Optional rather than defaulted on purpose. A `.default()` would put the
+   * field on every outlet in the document — including MCP ones, where it means
+   * nothing — and would make the "this only applies to a browser outlet" guard
+   * below fire on outlets nobody wrote it for. The default lives in
+   * `publishModeOf` instead, where exactly one thing owns it.
+   */
+  publish: z.enum(PUBLISH_MODES).optional(),
+  /**
+   * browser driver: this destination's terms require a person to press send.
+   *
+   * Refuses `publish: auto` at save time. It exists because the mode is one word
+   * in a YAML file and a destination whose terms are the reason for the
+   * hand-over deserves more than that — deleting a line that says *a person is
+   * required here* should read like the decision it is.
+   */
+  requires_human: z.boolean().optional(),
 })
 
 /**
@@ -418,6 +456,83 @@ function checkDestination(outlet: Outlet, issues: ConfigIssue[]): void {
 }
 
 /**
+ * How this outlet finishes a publish, with the default in exactly one place.
+ *
+ * Absent means `tethered`, which is what every browser outlet did before the
+ * field existed — so a configuration written against the old build keeps its
+ * behaviour rather than quietly acquiring a new one.
+ */
+export function publishModeOf(outlet: Pick<Outlet, 'publish'>): PublishMode {
+  return outlet.publish ?? 'tethered'
+}
+
+/**
+ * Whether the declared mode and the recipe agree about who finishes.
+ *
+ * The mode used to be inferred from the recipe's shape, and these rules are what
+ * replaces that inference: the outlet says how it finishes, and the recipe has
+ * to be capable of it. Each refusal is a specific way the pair could be
+ * incoherent, not a style preference.
+ */
+function checkPublishMode(outlet: Outlet, recipe: Recipe, issues: ConfigIssue[]): void {
+  const path = `outlets.${outlet.id}`
+  const mode = publishModeOf(outlet)
+
+  if (outlet.requires_human && mode === 'auto') {
+    issues.push({
+      path: `${path}.publish`,
+      message:
+        'this outlet is marked `requires_human`, so it cannot publish by itself — remove that line if the destination really does allow it',
+    })
+  }
+
+  if (mode === 'auto') {
+    /**
+     * Without a verify step an `auto` publish writes a PUBLISHED row that
+     * neither a person nor a check ever witnessed. There is no honest evidence
+     * grade for that, so it is refused rather than graded.
+     */
+    if (recipe.verify.length === 0) {
+      issues.push({
+        path: `${path}.recipe`,
+        message:
+          'a destination that publishes by itself needs a `## Verify` section — nobody is watching, so the desk has to be able to confirm it landed',
+      })
+    }
+    if (hasHandover(recipe)) {
+      issues.push({
+        path: `${path}.recipe`,
+        message:
+          'this outlet publishes by itself, so a `## Hand over` section has nobody to talk to — delete it, or set `publish: tethered`',
+      })
+    }
+    return
+  }
+
+  if (!hasHandover(recipe)) {
+    issues.push({
+      path: `${path}.recipe`,
+      message:
+        'a destination a person finishes needs a `## Hand over` section saying what they are being asked to do',
+    })
+  }
+
+  /**
+   * `detached` files something durable and then lets go, so the link read back
+   * at that moment is the only record that it exists — and the only thing the
+   * "never file this twice" guard can key on. A detached outlet that cannot say
+   * where its draft went is strictly worse than a tethered one.
+   */
+  if (mode === 'detached' && recipe.verify.length === 0) {
+    issues.push({
+      path: `${path}.recipe`,
+      message:
+        'a `detached` destination needs a `## Verify` section — the desk has to record where it filed the draft, or it cannot hand you the link and cannot stop itself filing a second one',
+    })
+  }
+}
+
+/**
  * A browser outlet, which has no tool and no advertised schema to check against
  * — only a page, a cookbook and a pinned address.
  *
@@ -470,19 +585,7 @@ function checkBrowser(outlet: Outlet, engineIds: Set<string>, issues: ConfigIssu
     issues.push({ path: `${path}.recipe`, message: `line ${issue.line}: ${issue.message}` })
   }
 
-  /**
-   * Phase 1 publishes only where a human presses the destination's own button.
-   * Refusing at save time is the honest form of that: an outlet with no hand
-   * over section would otherwise look configured and then sit in the queue
-   * doing nothing anyone could explain.
-   */
-  if (!hasHandover(recipe)) {
-    issues.push({
-      path: `${path}.recipe`,
-      message:
-        'autonomous browser outlets are not supported yet — add a `## Hand over` section describing what the operator clicks',
-    })
-  }
+  checkPublishMode(outlet, recipe, issues)
 
   const filled = filledKeys(recipe)
   if (filled.length === 0) {
@@ -621,13 +724,20 @@ export function validateConfig(config: Config): ConfigIssue[] {
 
     if (outlet.driver === 'browser') {
       checkBrowser(outlet, engineIds, issues)
-    } else if (outlet.engine !== undefined || outlet.recipe !== undefined) {
+    } else {
       // Silently ignoring these would make a mis-typed driver look like it
       // worked — the outlet would publish through the wrong transport entirely.
-      issues.push({
-        path,
-        message: `\`${outlet.engine !== undefined ? 'engine' : 'recipe'}\` only applies to a browser outlet — this one is "${outlet.driver}"`,
-      })
+      // `publish` is the one that matters most here: an outlet meant to be
+      // hand-finished, typed as `mcp`, would send itself and read as configured.
+      const stray = (['engine', 'recipe', 'publish', 'requires_human'] as const).find(
+        (field) => outlet[field] !== undefined,
+      )
+      if (stray) {
+        issues.push({
+          path,
+          message: `\`${stray}\` only applies to a browser outlet — this one is "${outlet.driver}"`,
+        })
+      }
     }
 
     const slots = slotsOf(outlet.args)

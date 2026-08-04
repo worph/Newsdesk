@@ -17,7 +17,7 @@ self.addEventListener('activate', (event) => {
 })
 
 self.addEventListener('push', (event) => {
-  let payload = { title: 'Newsdesk', body: 'Something is waiting.', url: '/queue' }
+  let payload = { title: 'Newsdesk', body: 'Something is waiting.', url: '/now' }
   try {
     if (event.data) payload = { ...payload, ...event.data.json() }
   } catch {
@@ -34,7 +34,7 @@ self.addEventListener('push', (event) => {
       badge: '/badge-96.png',
       data: { url: payload.url },
       // Collapse repeats: three drafts arriving should not stack three chimes.
-      tag: 'newsdesk-queue',
+      tag: 'newsdesk-waiting',
       renotify: true,
     }),
   )
@@ -42,7 +42,7 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const target = event.notification.data?.url ?? '/queue'
+  const target = event.notification.data?.url ?? '/now'
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {

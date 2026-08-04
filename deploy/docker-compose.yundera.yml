@@ -24,14 +24,50 @@ services:
     expose:
       - "80"
     labels:
+      # Ordered `handle` blocks, first match wins: the PWA identity files go
+      # STRAIGHT to the backend, everything else through the gate above.
+      #
+      # Why the bypass exists. Chrome does not draw the Android launcher icon
+      # itself — on install it sends the manifest and icon URLs to Google's
+      # WebAPK minting server, which fetches them from the public internet with
+      # no session of ours. Behind AppShield that fetch is a 302 to the OIDC
+      # login, minting fails, and Android falls back to a bookmark shortcut
+      # stamped with the small Chrome badge in the corner. Serving these two
+      # paths anonymously is what makes the install a real WebAPK with the real
+      # icon. (MetaWatch does the same thing for /health; same mechanism.)
+      #
+      # Nothing here is a secret: the manifest is app metadata and the icons are
+      # in the public repo. `/icon*` also lets an unknown /icon… path fall to the
+      # SPA's index.html, which is likewise public code — no data reachable
+      # without a session either way, since the whole API stays behind the gate.
+      # ---- newsdesk-${APP_DOMAIN} (gateway TLS) ----
       caddy_0: newsdesk-${APP_DOMAIN}
       caddy_0.import: gateway_tls
-      caddy_0.reverse_proxy: "{{upstreams 80}}"
+      caddy_0.0_handle: "/manifest.webmanifest"
+      caddy_0.0_handle.reverse_proxy: "newsdesk-backend:8080"
+      caddy_0.1_handle: "/icon*"
+      caddy_0.1_handle.reverse_proxy: "newsdesk-backend:8080"
+      caddy_0.2_handle: ""
+      caddy_0.2_handle.reverse_proxy: "{{upstreams 80}}"
+
+      # ---- newsdesk-IP.nip.io (gateway TLS) ----
       caddy_1: newsdesk-${APP_PUBLIC_IP_DASH}.nip.io
       caddy_1.import: gateway_tls
-      caddy_1.reverse_proxy: "{{upstreams 80}}"
+      caddy_1.0_handle: "/manifest.webmanifest"
+      caddy_1.0_handle.reverse_proxy: "newsdesk-backend:8080"
+      caddy_1.1_handle: "/icon*"
+      caddy_1.1_handle.reverse_proxy: "newsdesk-backend:8080"
+      caddy_1.2_handle: ""
+      caddy_1.2_handle.reverse_proxy: "{{upstreams 80}}"
+
+      # ---- newsdesk-IP.sslip.io (Let's Encrypt) ----
       caddy_2: newsdesk-${APP_PUBLIC_IP_DASH}.sslip.io
-      caddy_2.reverse_proxy: "{{upstreams 80}}"
+      caddy_2.0_handle: "/manifest.webmanifest"
+      caddy_2.0_handle.reverse_proxy: "newsdesk-backend:8080"
+      caddy_2.1_handle: "/icon*"
+      caddy_2.1_handle.reverse_proxy: "newsdesk-backend:8080"
+      caddy_2.2_handle: ""
+      caddy_2.2_handle.reverse_proxy: "{{upstreams 80}}"
     environment:
       BACKEND_HOST: "newsdesk-backend"
       BACKEND_PORT: "8080"
@@ -52,12 +88,12 @@ services:
   # On the pcs network so it can reach the Beacon aggregator by service name
   # for both the inference port and mcp-driver delivery outlets.
   newsdesk-backend:
-    # A commit tag, because no semver image exists: the v1.0.0 git tag was
-    # pushed before the workflow watched tags, so ghcr carries `latest` and one
-    # tag per commit and nothing else. `latest` on a store app would move under
-    # an install without anyone asking for it, so this pins the commit and the
-    # upgrade stays a deliberate edit. Cut a `v*` tag and this becomes a version.
-    image: ghcr.io/worph/newsdesk:0007960
+    # A version tag: the workflow builds one for every `v*` git tag, so ghcr
+    # carries these alongside `latest` and the per-commit tags. `latest` on a
+    # store app would move under an install without anyone asking for it, so this
+    # pins the release and the upgrade stays a deliberate edit. Bump it when a
+    # new `v*` tag is cut.
+    image: ghcr.io/worph/newsdesk:1.1.1
     container_name: newsdesk-backend
     restart: unless-stopped
     # Unprivileged, as the platform's 1000:1000. The data dir is created and

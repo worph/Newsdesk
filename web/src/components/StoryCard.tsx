@@ -1,9 +1,9 @@
 import type { StoryRow } from '../api'
 
 /**
- * One story as it appears in a list, with its per-outlet placement chips. Shared
- * by the Queue and Stories screens because they are the same rows asked
- * different questions.
+ * One story as it appears in a list, with its per-outlet placement chips. The
+ * row the Stories browser is made of, whichever filter it is showing — they are
+ * the same rows asked different questions.
  */
 
 export function when(iso: string): string {

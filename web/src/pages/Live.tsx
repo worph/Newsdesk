@@ -161,7 +161,9 @@ export function Live() {
     mutationFn: () => api.markNotSent(id!),
     onSuccess: () => {
       setStaged(null)
-      navigate('/queue')
+      // The slot survived and it is still waiting on a person, so it is still
+      // on the list of things that need you.
+      navigate('/now')
     },
   })
 
@@ -252,8 +254,8 @@ export function Live() {
     return (
       <div className="mx-auto max-w-7xl space-y-4 px-4 pb-16 md:px-6">
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={() => navigate('/queue')} className="text-sm text-desk-500 hover:text-desk-700">
-            ← the queue
+          <button onClick={() => navigate('/now')} className="text-sm text-desk-500 hover:text-desk-700">
+            ← what needs you
           </button>
           <span className="text-desk-300 dark:text-desk-700">·</span>
           <Badge tone="bg-desk-900 text-white dark:bg-desk-100 dark:text-desk-900">{outlet.name}</Badge>
@@ -358,11 +360,19 @@ export function Live() {
       {failed && (
         <div className="space-y-3 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
           <p>
-            <strong>The desk could not compose this.</strong> Nothing was sent.
+            <strong>The desk could not compose this.</strong> It stopped partway through the recipe.
           </p>
           <p className="font-mono text-xs">{failed}</p>
+          {/*
+            Not "nothing was sent". Staging types into the real page — that is what
+            makes the byte check worth anything — so a step that fails after a fill
+            has already changed the destination, and a destination that saves as you
+            type has kept it. The draft is the only thing the desk can vouch for.
+          */}
           <p className="text-xs">
-            The draft is unchanged and still approved. Fix the recipe or the sign-in, then try again.
+            The draft is unchanged and still approved. The destination may not be: composing types into the
+            real page, so if this one saves as you type, look at it before you retry. Then fix the recipe or
+            the sign-in.
           </p>
           <button
             onClick={() => {

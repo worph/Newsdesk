@@ -7,10 +7,10 @@ import { schema } from '../db/index.js'
 /**
  * What the desk is waiting on you for, as one list.
  *
- * The Queue is a backlog you read when there is time: two tabs, a preview of
- * every draft, the reason each story was placed. This is the opposite screen —
- * it answers "a notification just went off, what do I press" and nothing else.
- * One line per thing, one verb each, most-overdue first.
+ * Stories is the backlog you read when there is time: every story the desk
+ * opened, the reason each was placed, the drafts under it. This is the opposite
+ * screen — it answers "a notification just went off, what do I press" and
+ * nothing else. One line per thing, one verb each, most-overdue first.
  *
  * The ordering is domain judgement rather than presentation, which is why it is
  * decided here: a publication whose slot has already passed is *late*, and a
@@ -201,7 +201,7 @@ export function listActions(db: Db, limit = 100): DeskAction[] {
    * A story whose destinations already exist has nothing left to place — the
    * drafts are the work now, and listing both would put the same job on the
    * screen twice under two different verbs. That is precisely the noise this
-   * screen exists to remove; the Queue still shows the placement view in full.
+   * screen exists to remove; the story page still shows every placement in full.
    *
    * Every publication counts, not just the open ones: a story whose pieces have
    * all gone out is the most settled case there is, and asking to place it

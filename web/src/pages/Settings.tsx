@@ -338,7 +338,7 @@ export function Settings() {
         <p className="text-sm text-desk-500">
           A push when a story reaches the placement queue, and another when a draft is ready to
           approve. Each says how many are waiting and opens straight to the one that triggered it.
-          Best-effort by design — if it cannot go out, the Queue still tells you everything.
+          Best-effort by design — if it cannot go out, “Needs you” still tells you everything.
         </p>
 
         {!pushSupported() ? (

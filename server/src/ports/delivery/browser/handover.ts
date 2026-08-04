@@ -1,11 +1,12 @@
+import type { PublishMode } from '@newsdesk/shared'
 import { eq } from 'drizzle-orm'
 import type { Db } from '../../../db/index.js'
 import { schema } from '../../../db/index.js'
 import { logEvent } from '../../../events.js'
-import { withdrawPublication } from '../../../pipeline/approval.js'
-import { enqueue } from '../../../pipeline/queue.js'
-import { notifyHandoverDue, notifyNeedsAuth } from '../../../push.js'
-import { probeSignedIn } from './session.js'
+import { Deferred, enqueue } from '../../../pipeline/queue.js'
+import { notifyDraftFiled, notifyHandoverDue, notifyNeedsAuth } from '../../../push.js'
+import { BrowserBusy } from './lease.js'
+import { probeSignedIn, recordDraft, SignedOut, stage } from './session.js'
 
 /**
  * A slot has come for an outlet only a person can finish.
@@ -20,9 +21,24 @@ import { probeSignedIn } from './session.js'
  * stale copy into tomorrow morning.
  */
 
-/** Since the slot came. The last entry is when the desk stops waiting. */
+/** Since the slot came. After the last one the desk falls back to a daily nudge. */
 export const REMINDERS_MS = [30 * 60_000, 2 * 60 * 60_000] as const
-export const EXPIRE_AFTER_MS = 12 * 60 * 60_000
+
+/**
+ * After the reminders, once a day.
+ *
+ * Two nudges and then silence was sized for someone who publishes as the slots
+ * come. The desk is used in batches — approve a run in the morning, work through
+ * the notifications that evening or the next day — and under that rhythm silence
+ * at two hours means a batch approved on Friday is invisible by Monday.
+ */
+const DAILY_MS = 24 * 60 * 60_000
+
+/**
+ * Long enough that a row nobody has touched in a month is being ignored on
+ * purpose. Waking daily forever would be the desk nagging into the void.
+ */
+const STOP_REMINDING_AFTER_MS = 30 * DAILY_MS
 
 type Publication = typeof schema.publications.$inferSelect
 type Outlet = typeof schema.outlets.$inferSelect
@@ -42,13 +58,18 @@ function offeredAt(publication: Pick<Publication, 'scheduledFor' | 'approvedAt'>
 /** The next moment worth waking up for, or null when there is none left. */
 function nextWake(elapsedMs: number): number | null {
   for (const at of REMINDERS_MS) if (elapsedMs < at) return at
-  return elapsedMs < EXPIRE_AFTER_MS ? EXPIRE_AFTER_MS : null
+  if (elapsedMs >= STOP_REMINDING_AFTER_MS) return null
+  // Round up to the next daily tick rather than "a day from now", so the
+  // schedule stays a pure function of how long the row has been waiting and a
+  // job that ran late does not drift the whole chain.
+  return (Math.floor(elapsedMs / DAILY_MS) + 1) * DAILY_MS
 }
 
 export async function offerHandover(
   db: Db,
   publication: Publication,
   outlet: Outlet,
+  mode: Exclude<PublishMode, 'auto'> = 'tethered',
   now = Date.now(),
 ): Promise<void> {
   const story = db
@@ -106,23 +127,88 @@ export async function offerHandover(
     return
   }
 
+  /**
+   * A `detached` outlet is staged **here**, at the slot, and this is the one
+   * place the two hand-over modes genuinely diverge.
+   *
+   * Tethered waits because staging would hold the single lane from now until
+   * whenever the operator arrives. Detached has the opposite property: what it
+   * composes is durable at the destination, so once it is filed nothing needs
+   * holding at all. Doing it now is what lets the notification carry a link
+   * instead of an instruction.
+   */
+  if (mode === 'detached') {
+    await fileDraft(db, publication, outlet, title, now)
+    return
+  }
+
   logEvent(db, {
     level: 'info',
     code: 'HANDOVER_DUE',
     storyId: publication.storyId,
     publicationId: publication.id,
     message: `waiting for someone to publish this on ${outlet.name}`,
-    detail: {
-      outletId: outlet.id,
-      scheduledFor: publication.scheduledFor,
-      expiresAt: new Date(offeredAt(publication) + EXPIRE_AFTER_MS).toISOString(),
-    },
+    detail: { outletId: outlet.id, mode, scheduledFor: publication.scheduledFor },
   })
 
   await notifyHandoverDue(db, publication.id, outlet.name, title)
 
   enqueue(db, 'handover-followup', publication.id, new Date(now + REMINDERS_MS[0]))
 }
+
+/**
+ * Compose the page, record where it landed, and hand back the link.
+ *
+ * The dangerous part is not the staging, it is doing it twice: this creates
+ * something real at the destination, so a second run does not retry anything —
+ * it files a duplicate. `stage` refuses outright once `draft_url` is set, and
+ * this is the only function that sets it.
+ */
+async function fileDraft(
+  db: Db,
+  publication: Publication,
+  outlet: Outlet,
+  title: string,
+  now: number,
+): Promise<void> {
+  try {
+    await stage(db, publication.id)
+  } catch (err) {
+    if (err instanceof BrowserBusy) throw new Deferred(`the browser is publishing ${err.held.label}`, DEFER_MS)
+
+    /**
+     * Signed out, or the recipe broke. `stage` has already set the row's status
+     * and written the trace; the one thing worth adding is where the browser was
+     * standing when it stopped, because on a destination that autosaves there may
+     * now be a half-made page nobody knows about.
+     */
+    if (err instanceof SignedOut) {
+      await notifyNeedsAuth(db, publication.id, outlet.name, title)
+      enqueue(db, 'handover-followup', publication.id, new Date(now + REMINDERS_MS[0]))
+      return
+    }
+    throw err
+  }
+
+  const draftUrl = await recordDraft(db, publication.id)
+
+  logEvent(db, {
+    level: 'info',
+    code: 'DRAFT_FILED',
+    storyId: publication.storyId,
+    publicationId: publication.id,
+    message: draftUrl
+      ? `filed on ${outlet.name} — it is yours to finish`
+      : `filed on ${outlet.name}, but the desk could not read back where it landed`,
+    detail: { outletId: outlet.id, draftUrl },
+  })
+
+  await notifyDraftFiled(db, publication.id, outlet.name, title)
+  enqueue(db, 'handover-followup', publication.id, new Date(now + REMINDERS_MS[0]))
+}
+
+/** Matches the autonomous path: waiting for a lane is not a failure. */
+const DEFER_MS = 5 * 60_000
 
 /**
  * Remind, then give up.
@@ -144,7 +230,7 @@ export function handoverFollowupHandler(options: { now?: () => number } = {}) {
       .get()
 
     // Both states are the desk owed a person: one wants a publish, the other
-    // wants a sign-in. Neither resolves itself, and both give the slot up.
+    // wants a sign-in. Neither resolves itself, so both keep being asked about.
     if (!publication || !['AWAITING_SEND', 'NEEDS_AUTH'].includes(publication.status)) return
 
     const outlet = db
@@ -161,25 +247,21 @@ export function handoverFollowupHandler(options: { now?: () => number } = {}) {
     const now = clock()
     const elapsed = now - offeredAt(publication)
 
-    if (elapsed >= EXPIRE_AFTER_MS) {
-      const result = withdrawPublication(db, publicationId)
-      logEvent(db, {
-        level: 'warn',
-        code: 'SEND_EXPIRED',
-        storyId: publication.storyId,
-        publicationId,
-        message: result.ok
-          ? `nobody published this on ${outlet?.name ?? publication.outletId} — the slot was given up`
-          : `this expired on ${outlet?.name ?? publication.outletId} but could not be withdrawn`,
-        detail: {
-          outletId: publication.outletId,
-          waitedHours: Math.round(elapsed / 3_600_000),
-          ...(result.ok ? {} : { error: result.error }),
-        },
-      })
-      return
-    }
-
+    /**
+     * Nothing expires here any more, and the reason is worth stating.
+     *
+     * Expiry exists to stop something being *sent* once it has gone stale — and
+     * a row in this handler cannot be sent without a person looking at it, who
+     * can see the date for themselves. Withdrawing it would only ever throw away
+     * work somebody was about to do, which is the failure the batch workflow
+     * runs into: approve a run in the morning, sit down at nine in the evening,
+     * find the desk gave every slot up at nine. Unattended sending is the `auto`
+     * path, and that is where the deadline now lives.
+     *
+     * What replaces it is visible staleness — the row says how long it has been
+     * waiting — plus a nag that decays to daily rather than stopping.
+     * See docs/browser-publishing.md §4.5.
+     */
     const outletName = outlet?.name ?? publication.outletId
     const title = story?.title ?? 'A story is ready'
 

@@ -3,8 +3,9 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   checksSignIn,
-  hasHandover,
+  commitSelector,
   parseRecipe,
+  type PublishMode,
   type Recipe,
   type RecipeStep,
 } from '@newsdesk/shared'
@@ -12,9 +13,11 @@ import { eq } from 'drizzle-orm'
 import type { Db } from '../../../db/index.js'
 import { schema } from '../../../db/index.js'
 import { logEvent } from '../../../events.js'
+import { enqueue } from '../../../pipeline/queue.js'
 import { McpError } from '../../mcp/client.js'
 import { browser, loadEngine, type BrowserEngineRef } from './engine.js'
 import { acquire, attachPage, BrowserBusy, holder, release, renew, type Lease } from './lease.js'
+import { resolveMode } from './mode.js'
 
 /**
  * Publishing through a browser, one publication at a time.
@@ -38,14 +41,60 @@ export interface StagedPage {
   outletName: string
   /** What the operator is told to do, straight from the recipe. */
   handover: string
+  mode: PublishMode
+  /**
+   * The button the operator is being asked to press, when the recipe names one.
+   *
+   * The desk does not click it under a hand-over mode — this is so the viewer
+   * can put it on screen. Reading prose on a phone and then hunting for the
+   * control it describes is the part of a hand-over that a screencast makes
+   * worse, and the recipe already knows the answer.
+   */
+  commitSelector: string | null
   lease: Lease
   screenshotPath: string | null
   stagedAt: string
 }
 
+/**
+ * A detached publication that already has a draft at its destination.
+ *
+ * Its own class rather than a plain refusal because the caller has something
+ * useful to do with it: this is not an error the operator caused, it is the desk
+ * declining to make a second copy and handing back the first one's address.
+ */
+/**
+ * The browser is signed out, found while staging rather than at the slot.
+ *
+ * Distinct from every other staging error because it must not park the row
+ * `FAILED`: `NEEDS_AUTH` has a notification, a deep link and a re-probe behind
+ * it, and this is the state that machinery exists for.
+ */
+export class SignedOut extends Error {
+  constructor(readonly outletName: string) {
+    super(`the browser is signed out of ${outletName}`)
+    this.name = 'SignedOut'
+  }
+}
+
+export class AlreadyFiled extends Error {
+  constructor(
+    readonly draftUrl: string,
+    readonly outletName: string,
+  ) {
+    super(`this is already filed on ${outletName} — opening it again would file a second copy`)
+    this.name = 'AlreadyFiled'
+  }
+}
+
 export interface Attestation {
   status: 'PUBLISHED'
-  evidence: 'verified' | 'attested'
+  /**
+   * `edited` is not a weaker `verified` — it says the desk found the post *and*
+   * that what is at the destination is no longer the payload that was approved,
+   * because a person worked on it before sending. See §2.
+   */
+  evidence: 'verified' | 'attested' | 'edited'
   externalUrl: string | null
   externalId: string | null
 }
@@ -63,12 +112,6 @@ interface Loaded {
   engine: BrowserEngineRef
   recipe: Recipe
   payload: Record<string, unknown>
-}
-
-/** Does this outlet's recipe stop and ask for a person? */
-export function handsOver(recipe: string | null | undefined): boolean {
-  if (!recipe) return false
-  return hasHandover(parseRecipe(recipe).recipe)
 }
 
 /**
@@ -92,7 +135,12 @@ export async function probeSignedIn(db: Db, publicationId: string): Promise<bool
    * without the lease it would wipe a page somebody else has staged and is
    * reading. If the browser is busy the check is simply skipped: a false alarm
    * here would send an operator to sign in to something that is already fine,
-   * and `stage` re-checks anyway.
+   * and staging checks again anyway.
+   *
+   * ⚠️ Only call this from *outside* a lease. `release` is not refcounted while
+   * `acquire` is re-entrant, so calling it from within one gives the browser
+   * away mid-publish — which is why the actual looking lives in
+   * `signedOutMarkerFound`, and why staging calls that instead of this.
    */
   try {
     acquire(loaded.engine.id, publicationId, loaded.outlet.name, { ttlMs: 60_000 })
@@ -104,23 +152,40 @@ export async function probeSignedIn(db: Db, publicationId: string): Promise<bool
   try {
     const url = destinationUrl(loaded)
     await browser.navigate(loaded.engine, url)
-
-    for (const marker of loaded.recipe.signedOut) {
-      const present = await appearsWithin(loaded.engine, marker.selector, signInSettleMs)
-      trace(db, publicationId, {
-        phase: 'signin',
-        action: 'check',
-        selector: marker.selector,
-        url,
-        ok: !present,
-        detail: { signedOut: present },
-      })
-      if (present) return false
-    }
-    return true
+    return !(await signedOutMarkerFound(db, loaded, undefined, url))
   } finally {
     release(loaded.engine.id, publicationId)
   }
+}
+
+/**
+ * Does this page carry a marker that only exists when signed out?
+ *
+ * Takes no lease and navigates nowhere: it looks at the tab it is given, which
+ * is what lets staging reuse it *inside* its own lease and on *its own* tab.
+ * Both matter — a check that took the lease would release it out from under the
+ * publish, and a check against page 0 would prove nothing about the page the
+ * desk is a moment away from typing into.
+ */
+async function signedOutMarkerFound(
+  db: Db,
+  loaded: Loaded,
+  pageId: string | undefined,
+  url: string,
+): Promise<boolean> {
+  for (const marker of loaded.recipe.signedOut) {
+    const present = await appearsWithin(loaded.engine, marker.selector, signInSettleMs, pageId)
+    trace(db, loaded.publication.id, {
+      phase: 'signin',
+      action: 'check',
+      selector: marker.selector,
+      url,
+      ok: !present,
+      detail: { signedOut: present, pageId },
+    })
+    if (present) return true
+  }
+  return false
 }
 
 function load(db: Db, publicationId: string): Loaded {
@@ -168,7 +233,7 @@ function trace(
   db: Db,
   publicationId: string,
   row: {
-    phase: 'signin' | 'stage' | 'handover' | 'verify'
+    phase: 'signin' | 'stage' | 'commit' | 'handover' | 'verify'
     action: string
     selector?: string | null
     url?: string | null
@@ -235,6 +300,7 @@ async function appearsWithin(
   engine: BrowserEngineRef,
   selector: string,
   windowMs: number,
+  pageId?: string,
 ): Promise<boolean> {
   const deadline = Date.now() + windowMs
   for (;;) {
@@ -253,7 +319,7 @@ async function appearsWithin(
      * there.
      */
     try {
-      if (await browser.exists(engine, selector)) return true
+      if (await browser.exists(engine, selector, pageId)) return true
     } catch {
       // fall through to the deadline check and poll again
     }
@@ -311,7 +377,7 @@ async function runStep(
   db: Db,
   loaded: Loaded,
   step: RecipeStep,
-  phase: 'stage' | 'verify',
+  phase: 'stage' | 'commit' | 'verify',
   pageId?: string,
 ): Promise<string | undefined> {
   const { engine } = loaded
@@ -416,17 +482,37 @@ async function screenshot(
  */
 export async function stage(db: Db, publicationId: string): Promise<StagedPage> {
   const loaded = load(db, publicationId)
+  const mode = resolveMode(loaded.outlet)
 
-  if (loaded.publication.status !== 'AWAITING_SEND') {
+  /**
+   * Already filed, and filing again would file a second one.
+   *
+   * First of everything in this function and deliberately **before the lease**:
+   * a busy browser must not be able to mask this. A detached stage created
+   * something durable at the destination, so a reopened row asking to stage is
+   * not a retry — it is a request for a duplicate, and the only safe answer is
+   * the link it already has. See docs/browser-publishing.md §4.2.
+   */
+  if (mode === 'detached' && loaded.publication.draftUrl) {
+    throw new AlreadyFiled(loaded.publication.draftUrl, loaded.outlet.name)
+  }
+
+  /**
+   * Who may ask for a stage depends on who finishes.
+   *
+   * A hand-over row is staged when its operator opens it, so it is already
+   * waiting. An `auto` row is staged by delivery the moment its slot fires, so
+   * it is still `APPROVED` or `SCHEDULED` — and a `FAILED` one is a human
+   * pressing retry on either.
+   */
+  const STAGEABLE = ['AWAITING_SEND', 'APPROVED', 'SCHEDULED', 'FAILED']
+  if (!STAGEABLE.includes(loaded.publication.status)) {
     throw new McpError(
       loaded.publication.status === 'NEEDS_AUTH'
         ? 'the browser is signed out of this destination — sign it back in first'
-        : `this is ${loaded.publication.status.toLowerCase()} — only a publication waiting to be sent can be staged`,
+        : `this is ${loaded.publication.status.toLowerCase()} — only an approved publication can be staged`,
       false,
     )
-  }
-  if (!hasHandover(loaded.recipe)) {
-    throw new McpError(`the recipe for "${loaded.outlet.id}" has no hand over section`, false)
   }
 
   const lease = acquire(loaded.engine.id, publicationId, loaded.outlet.name)
@@ -436,6 +522,19 @@ export async function stage(db: Db, publicationId: string): Promise<StagedPage> 
     const url = destinationUrl(loaded)
     await browser.navigate(loaded.engine, url, pageId)
     trace(db, publicationId, { phase: 'stage', action: 'navigate', url, ok: true, detail: { pageId } })
+
+    /**
+     * Still signed in, checked on *this* tab and not on trust.
+     *
+     * The slot-time probe can be hours old by the moment anyone acts on it, and
+     * a session that lapsed in between would otherwise be discovered as a
+     * `wait:` that timed out — a baffling error on a destination with a button,
+     * and a half-written page on one that saves as you type. This is the
+     * cheapest check in the file and it guards the most expensive mistake.
+     */
+    if (checksSignIn(loaded.recipe) && (await signedOutMarkerFound(db, loaded, pageId, url))) {
+      throw new SignedOut(loaded.outlet.name)
+    }
 
     for (const step of loaded.recipe.stage) {
       await runStep(db, loaded, step, 'stage', pageId)
@@ -500,6 +599,8 @@ export async function stage(db: Db, publicationId: string): Promise<StagedPage> 
       publicationId,
       outletName: loaded.outlet.name,
       handover: loaded.recipe.handover ?? '',
+      mode,
+      commitSelector: commitSelector(loaded.recipe),
       lease,
       screenshotPath: shot,
       stagedAt,
@@ -508,6 +609,31 @@ export async function stage(db: Db, publicationId: string): Promise<StagedPage> 
     const message = err instanceof Error ? err.message : String(err)
     await screenshot(db, loaded, 'stage', holder(loaded.engine.id)?.pageId)
     await releaseTab(loaded, publicationId)
+
+    /**
+     * Signed out is not a failure, it is a state with its own machinery.
+     *
+     * Marking the row `FAILED` here would bypass `NEEDS_AUTH` entirely — no
+     * notification asking for a sign-in, no deep link to the login page, and an
+     * ops error for a browser that simply needs somebody to log in. The one
+     * thing this branch must do is get out of the way.
+     */
+    if (err instanceof SignedOut) {
+      db.update(schema.publications)
+        .set({ status: 'NEEDS_AUTH', error: null })
+        .where(eq(schema.publications.id, publicationId))
+        .run()
+
+      logEvent(db, {
+        level: 'warn',
+        code: 'NEEDS_AUTH',
+        storyId: loaded.publication.storyId,
+        publicationId,
+        message: `the browser is signed out of ${loaded.outlet.name} — someone has to sign it back in`,
+        detail: { outletId: loaded.outlet.id, foundWhile: 'staging' },
+      })
+      throw err
+    }
 
     db.update(schema.publications)
       .set({ status: 'FAILED', error: message })
@@ -552,49 +678,33 @@ export async function attest(db: Db, publicationId: string): Promise<Attestation
     )
   }
 
-  let externalUrl: string | null = null
-  let externalId: string | null = null
-  let evidence: Attestation['evidence'] = 'attested'
+  const found = await runVerify(db, loaded, holder(loaded.engine.id)?.pageId)
+  const shipped = await rereadShipped(db, loaded, holder(loaded.engine.id)?.pageId)
 
-  if (loaded.recipe.verify.length > 0) {
-    try {
-      const pageId = holder(loaded.engine.id)?.pageId
-      for (const step of loaded.recipe.verify) {
-        const value = await runStep(db, loaded, step, 'verify', pageId)
-        if (step.verb !== 'read' || !value) continue
-        if (step.key === 'url') externalUrl = value
-        if (step.key === 'id') externalId = value
-      }
-      // Only a step that actually found something is evidence. A verify section
-      // that ran and matched nothing means the desk looked and did not see the
-      // post, which is not the same as having no way to look.
-      evidence = externalUrl || externalId ? 'verified' : 'attested'
-    } catch (err) {
-      // The human says it went out; a failed check does not overrule them. It
-      // downgrades the evidence and is recorded, which is all it should do.
-      logEvent(db, {
-        level: 'warn',
-        code: 'VERIFY_FAILED',
-        storyId: loaded.publication.storyId,
-        publicationId,
-        message: `could not confirm the post on ${loaded.outlet.name} — recording it as attested`,
-        detail: { error: err instanceof Error ? err.message : String(err) },
-      })
-    }
-    await screenshot(db, loaded, 'verify', holder(loaded.engine.id)?.pageId)
-  }
+  /**
+   * `edited` outranks the other two, and that ordering is the point of it.
+   *
+   * A row where the desk both found the post *and* can see the operator worked
+   * on it afterwards is not simply `verified` — what is at the destination is no
+   * longer the payload that was approved. Saying `verified` there would be true
+   * about the wrong question. See docs/browser-publishing.md §2.
+   */
+  const evidence: Attestation['evidence'] = shipped?.differs ? 'edited' : found.evidence
 
   db.update(schema.publications)
     .set({
       status: 'PUBLISHED',
       publishedAt: new Date().toISOString(),
       evidence,
-      externalUrl,
-      externalId,
+      externalUrl: found.externalUrl,
+      externalId: found.externalId,
+      shipped: shipped ? JSON.stringify(shipped.fields) : null,
       error: null,
     })
     .where(eq(schema.publications.id, publicationId))
     .run()
+
+  const { externalUrl, externalId } = found
 
   await releaseTab(loaded, publicationId)
 
@@ -605,13 +715,238 @@ export async function attest(db: Db, publicationId: string): Promise<Attestation
     storyId: loaded.publication.storyId,
     publicationId,
     message:
-      evidence === 'verified'
-        ? `published on ${loaded.outlet.name} and confirmed on the page`
-        : `published on ${loaded.outlet.name}, on the operator's word`,
+      evidence === 'edited'
+        ? `published on ${loaded.outlet.name}, edited on the page before it went`
+        : evidence === 'verified'
+          ? `published on ${loaded.outlet.name} and confirmed on the page`
+          : `published on ${loaded.outlet.name}, on the operator's word`,
     detail: { driver: 'browser', evidence, externalUrl, externalId },
   })
 
   return { status: 'PUBLISHED', evidence, externalUrl, externalId }
+}
+
+/**
+ * Look for what was published, and record what was found.
+ *
+ * Shared by the operator's confirmation and by an `auto` publish, because they
+ * are asking the same question of the same page — the difference between them is
+ * who was standing there, not what counts as having landed.
+ *
+ * A verify section that ran and matched nothing means the desk looked and did
+ * not see the post, which is *not* the same as having no way to look. Only a
+ * step that actually found something is evidence.
+ */
+async function runVerify(
+  db: Db,
+  loaded: Loaded,
+  pageId: string | undefined,
+): Promise<{ externalUrl: string | null; externalId: string | null; evidence: 'verified' | 'attested' }> {
+  let externalUrl: string | null = null
+  let externalId: string | null = null
+
+  if (loaded.recipe.verify.length === 0) return { externalUrl, externalId, evidence: 'attested' }
+
+  try {
+    for (const step of loaded.recipe.verify) {
+      const value = await runStep(db, loaded, step, 'verify', pageId)
+      if (step.verb !== 'read' || !value) continue
+      if (step.key === 'url') externalUrl = value
+      if (step.key === 'id') externalId = value
+    }
+  } catch (err) {
+    // A failed check never overrules what happened. It downgrades the evidence
+    // and is recorded, which is all it should ever do — the alternative is a
+    // desk that calls a successful publish a failure because it could not find
+    // the permalink afterwards.
+    logEvent(db, {
+      level: 'warn',
+      code: 'VERIFY_FAILED',
+      storyId: loaded.publication.storyId,
+      publicationId: loaded.publication.id,
+      message: `could not confirm the post on ${loaded.outlet.name} — recording it as attested`,
+      detail: { error: err instanceof Error ? err.message : String(err) },
+    })
+  }
+
+  await screenshot(db, loaded, 'verify', pageId)
+  return { externalUrl, externalId, evidence: externalUrl || externalId ? 'verified' : 'attested' }
+}
+
+/**
+ * What the fields hold now that the operator has finished with them.
+ *
+ * The compare at staging proved the desk typed the approved bytes. This asks a
+ * different question — what did the destination actually receive — and the two
+ * answers diverge whenever somebody applies formatting, fixes a line, or adds a
+ * paragraph before pressing send. All of which is legitimate; recording the
+ * approved payload as though it were the published one is not.
+ *
+ * Returns null when the desk cannot honestly answer: no tab left, or a read that
+ * failed. A missing answer is recorded as missing rather than assumed to be
+ * "unchanged" — see docs/browser-publishing.md §5.
+ */
+async function rereadShipped(
+  db: Db,
+  loaded: Loaded,
+  pageId: string | undefined,
+): Promise<{ fields: Record<string, string>; differs: boolean } | null> {
+  const fills = loaded.recipe.stage.filter((step) => step.verb === 'fill')
+  if (fills.length === 0) return null
+
+  const fields: Record<string, string> = {}
+  let differs = false
+
+  try {
+    for (const step of fills) {
+      const approved = String(loaded.payload[step.key!] ?? '')
+      const field = await browser.readValue(loaded.engine, step.selector, pageId)
+      const normalise = field.rich ? comparableRich : comparable
+      const changed = normalise(approved) !== normalise(field.value)
+      if (changed) differs = true
+      fields[step.key!] = field.value
+
+      trace(db, loaded.publication.id, {
+        phase: 'handover',
+        action: 'compare',
+        selector: step.selector,
+        ok: true,
+        detail: {
+          key: step.key,
+          reread: true,
+          changed,
+          approved: hash(normalise(approved)),
+          shipped: hash(normalise(field.value)),
+        },
+      })
+    }
+  } catch (err) {
+    // Recorded as *not read*, which is the honest shape. Claiming a comparison
+    // that did not happen is the exact failure this whole mechanism exists to
+    // correct, so a re-read the desk could not do says so in the trace.
+    trace(db, loaded.publication.id, {
+      phase: 'handover',
+      action: 'compare',
+      ok: false,
+      detail: { reread: false, error: err instanceof Error ? err.message : String(err) },
+    })
+    return null
+  }
+
+  return { fields, differs }
+}
+
+/**
+ * Press the destination's own button, then go and look.
+ *
+ * Called only after `stage` has composed the page **and proved the bytes**, and
+ * only for an outlet in `auto`. That ordering is the entire reason `## Commit`
+ * is a section of its own rather than the tail of `## Stage`: put the sending
+ * click among the stage steps and it fires before the comparison it is supposed
+ * to be gated on. See docs/browser-publishing.md §3.
+ *
+ * The lease and the tab are the caller's; this finishes the job inside them.
+ */
+export async function commitAndVerify(db: Db, publicationId: string): Promise<Attestation> {
+  const loaded = load(db, publicationId)
+  const pageId = holder(loaded.engine.id)?.pageId
+
+  for (const [index, step] of loaded.recipe.commit.entries()) {
+    // The last click is the one that made it public, and an incident asks about
+    // that step and no other. A trace that could not tell it from the click
+    // that opened a menu could not answer the only question worth asking.
+    const commits = step.verb === 'click' && index === lastClickIndex(loaded.recipe.commit)
+    await runStep(db, loaded, step, 'commit', pageId)
+    if (commits) {
+      trace(db, publicationId, {
+        phase: 'commit',
+        action: 'commit',
+        selector: step.selector,
+        ok: true,
+        detail: { sentAt: new Date().toISOString() },
+      })
+    }
+    renew(loaded.engine.id, publicationId)
+  }
+
+  const found = await runVerify(db, loaded, pageId)
+
+  /**
+   * Verify found nothing, and the click has already happened.
+   *
+   * `FAILED` would be the intuitive status and it is the dangerous one: it reads
+   * as "this did not go out" and invites a retry that posts the story twice. The
+   * truthful record is that it was sent and the desk could not find it, which is
+   * `PUBLISHED (attested)` plus a warning loud enough to go and look by hand.
+   */
+  if (found.evidence === 'attested' && loaded.recipe.verify.length > 0) {
+    logEvent(db, {
+      level: 'warn',
+      code: 'VERIFY_FAILED',
+      storyId: loaded.publication.storyId,
+      publicationId,
+      message: `sent to ${loaded.outlet.name} but the desk could not find it afterwards — check the destination before re-sending, it is probably there`,
+      detail: { outletId: loaded.outlet.id, mode: 'auto' },
+    })
+  }
+
+  db.update(schema.publications)
+    .set({
+      status: 'PUBLISHED',
+      publishedAt: new Date().toISOString(),
+      evidence: found.evidence,
+      externalUrl: found.externalUrl,
+      externalId: found.externalId,
+      error: null,
+    })
+    .where(eq(schema.publications.id, publicationId))
+    .run()
+
+  await releaseTab(loaded, publicationId)
+
+  logEvent(db, {
+    level: 'info',
+    code: 'PUBLISHED',
+    storyId: loaded.publication.storyId,
+    publicationId,
+    message: `published on ${loaded.outlet.name} by the desk`,
+    detail: {
+      driver: 'browser',
+      mode: 'auto',
+      evidence: found.evidence,
+      externalUrl: found.externalUrl,
+      externalId: found.externalId,
+    },
+  })
+
+  return { status: 'PUBLISHED', ...found }
+}
+
+function lastClickIndex(steps: RecipeStep[]): number {
+  for (let i = steps.length - 1; i >= 0; i--) if (steps[i]!.verb === 'click') return i
+  return -1
+}
+
+/**
+ * File a draft, record where it went, and let go of everything.
+ *
+ * The detached half of staging. Verify runs *now* rather than at confirmation,
+ * because the link it reads is the hand-over — without it there is nothing to
+ * send the operator to and, worse, nothing for the never-file-this-twice guard
+ * to key on.
+ */
+export async function recordDraft(db: Db, publicationId: string): Promise<string | null> {
+  const loaded = load(db, publicationId)
+  const found = await runVerify(db, loaded, holder(loaded.engine.id)?.pageId)
+  const draftUrl = found.externalUrl
+
+  db.update(schema.publications)
+    .set({ draftUrl })
+    .where(eq(schema.publications.id, publicationId))
+    .run()
+
+  await releaseTab(loaded, publicationId)
+  return draftUrl
 }
 
 /**
@@ -632,6 +967,14 @@ export async function abandon(db: Db, publicationId: string): Promise<void> {
    * the record that it was ever composed.
    */
   if (loaded.publication.status !== 'AWAITING_SEND') return
+
+  /**
+   * A detached row was never "staged and waiting" in the sense this clears. Its
+   * draft is at the destination, and `staged_at` is the record that it was put
+   * there. Wiping that on the way out of a screen would leave a real page under
+   * News with nothing in the desk pointing at it.
+   */
+  if (loaded.publication.draftUrl) return
 
   db.update(schema.publications)
     .set({ stagedAt: null })
@@ -735,10 +1078,29 @@ export async function confirmSignedIn(db: Db, publicationId: string): Promise<bo
 
   if (!(await probeSignedIn(db, publicationId))) return false
 
-  db.update(schema.publications)
-    .set({ status: 'AWAITING_SEND', error: null })
-    .where(eq(schema.publications.id, publicationId))
-    .run()
+  /**
+   * Where the row goes back to depends on who was going to finish it.
+   *
+   * A hand-over row returns to `AWAITING_SEND`: its operator is standing on the
+   * live view and will carry on. An `auto` row has nobody standing anywhere —
+   * leaving it `AWAITING_SEND` would park it forever, offering "press their
+   * button" on a destination whose button the desk was always going to press.
+   * It goes back to being approved, and the send is queued again.
+   */
+  const mode = resolveMode(loaded.outlet)
+
+  if (mode === 'auto') {
+    db.update(schema.publications)
+      .set({ status: loaded.publication.scheduledFor ? 'SCHEDULED' : 'APPROVED', error: null })
+      .where(eq(schema.publications.id, publicationId))
+      .run()
+    enqueue(db, 'publish', publicationId)
+  } else {
+    db.update(schema.publications)
+      .set({ status: 'AWAITING_SEND', error: null })
+      .where(eq(schema.publications.id, publicationId))
+      .run()
+  }
 
   logEvent(db, {
     level: 'info',

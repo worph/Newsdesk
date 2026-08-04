@@ -12,7 +12,6 @@ import { InstallButton } from './InstallButton'
 const NAV = [
   { group: 'Desk', items: [
     { to: '/now', label: 'Needs you', ready: true },
-    { to: '/queue', label: 'Queue', ready: true },
     { to: '/calendar', label: 'Calendar', ready: true },
     { to: '/compose', label: 'Write', ready: true },
     { to: '/tips', label: 'Tip line', ready: true },
@@ -45,7 +44,8 @@ function Icon({ path }: { path: ReactNode }) {
 
 /**
  * What a thumb can reach, in the order a phone actually uses the desk: what is
- * waiting, the backlog behind it, and the two ways to put something in.
+ * waiting, everything the desk has opened behind it, and the two ways to put
+ * something in.
  *
  * Everything else lives one tap further away, in the sheet — a phone screen
  * cannot show ten destinations without becoming a menu instead of an app.
@@ -58,8 +58,8 @@ const TABS = [
     icon: <Icon path={<><path d="M18 8A6 6 0 1 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></>} />,
   },
   {
-    to: '/queue',
-    label: 'Queue',
+    to: '/stories',
+    label: 'Stories',
     icon: <Icon path={<><path d="M8 6h13" /><path d="M8 12h13" /><path d="M8 18h13" /><path d="M3 6h.01" /><path d="M3 12h.01" /><path d="M3 18h.01" /></>} />,
   },
   {

@@ -9,7 +9,6 @@ import { Live } from './pages/Live'
 import { Log } from './pages/Log'
 import { Login } from './pages/Login'
 import { Now } from './pages/Now'
-import { Queue } from './pages/Queue'
 import { Review } from './pages/Review'
 import { Settings } from './pages/Settings'
 import { Stories } from './pages/Stories'
@@ -38,7 +37,9 @@ export function App() {
     <Layout>
       <Routes>
         <Route path="/now" element={<Now />} />
-        <Route path="/queue" element={<Queue />} />
+        {/* The Queue was two lists of rows every other screen already owns —
+            what needs a decision is /now, the archive behind it is /stories. */}
+        <Route path="/queue" element={<Navigate to="/now" replace />} />
         <Route path="/calendar" element={<Calendar />} />
         <Route path="/compose" element={<Compose />} />
         <Route path="/stories" element={<Stories />} />

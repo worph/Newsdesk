@@ -10,7 +10,15 @@ import { createGateCheck, type GateCheck } from './gate.js'
 import type { Db } from './db/index.js'
 import type { PlacementOptions } from './api/routes.js'
 
-export const VERSION = '0.1.0'
+/**
+ * Kept in step with package.json by hand, and by hand because the alternative
+ * is reading package.json at runtime — which means resolving a path that is
+ * one thing in the workspace, another in the built server, and another again
+ * in the image. This string is what the boot log and /healthz report, so a
+ * stale one costs an afternoon working out which build a box is actually
+ * running. Bump it in the same commit as the four package.json files.
+ */
+export const VERSION = '1.1.1'
 
 export interface AppOptions {
   db: Db

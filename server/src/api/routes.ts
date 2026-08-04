@@ -109,7 +109,13 @@ export function registerRoutes(
   receiveOptions: PlacementOptions = {},
 ): void {
   registerIngestRoutes(app, db, receiveOptions)
-  registerStoryRoutes(app, db, receiveOptions.enqueueManagingEditor, receiveOptions.enqueueWriter)
+  registerStoryRoutes(app, db, {
+    ...(receiveOptions.enqueueManagingEditor
+      ? { enqueueManagingEditor: receiveOptions.enqueueManagingEditor }
+      : {}),
+    ...(receiveOptions.enqueueWriter ? { enqueueWriter: receiveOptions.enqueueWriter } : {}),
+    ...(receiveOptions.enqueuePublish ? { enqueuePublish: receiveOptions.enqueuePublish } : {}),
+  })
   registerPublicationRoutes(app, db, receiveOptions.enqueuePublish, receiveOptions.driver)
   registerActionRoutes(app, db)
   registerCalendarRoutes(app, db)

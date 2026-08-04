@@ -1,4 +1,4 @@
-import { filledKeys, hasHandover, parseRecipe, readKeys } from '@newsdesk/shared'
+import { commitSelector, filledKeys, hasCommit, hasHandover, parseRecipe, readKeys } from '@newsdesk/shared'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -104,5 +104,68 @@ click: button.post`)
   it('notices a section written twice', () => {
     const { issues } = parseRecipe('## Stage\nclick: a\n## Stage\nclick: b')
     expect(issues[0]!.message).toContain('appears twice')
+  })
+})
+
+/**
+ * The section that sends.
+ *
+ * It is separate from `## Stage` because of *when* it runs: the byte-compare
+ * happens at the end of staging, so a sending click among the stage steps would
+ * fire before the copy had been proved. Everything below is that ordering
+ * expressed as grammar.
+ */
+describe('the commit section', () => {
+  const TELEGRAM = `## Stage
+wait: div.composer
+fill: div.composer <- body
+
+## Commit
+wait:  button.send:not([disabled])
+click: button.send
+
+## Verify
+read: a.message-link -> url`
+
+  it('collects its steps apart from the stage ones', () => {
+    const { recipe, issues } = parseRecipe(TELEGRAM)
+
+    expect(issues).toEqual([])
+    expect(recipe.stage.map((s) => s.verb)).toEqual(['wait', 'fill'])
+    expect(recipe.commit.map((s) => s.verb)).toEqual(['wait', 'click'])
+    expect(hasCommit(recipe)).toBe(true)
+  })
+
+  it('refuses to let copy in after the compare', () => {
+    // The one rule that makes the section worth having: everything the desk
+    // types is proved before these steps run, so nothing may type here.
+    const { issues } = parseRecipe(`## Stage
+fill: div.composer <- body
+## Commit
+fill: div.composer <- body`)
+
+    expect(issues).toHaveLength(1)
+    expect(issues[0]!.line).toBe(4)
+    expect(issues[0]!.message).toContain('not allowed under commit')
+  })
+
+  it('takes the last click as the button that sends', () => {
+    // Reaching a send button routinely means opening a menu on the way, and
+    // those earlier clicks are how you get to the thing, not the thing.
+    const { recipe } = parseRecipe(`## Stage
+fill: div.composer <- body
+## Commit
+click: button.more
+click: button.send-now`)
+
+    expect(commitSelector(recipe)).toBe('button.send-now')
+  })
+
+  it('has no opinion when a destination has no button', () => {
+    // Docmost saves as the desk types; there is nothing to press, and that is a
+    // shape of recipe rather than a defect in one.
+    const { recipe } = parseRecipe(LINKEDIN)
+    expect(hasCommit(recipe)).toBe(false)
+    expect(commitSelector(recipe)).toBeNull()
   })
 })

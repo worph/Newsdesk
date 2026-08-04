@@ -391,12 +391,13 @@ export function registerPublicationRoutes(
   })
 
   /**
-   * The article half of the queue.
+   * Every draft, filtered by status — what a caller asking "what is standing at
+   * the gate" gets.
    *
    * Ordered by when the story arrived rather than when it was approved: the
    * rows this list exists for have not been approved, so `approved_at` is null
-   * on every one of them and sorts them arbitrarily. Oldest first, like the
-   * placement half — a queue is a backlog.
+   * on every one of them and sorts them arbitrarily. Oldest first — a backlog
+   * is read from the bottom.
    */
   app.get('/api/v1/publications', { preHandler: requireSession }, async (request) => {
     const query = z

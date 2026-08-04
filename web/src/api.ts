@@ -296,6 +296,26 @@ export interface StoryPlacement {
   angle: string | null
 }
 
+/**
+ * A placement as the story screen sees it: the proposal plus everything needed
+ * to decide on it there, without opening the editor.
+ *
+ * All of it is computed by the server per request. `ready` in particular is the
+ * gate's own condition rather than a status check the browser reinvents — a
+ * button offering a decision the desk will refuse is worse than one that is off
+ * with a reason.
+ */
+export interface StoryPlacementDetail extends StoryPlacement {
+  /** Committed. Set only once this placement has been approved for a time. */
+  scheduledFor: string | null
+  urgency: string | null
+  /** When the desk proposes to send it, and why that time. Null once settled. */
+  schedule: { at: string; reason: string } | null
+  ready: boolean
+  /** Slots still blank, which is why `ready` is false. */
+  missing: string[]
+}
+
 export interface StoryRow {
   id: string
   title: string
@@ -326,8 +346,16 @@ export interface StoryDetail {
     receivedAt: string
     considered: string | null
   }>
-  placements: StoryPlacement[]
+  placements: StoryPlacementDetail[]
   related: { id: string; title: string; summary: string } | null
+  /** The desk's zone, so a proposed time reads as it does on the calendar. */
+  timezone: string
+}
+
+/** What an approve-all came to, destination by destination. */
+export interface BulkApproval {
+  approved: Array<{ id: string; outlet: string; scheduledFor: string | null }>
+  skipped: Array<{ id: string; outlet: string; reason: string }>
 }
 
 export interface JobRow {
@@ -427,8 +455,8 @@ export interface CalendarEntry {
 }
 
 /**
- * One publication as it appears in a list. The article half of the Queue —
- * enough to decide whether to open it without opening it.
+ * One publication as it appears in a list: enough to decide whether to open it
+ * without opening it.
  */
 export interface PublicationRow {
   id: string
@@ -605,6 +633,17 @@ export const api = {
     request<{ id: string }>(`/api/v1/stories/${id}/placements`, {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  /**
+   * Let every draft on a story through the gate at once. Each destination keeps
+   * the time the desk proposed for it unless one is given here for all of them,
+   * and each is approved on its own terms — what cannot go comes back in
+   * `skipped` with the reason, and the rest still go.
+   */
+  approvePlacements: (id: string, scheduledFor?: string) =>
+    request<BulkApproval>(`/api/v1/stories/${id}/placements/approve`, {
+      method: 'POST',
+      body: JSON.stringify(scheduledFor ? { scheduled_for: scheduledFor } : {}),
     }),
   /**
    * Write and place a piece yourself. Creates the story and one blank

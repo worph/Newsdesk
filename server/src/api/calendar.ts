@@ -12,8 +12,8 @@ import { getTimezone } from '../settings.js'
  * Planned and published are the same question asked in two tenses — "what does
  * this outlet's week look like" — so they are one query rather than two
  * screens. A row is on the calendar if it has committed to a time or if it
- * actually went out; everything still awaiting a decision belongs on the Queue,
- * which is a backlog and not a calendar.
+ * actually went out; everything still awaiting a decision belongs on the story
+ * it came from, where the decision is made — a backlog is not a calendar.
  */
 
 const range = z.object({

@@ -45,7 +45,7 @@ export interface RecipeStep {
   line: number
 }
 
-export type RecipeSection = 'stage' | 'handover' | 'verify' | 'signedout'
+export type RecipeSection = 'stage' | 'commit' | 'handover' | 'verify' | 'signedout'
 
 export interface Recipe {
   /**
@@ -61,9 +61,28 @@ export interface Recipe {
   signedOut: RecipeStep[]
   stage: RecipeStep[]
   /**
+   * The click that actually sends, and anything needed to reach it.
+   *
+   * Separate from `stage` because of *when* it runs, which is the whole reason
+   * the section exists: the byte-compare happens at the end of staging, so a
+   * sending click among the stage steps would fire before the copy had been
+   * proved. Here it runs only after the comparison passed.
+   *
+   * Executed by the desk only under `publish: auto`. Under a hand-over mode it
+   * is inert — the viewer uses its selector to point the operator at the button
+   * and nothing else. That is what lets one recipe serve both, with the outlet's
+   * `publish` field as the only difference.
+   *
+   * See docs/browser-publishing.md §3.
+   */
+  commit: RecipeStep[]
+  /**
    * The prose the operator is shown when the page is handed to them, or null
-   * when the section is absent — which is what distinguishes an outlet a human
-   * finishes from one the desk would finish itself.
+   * when the section is absent.
+   *
+   * It used to be the mode switch — present meant a human finished the publish.
+   * It no longer is: the outlet says how a publish finishes, and this says what
+   * to tell the person once it has been decided that there is one.
    */
   handover: string | null
   verify: RecipeStep[]
@@ -81,10 +100,17 @@ export interface ParsedRecipe {
   issues: RecipeIssue[]
 }
 
-/** Which verbs make sense where. A `read` while staging would find nothing yet. */
+/**
+ * Which verbs make sense where. A `read` while staging would find nothing yet.
+ *
+ * `commit` takes no `fill:`, and that refusal is load-bearing rather than tidy:
+ * the byte-compare has already run by the time these steps execute, so copy
+ * entering here would be copy nobody proved.
+ */
 const ALLOWED: Record<RecipeSection, readonly RecipeVerb[]> = {
   signedout: ['when'],
   stage: ['wait', 'hover', 'click', 'fill'],
+  commit: ['wait', 'click'],
   handover: [],
   verify: ['wait', 'read'],
 }
@@ -92,6 +118,7 @@ const ALLOWED: Record<RecipeSection, readonly RecipeVerb[]> = {
 const HEADINGS: Array<{ section: RecipeSection; re: RegExp }> = [
   { section: 'signedout', re: /^#{1,6}\s*signed[\s-]?out\s*$/i },
   { section: 'stage', re: /^#{1,6}\s*stage\s*$/i },
+  { section: 'commit', re: /^#{1,6}\s*commit\s*$/i },
   { section: 'handover', re: /^#{1,6}\s*hand[\s-]?over\s*$/i },
   { section: 'verify', re: /^#{1,6}\s*verif(?:y|ication)\s*$/i },
 ]
@@ -159,8 +186,15 @@ export function parseRecipe(text: string): ParsedRecipe {
   const issues: RecipeIssue[] = []
   const signedOut: RecipeStep[] = []
   const stage: RecipeStep[] = []
+  const commit: RecipeStep[] = []
   const verify: RecipeStep[] = []
-  const prose: Record<RecipeSection, string[]> = { signedout: [], stage: [], handover: [], verify: [] }
+  const prose: Record<RecipeSection, string[]> = {
+    signedout: [],
+    stage: [],
+    commit: [],
+    handover: [],
+    verify: [],
+  }
   const seen = new Set<RecipeSection>()
 
   let section: RecipeSection | undefined
@@ -217,6 +251,7 @@ export function parseRecipe(text: string): ParsedRecipe {
     if (!step) continue
     if (section === 'signedout') signedOut.push(step)
     else if (section === 'stage') stage.push(step)
+    else if (section === 'commit') commit.push(step)
     else verify.push(step)
   }
 
@@ -230,11 +265,13 @@ export function parseRecipe(text: string): ParsedRecipe {
     recipe: {
       signedOut,
       stage,
+      commit,
       handover: seen.has('handover') ? tidy('handover') : null,
       verify,
       prose: {
         signedout: tidy('signedout'),
         stage: tidy('stage'),
+        commit: tidy('commit'),
         handover: tidy('handover'),
         verify: tidy('verify'),
       },
@@ -244,14 +281,34 @@ export function parseRecipe(text: string): ParsedRecipe {
 }
 
 /**
- * Whether a human finishes this publish.
+ * Whether the recipe says anything to the person who finishes this publish.
  *
- * The presence of the section is the whole signal — an outlet whose recipe says
- * what the operator clicks is one the desk stops short of sending. See
- * docs/browser-publishing.md section 3.
+ * It used to be the mode switch. It is now what the validator checks a declared
+ * mode *against*: a hand-over mode with nothing to tell the operator is an
+ * outlet that will hand them a page and no instructions, and an `auto` outlet
+ * carrying operator instructions is a contradiction rather than a leftover.
+ * See docs/browser-publishing.md section 3.
  */
 export function hasHandover(recipe: Recipe): boolean {
   return recipe.handover !== null
+}
+
+/** Whether the desk has been given a click that sends. */
+export function hasCommit(recipe: Recipe): boolean {
+  return recipe.commit.length > 0
+}
+
+/**
+ * The button that sends, for a viewer that wants to point at it.
+ *
+ * The *last* click rather than the first: reaching a send button routinely means
+ * opening a menu or a modal on the way, and those earlier clicks are how you get
+ * to the thing, not the thing. Returns null when the recipe names no commit
+ * step, which is every destination that saves as you type.
+ */
+export function commitSelector(recipe: Recipe): string | null {
+  const clicks = recipe.commit.filter((step) => step.verb === 'click')
+  return clicks.length > 0 ? clicks[clicks.length - 1]!.selector : null
 }
 
 /** Payload keys the recipe types in, in order. */

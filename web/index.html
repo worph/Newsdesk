@@ -4,7 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <!--
+      `crossorigin="use-credentials"` is load-bearing behind the AppShield gate:
+      a manifest is fetched in CORS mode with credentials OMITTED by default, so
+      the perimeter sees an anonymous request, 302s it to the OIDC login, and the
+      browser reports a CORS failure on the auth origin rather than the 401 it
+      really is — and then applies no manifest at all.
+
+      Belt and braces, not the whole fix. The manifest and the icons must ALSO
+      be reachable anonymously, because Chrome does not build the Android
+      launcher icon itself: it hands the URLs to Google's WebAPK minting server,
+      which fetches them from outside with no session. Behind the gate that
+      fetch 302s, minting fails, and Android installs a plain shortcut wearing
+      the little Chrome badge instead of a real app icon. The public route for
+      those paths is the Caddy `handle` block in
+      deploy/docker-compose.yundera.yml.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <!-- For anything that will not take an SVG favicon, which still includes some Android launchers. -->
     <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192" />

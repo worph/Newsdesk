@@ -26,6 +26,26 @@ export interface BrowserEngineRef {
 /** Long enough for a heavy SPA to settle, short enough that a hang is visible. */
 const DEFAULT_TIMEOUT_MS = 30_000
 
+/**
+ * How long a read-back keeps looking for a field that is not there yet.
+ *
+ * A read-back runs immediately after the last fill, which on a single-page app
+ * is exactly when a route change can be in flight: Docmost unmounts the title
+ * editor for the better part of a second while it swaps pages, and a single
+ * `querySelector` landing in that gap reports the field as missing when it is
+ * merely between renders. Failing there is the worst possible moment to fail —
+ * the bytes are already typed, so the publish is marked FAILED after the
+ * destination has changed.
+ *
+ * Not a `waitFor`: this has to distinguish "gone for a moment" from "the
+ * selector is wrong", and a shorter window than the 15s one keeps a genuinely
+ * bad selector from costing a quarter minute per field.
+ */
+const READ_BACK_RETRY_MS = 5_000
+const READ_BACK_POLL_MS = 250
+
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms))
+
 export function loadEngine(db: Db, engineId: string | null): BrowserEngineRef {
   if (!engineId) throw new McpError('this outlet has no browser engine configured', false)
   const row = db.select().from(schema.browserEngines).where(eq(schema.browserEngines.id, engineId)).get()
@@ -163,14 +183,24 @@ export const browser = {
       if ('value' in el && typeof el.value === 'string') return { value: el.value, rich: false }
       return { value: el.innerText ?? el.textContent ?? '', rich: true }
     })()`
-    const result = (await post(engine, '/api/evaluate', { script, pageId })) as {
-      result?: { value?: unknown; rich?: unknown } | null
+    const deadline = Date.now() + READ_BACK_RETRY_MS
+    for (;;) {
+      const result = (await post(engine, '/api/evaluate', { script, pageId })) as {
+        result?: { value?: unknown; rich?: unknown } | null
+      }
+      const field = result?.result
+      if (field !== null && field !== undefined) {
+        return { value: String(field.value ?? ''), rich: field.rich === true }
+      }
+      if (Date.now() >= deadline) {
+        throw new McpError(
+          `nothing matches "${selector}" on the page, ` +
+            `still not there ${READ_BACK_RETRY_MS / 1000}s after the last field was filled`,
+          false,
+        )
+      }
+      await sleep(READ_BACK_POLL_MS)
     }
-    const field = result?.result
-    if (field === null || field === undefined) {
-      throw new McpError(`nothing matches "${selector}" on the page`, false)
-    }
-    return { value: String(field.value ?? ''), rich: field.rich === true }
   },
 
   /**

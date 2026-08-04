@@ -83,7 +83,9 @@ export const EVENT_CODES = {
   STAGED: { category: 'delivery', label: 'composed in the browser' },
   STAGE_FAILED: { category: 'delivery', label: 'could not compose', assistable: true },
   VERIFY_FAILED: { category: 'delivery', label: 'could not confirm the post' },
-  SEND_EXPIRED: { category: 'delivery', label: 'hand-over expired' },
+  SEND_EXPIRED: { category: 'delivery', label: 'too stale to send' },
+  DRAFT_FILED: { category: 'delivery', label: 'draft filed at the destination' },
+  DRAFT_ABANDONED: { category: 'delivery', label: 'draft left unfinished' },
 
   // ── queue ─────────────────────────────────────────────────────────────────
   JOB_RETRY: { category: 'queue', label: 'job will retry' },
@@ -93,6 +95,7 @@ export const EVENT_CODES = {
 
   // ── editorial ─────────────────────────────────────────────────────────────
   APPROVED: { category: 'editorial', label: 'approved' },
+  PLACEMENTS_APPROVED: { category: 'editorial', label: 'placements approved together' },
   WITHDRAWN: { category: 'editorial', label: 'withdrawn' },
   RESCHEDULED: { category: 'editorial', label: 'rescheduled' },
   ROUTE_ADDED: { category: 'editorial', label: 'placement added' },
@@ -147,21 +150,37 @@ interface EventDetails {
   DRAFT_FAILED: { publicationId: string; outletId?: string; error: string; stack?: string }
   PUBLISH_FAILED: {
     outletId: string
-    outletName: string
-    driver: string
+    outletName?: string
+    driver?: string
     tool?: string | null
     endpointId?: string | null
     httpStatus?: number
     /** The classifier's read: is a human reconnecting the fix, or is this a bug to chase? */
     needsAuth?: boolean
     retryable?: boolean
+    /** A browser publish that never got a lane: who had it, and since when. */
+    heldBy?: string
+    since?: number
     error: string
     stack?: string
   }
   PUBLISH_LATE: { outletId: string; scheduledFor: string; sentAt: string; lateBySeconds: number }
   /** Which page, which browser, and what it refused to do — see publish_traces for the steps. */
   STAGE_FAILED: { outletId: string; engine: string; error: string; stack?: string }
-  SEND_EXPIRED: { outletId: string; waitedHours: number; error?: string }
+  /**
+   * `allowedHours` is what the row's urgency permitted. Only an outlet that
+   * publishes unwatched can expire — a hand-over one waits as long as it takes,
+   * because a person sees the date before it goes anywhere.
+   */
+  SEND_EXPIRED: {
+    outletId: string
+    waitedHours: number
+    urgency?: string | null
+    allowedHours?: number
+    error?: string
+  }
+  DRAFT_FILED: { outletId: string; draftUrl: string | null }
+  DRAFT_ABANDONED: { outletId: string; draftUrl: string; reason?: string }
   JOB_RETRY: { jobId: string; kind: string; refId: string; attempts: number; retryInSeconds: number; error: string }
   JOB_FAILED: { jobId: string; kind: string; refId: string; attempts: number; error: string; stack?: string }
   JOB_DEFERRED: { jobId: string; kind: string; refId: string; retryInSeconds: number; reason: string }

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Db } from '../src/db/index.js'
-import { EXPIRE_AFTER_MS, handoverFollowupHandler } from '../src/ports/delivery/browser/handover.js'
+import { handoverFollowupHandler } from '../src/ports/delivery/browser/handover.js'
 import { BrowserBusy, resetLeases } from '../src/ports/delivery/browser/lease.js'
 import {
   abandon,
@@ -63,6 +63,14 @@ interface StubPage {
    * and the container answers 500 rather than an answer.
    */
   failReads: number
+  /**
+   * Answer the next N *value* reads as "no such element", then behave. Not the
+   * same lie as `failReads`: the container is healthy and answering, the page
+   * simply has not rendered the field yet. This is what a single-page app looks
+   * like mid-route-change, and it is the case a read-back must ride out rather
+   * than call a missing selector.
+   */
+  hideReads: number
   fail: string | null
 }
 
@@ -145,6 +153,10 @@ async function startStub(page: StubPage): Promise<{ apiBase: string; close: () =
         if (attribute !== undefined) {
           return reply({ result: page.attributes.get(`${selector}|${attribute}`) ?? null })
         }
+        if (page.hideReads > 0) {
+          page.hideReads -= 1
+          return reply({ result: null })
+        }
         const stored = page.fields.get(selector!)
         if (stored === undefined) return reply({ result: null })
         return reply({
@@ -178,7 +190,16 @@ const BODY = 'The release lands today.\n\nIt is smaller than it looks.'
 function seedBrowserPublication(
   db: Db,
   apiBase: string,
-  options: { status?: string; recipe?: string; scheduledFor?: string | null } = {},
+  options: {
+    status?: string
+    recipe?: string
+    scheduledFor?: string | null
+    publish?: string
+    requiresHuman?: boolean
+    draftUrl?: string
+    urgency?: string
+    approvedAt?: string
+  } = {},
 ): string {
   db.insert(schema.browserEngines)
     .values({ id: 'sidecar', name: 'Newsdesk browser', apiBase, viewer: 'novnc' })
@@ -195,6 +216,8 @@ function seedBrowserPublication(
       voiceId: 'alicia',
       engineId: 'sidecar',
       recipe: options.recipe ?? RECIPE,
+      publish: options.publish ?? null,
+      requiresHuman: options.requiresHuman ?? null,
       argsSpec: JSON.stringify({
         url: PAGE_URL,
         body: { slot: 'markdown', label: 'Post', optional: false, primary: true },
@@ -223,8 +246,10 @@ function seedBrowserPublication(
       origin: 'managing-editor',
       slots: JSON.stringify({ body: BODY }),
       payload: JSON.stringify({ url: PAGE_URL, body: BODY }),
-      approvedAt: new Date().toISOString(),
+      approvedAt: options.approvedAt ?? new Date().toISOString(),
       scheduledFor: options.scheduledFor ?? null,
+      draftUrl: options.draftUrl ?? null,
+      urgency: options.urgency ?? null,
     })
     .run()
 
@@ -247,6 +272,7 @@ describe('browser publishing', () => {
       mangle: null,
       rich: false,
       failReads: 0,
+      hideReads: 0,
       fail: null,
     }
     stub = await startStub(page)
@@ -420,6 +446,34 @@ ${RECIPE}`
       expect(JSON.stringify(detail)).not.toContain('release lands today')
     })
 
+    it('waits out a field that is between renders rather than calling it missing', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = seedBrowserPublication(db, stub.apiBase)
+      // Docmost unmounts the editors for the better part of a second while it
+      // swaps pages, and the read-back runs the instant the last fill returns.
+      // Failing here would report a bad selector for a page that is merely
+      // mid-navigation — after the bytes have already been typed into it.
+      page.hideReads = 4
+
+      await expect(stage(db, id)).resolves.toMatchObject({ outletName: 'LinkedIn' })
+      expect(page.hideReads).toBe(0)
+    })
+
+    it('still gives up on a selector that never matches', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      const id = seedBrowserPublication(db, stub.apiBase)
+      // Longer than the retry window: this one really is the wrong selector,
+      // and waiting forever for it would hide the recipe bug.
+      page.hideReads = 1_000
+
+      await expect(stage(db, id)).rejects.toThrow(/nothing matches "div\.editor"/)
+      expect(db.select().from(schema.publications).where(eqId(id)).get()?.status).toBe('FAILED')
+      // The one test that pays the retry window in full — that it is spent
+      // before giving up is the assertion, so it cannot be stubbed shorter.
+    }, 15_000)
+
     it('refuses to hand over a page that does not hold what was approved', async () => {
       const { db } = openTestDb()
       seedDesk(db)
@@ -542,7 +596,7 @@ ${RECIPE}`
       seedDesk(db)
       const id = seedBrowserPublication(db, stub.apiBase, { status: 'PUBLISHED' })
 
-      await expect(stage(db, id)).rejects.toThrow(/only a publication waiting to be sent/)
+      await expect(stage(db, id)).rejects.toThrow(/only an approved publication can be staged/)
     })
   })
 
@@ -636,30 +690,57 @@ ${RECIPE}`
   })
 
   describe('when nobody publishes it', () => {
-    it('reminds, then gives the slot up', async () => {
+    it('keeps reminding, and never gives the slot up on its own', async () => {
       const { db } = openTestDb()
       seedDesk(db)
       const scheduledFor = new Date(Date.now() - 60_000).toISOString()
       const id = seedBrowserPublication(db, stub.apiBase, { status: 'SCHEDULED', scheduledFor })
+      const at = (ms: number) => () => Date.parse(scheduledFor) + ms
 
       await deliverPublication(db, id)
 
       // An hour in: still owed, so it nags and books the next look.
-      await handoverFollowupHandler({ now: () => Date.parse(scheduledFor) + 60 * 60_000 })(db, id)
+      await handoverFollowupHandler({ now: at(60 * 60_000) })(db, id)
       expect(db.select().from(schema.publications).where(eqId(id)).get()?.status).toBe('AWAITING_SEND')
 
-      // Past the deadline: the news has moved on, so it wants a fresh decision
-      // rather than firing stale copy tomorrow morning.
-      await handoverFollowupHandler({ now: () => Date.parse(scheduledFor) + EXPIRE_AFTER_MS + 1 })(db, id)
+      /**
+       * Two days later it is still there, and that is the point.
+       *
+       * The old rule withdrew after twelve hours, which reads as prudent until
+       * you use the desk the way it is actually used: approve a batch in the
+       * morning, work through the notifications that evening or the next day.
+       * A slot given up in the meantime throws away work somebody was about to
+       * do. Nothing here can go out without a person looking at it first, and a
+       * person can see the date — so staleness is shown, not enforced.
+       */
+      await handoverFollowupHandler({ now: at(2 * 24 * 60 * 60_000) })(db, id)
 
       const row = db.select().from(schema.publications).where(eqId(id)).get()
-      expect(row?.status).toBe('AWAITING_APPROVAL')
-      // Withdrawn, not spiked: the copy survives and only the slot is given up.
-      expect(row?.payload).toBeNull()
-      expect(row?.scheduledFor).toBeNull()
+      expect(row?.status).toBe('AWAITING_SEND')
+      expect(row?.payload).not.toBeNull()
+      expect(row?.scheduledFor).toBe(scheduledFor)
 
       const codes = db.select().from(schema.events).all().map((e) => e.code)
-      expect(codes).toContain('SEND_EXPIRED')
+      expect(codes).not.toContain('SEND_EXPIRED')
+
+      // And it is still booked to ask again, rather than having gone quiet.
+      const pending = db.select().from(schema.jobs).all().filter((job) => job.kind === 'handover-followup')
+      expect(pending.some((job) => job.status === 'PENDING')).toBe(true)
+    })
+
+    it('stops asking eventually rather than nagging into the void', async () => {
+      const { db } = openTestDb()
+      seedDesk(db)
+      const scheduledFor = new Date(Date.now() - 60_000).toISOString()
+      const id = seedBrowserPublication(db, stub.apiBase, { status: 'AWAITING_SEND', scheduledFor })
+
+      db.delete(schema.jobs).run()
+      await handoverFollowupHandler({ now: () => Date.parse(scheduledFor) + 60 * 24 * 60 * 60_000 })(db, id)
+
+      // Two months untouched is somebody ignoring it on purpose. The row stays
+      // — only the reminders stop.
+      expect(db.select().from(schema.publications).where(eqId(id)).get()?.status).toBe('AWAITING_SEND')
+      expect(db.select().from(schema.jobs).all()).toHaveLength(0)
     })
 
     it('does nothing at all once the row has moved on', async () => {
@@ -667,7 +748,7 @@ ${RECIPE}`
       seedDesk(db)
       const id = seedBrowserPublication(db, stub.apiBase, { status: 'PUBLISHED' })
 
-      await handoverFollowupHandler({ now: () => Date.now() + EXPIRE_AFTER_MS * 2 })(db, id)
+      await handoverFollowupHandler({ now: () => Date.now() + 24 * 60 * 60_000 })(db, id)
 
       expect(db.select().from(schema.publications).where(eqId(id)).get()?.status).toBe('PUBLISHED')
     })

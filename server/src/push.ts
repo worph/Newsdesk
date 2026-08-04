@@ -280,6 +280,52 @@ export async function notifyNeedsAuth(
   })
 }
 
+/**
+ * Called when the desk published something by itself.
+ *
+ * The only notification here that asks for nothing. Every other one exists
+ * because the desk is stuck without a person; this one exists because it is
+ * not, and telling somebody afterwards is the whole of the courtesy owed. So it
+ * says what went where, and carries the link if the desk found one.
+ *
+ * The link goes to the desk's own page for the row, never straight to the
+ * destination: the service worker navigates with `client.navigate`, which
+ * rejects a cross-origin target outright.
+ */
+export async function notifyPublished(
+  db: Db,
+  publicationId: string,
+  outletName: string,
+  storyTitle: string,
+  externalUrl: string | null,
+): Promise<void> {
+  await notifyAll(db, {
+    title: `Published on ${outletName}`,
+    body: externalUrl ? `${storyTitle} — tap to see where it went` : storyTitle,
+    url: `/review/${publicationId}`,
+  })
+}
+
+/**
+ * Called when a `detached` publish filed its draft and let go of the browser.
+ *
+ * Not "it is published" and not "go and press a button": the page exists at the
+ * destination, unfinished, and the operator can take as long as they like over
+ * it. What they need from the phone is the fact and a way back to the link.
+ */
+export async function notifyDraftFiled(
+  db: Db,
+  publicationId: string,
+  outletName: string,
+  storyTitle: string,
+): Promise<void> {
+  await notifyAll(db, {
+    title: `Filed on ${outletName} — yours to finish`,
+    body: storyTitle,
+    url: `/review/${publicationId}`,
+  })
+}
+
 export interface PlacedStory {
   storyId: string
   title: string
@@ -308,8 +354,8 @@ export async function notifyPlacementsWaiting(db: Db, opened: PlacedStory[]): Pr
     title: waiting > 1 ? `${waiting} placements waiting` : held ? 'A story needs context' : 'A placement is waiting',
     body: single ? single.title : opened.map((story) => story.title).join(' · '),
     // A single story opens on itself; several have no one page, so they land
-    // on the action list rather than the backlog — a notification exists to be
-    // acted on, and the Queue makes you hunt for the thing that just chimed.
+    // on the action list — a notification exists to be acted on, and any list
+    // wider than that makes you hunt for the thing that just chimed.
     url: single ? `/stories/${single.storyId}` : '/now',
   })
 }

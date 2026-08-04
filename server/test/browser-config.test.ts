@@ -112,14 +112,6 @@ describe('a browser outlet', () => {
     ])
   })
 
-  it('refuses an autonomous outlet rather than half-supporting it', () => {
-    // Phase 1 publishes only where a human presses the button. An outlet with no
-    // hand over section would otherwise look configured and quietly do nothing.
-    expect(issuesFor(config({ recipe: '## Stage\nfill: div.editor <- body' }))).toEqual([
-      expect.stringContaining('autonomous browser outlets are not supported yet'),
-    ])
-  })
-
   it('will not type into a key that is not an authoring slot', () => {
     expect(
       issuesFor(config({ recipe: '## Stage\nfill: div.editor <- url\n## Hand over\nGo.' })),
@@ -148,5 +140,101 @@ describe('a browser outlet', () => {
       }),
     )
     expect(issues).toContain('`recipe` only applies to a browser outlet — this one is "mcp"')
+  })
+
+  it('will not let a non-browser outlet say how it finishes', () => {
+    // The dangerous version of the previous test: an outlet meant to be
+    // hand-finished, typed `mcp`, would send itself and still read as
+    // configured — the mistake would only be visible after it had gone out.
+    const issues = issuesFor(
+      config({
+        driver: 'mcp',
+        endpoint: undefined,
+        tool: 'discord-mcp__send_embed',
+        engine: undefined,
+        recipe: undefined,
+        publish: 'tethered',
+        args: {
+          channelId: '123',
+          body: { slot: 'markdown', label: 'Post', primary: true },
+        },
+      }),
+    )
+    expect(issues).toContain('`publish` only applies to a browser outlet — this one is "mcp"')
+  })
+})
+
+/**
+ * The mode says how a publish finishes; the recipe has to be capable of it.
+ *
+ * These replace the old blanket refusal of autonomous outlets. Each one is a
+ * specific way the pair can be incoherent — an outlet that publishes by itself
+ * with nothing able to confirm it landed, or a person being handed a page with
+ * no instructions — rather than a house style.
+ */
+describe('how a browser outlet finishes', () => {
+  const AUTO = `## Stage
+fill: div.editor <- body
+
+## Commit
+click: button.send
+
+## Verify
+read: a.permalink -> url`
+
+  it('defaults to tethered, which is what it did before the field existed', () => {
+    // No `publish` anywhere in the fixture, and the hand-over rules apply — so
+    // an old configuration keeps its behaviour rather than acquiring a new one.
+    expect(issuesFor(config())).toEqual([])
+    expect(issuesFor(config({ publish: 'tethered' }))).toEqual([])
+  })
+
+  it('lets an outlet publish by itself when it can prove it landed', () => {
+    expect(issuesFor(config({ publish: 'auto', recipe: AUTO }))).toEqual([])
+  })
+
+  it('refuses to publish by itself with no way to confirm it', () => {
+    // Nobody is watching, so a PUBLISHED row with no verify step is one the desk
+    // cannot vouch for at all — and there is no honest evidence grade for that.
+    expect(
+      issuesFor(config({ publish: 'auto', recipe: '## Stage\nfill: div.editor <- body' })),
+    ).toEqual([expect.stringContaining('needs a `## Verify` section')])
+  })
+
+  it('refuses hand-over prose on an outlet that finishes itself', () => {
+    expect(
+      issuesFor(config({ publish: 'auto', recipe: `${AUTO}\n## Hand over\nPress Post.` })),
+    ).toEqual([expect.stringContaining('has nobody to talk to')])
+  })
+
+  it('wants hand-over prose whenever a person finishes it', () => {
+    const noProse = '## Stage\nfill: div.editor <- body\n## Verify\nread: a.permalink -> url'
+    expect(issuesFor(config({ publish: 'tethered', recipe: noProse }))).toEqual([
+      expect.stringContaining('needs a `## Hand over` section'),
+    ])
+  })
+
+  it('wants a detached outlet to record where it filed the draft', () => {
+    // Without the link there is nothing to hand over and, worse, nothing for the
+    // never-file-this-twice guard to key on.
+    expect(issuesFor(config({ publish: 'detached' }))).toEqual([
+      expect.stringContaining('cannot stop itself filing a second one'),
+    ])
+  })
+
+  it('keeps a commit section legal, and inert, under a hand-over mode', () => {
+    // This is what lets one Telegram recipe serve both cases: whether the desk
+    // presses send is the outlet's `publish` field, not the recipe's shape.
+    const both = `${AUTO}\n## Hand over\nRead it, then press the send arrow.`
+    expect(issuesFor(config({ publish: 'tethered', recipe: both }))).toEqual([])
+  })
+
+  it('never lets a destination that requires a person publish by itself', () => {
+    const issues = issuesFor(config({ publish: 'auto', requires_human: true, recipe: AUTO }))
+    expect(issues).toEqual([expect.stringContaining('cannot publish by itself')])
+  })
+
+  it('leaves requires_human alone when a person does finish it', () => {
+    expect(issuesFor(config({ publish: 'tethered', requires_human: true }))).toEqual([])
   })
 })

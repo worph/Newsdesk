@@ -198,10 +198,19 @@ outlets:
       identical but for their containers — hence `.page-title` and
       `.editor-container` rather than the bare `.ProseMirror` a first reading
       suggests, which would put the note in the title.
+
+      The wait after the + is on an *empty* title, and that is the whole point.
+      Creating the child page and opening it took 6.5s when measured, and the
+      News page the desk is standing on has a title editor of its own that
+      matches 100ms after the click — so a wait on the editor alone returns
+      while the browser is still on the parent, and the story is typed over the
+      destination page instead of into a new one. Docmost autosaves, so that is
+      not recoverable by failing later. `h1.is-editor-empty` is the placeholder
+      state of a brand-new page and the parent can never have it.
       wait:  a.isSelected
       hover: a.isSelected
       click: a.isSelected button:has(svg.tabler-icon-plus)
-      wait:  .page-title .ProseMirror[contenteditable="true"]
+      wait:  .page-title .ProseMirror[contenteditable="true"] h1.is-editor-empty
       fill:  .page-title .ProseMirror[contenteditable="true"] <- title
       fill:  .editor-container .ProseMirror[contenteditable="true"] <- body
 

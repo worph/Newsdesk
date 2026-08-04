@@ -4,8 +4,9 @@ import { schema } from '../../db/index.js'
 import { logEvent } from '../../events.js'
 import { callTool, McpError } from '../mcp/client.js'
 import { attachAuth } from '../mcp/oauth.js'
+import { publishAutonomously } from './browser/autopublish.js'
 import { offerHandover } from './browser/handover.js'
-import { handsOver } from './browser/session.js'
+import { resolveMode } from './browser/mode.js'
 
 /**
  * The delivery port sends an already-approved payload. It performs no
@@ -151,6 +152,17 @@ export async function deliverPublication(db: Db, publicationId: string): Promise
    */
   if (publication.status === 'AWAITING_SEND') return
 
+  /**
+   * States the desk itself chose, and a late job must not argue with.
+   *
+   * `EXPIRED` is a send the desk declined because the news had aged past what
+   * its urgency allows; `ABANDONED_DRAFT` is a draft at a destination that only
+   * a person can resolve. Falling through to the throw below would park the job
+   * `FAILED` and write an ops error about the desk doing exactly what it decided
+   * to do.
+   */
+  if (publication.status === 'EXPIRED' || publication.status === 'ABANDONED_DRAFT') return
+
   if (
     publication.status !== 'APPROVED' &&
     publication.status !== 'SCHEDULED' &&
@@ -169,18 +181,30 @@ export async function deliverPublication(db: Db, publicationId: string): Promise
   if (!outlet) throw new McpError(`outlet "${publication.outletId}" no longer exists`, false)
 
   /**
-   * A browser outlet whose recipe hands over is not sent here — it is *offered*.
+   * A browser publish is not sent through a driver at all — it is either run or
+   * offered, and the outlet says which.
    *
-   * The slot has come, so the desk stops and asks an operator to open the page
-   * and press the destination's own button. Deliberately nothing is staged at
-   * this moment: staging would occupy the single browser lane from now until
-   * whenever they get to it, and the browser would be reaped from under them
-   * long before that. The page is composed when they open the link.
-   *
-   * See docs/browser-publishing.md section 4.
+   * This used to read the recipe's shape. It reads the outlet's declared mode
+   * now, because the recipe answered two questions with one signal and got the
+   * second one wrong on every destination that saves as you type. See
+   * docs/browser-publishing.md sections 3 and 4.
    */
-  if (outlet.driver === 'browser' && handsOver(outlet.recipe)) {
-    await offerHandover(db, publication, outlet)
+  if (outlet.driver === 'browser') {
+    const mode = resolveMode(outlet)
+
+    if (mode === 'auto') {
+      await publishAutonomously(db, publication, outlet)
+      return
+    }
+
+    /**
+     * Handed over. Deliberately nothing is staged for a `tethered` outlet at
+     * this moment: staging would occupy the single browser lane from now until
+     * whenever the operator gets to it, and the browser would be reaped from
+     * under them long before that. `detached` is the opposite and stages here —
+     * that branch lives in `offerHandover`, which is where the two diverge.
+     */
+    await offerHandover(db, publication, outlet, mode)
     return
   }
 
@@ -298,8 +322,22 @@ export function publishHandler() {
      * the queue claims a job whose time has come, so early is impossible and
      * a few seconds of worker latency is not news. A gap of minutes means the
      * desk was down or the queue was saturated.
+     *
+     * And only when something actually went out. `deliverPublication` returning
+     * is not the same as a send: it also returns having handed the row to an
+     * operator, having filed a draft for them to finish, or having declined a
+     * stale one. Logging on `scheduledFor` alone wrote *"this went out N hours
+     * late"* about publications that had not gone out at all — wrong for every
+     * hand-over row since browser publishing existed, and routinely wrong now
+     * that a busy browser can defer the job.
      */
-    if (publication?.scheduledFor) {
+    const sent = db
+      .select({ status: schema.publications.status })
+      .from(schema.publications)
+      .where(eq(schema.publications.id, refId))
+      .get()
+
+    if (publication?.scheduledFor && sent?.status === 'PUBLISHED') {
       const due = Date.parse(publication.scheduledFor)
       const lateBySeconds = Math.round((Date.now() - due) / 1000)
       if (Number.isFinite(due) && lateBySeconds >= LATE_THRESHOLD_SECONDS) {

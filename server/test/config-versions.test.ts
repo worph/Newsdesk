@@ -246,3 +246,62 @@ describe('the loss a restore cannot undo', () => {
     expect(stored.map((row) => row.yaml).join(' ')).not.toContain('sekrit')
   })
 })
+
+/**
+ * The fields that say how a browser publish finishes have to survive the round
+ * trip, because the Configuration screen writes the whole document on every
+ * save. A field that read back as absent would silently revert an outlet to
+ * `tethered` — or, worse, lose the `requires_human` line that is the only thing
+ * standing between a destination and publishing itself.
+ */
+describe('a browser outlet through the store', () => {
+  function asBrowserOutlet(config: ReturnType<typeof readConfig>) {
+    const outlet = config.outlets[0]!
+    config.browser_engines = [{ id: 'sidecar', name: 'browser', api_base: 'http://browser:9746', viewer: 'novnc' }]
+    outlet.driver = 'browser'
+    outlet.engine = 'sidecar'
+    outlet.tool = undefined
+    outlet.endpoint = undefined
+    outlet.args = {
+      url: 'https://example.test/page',
+      body: { slot: 'text', label: 'Post', primary: true },
+    }
+    outlet.recipe =
+      '## Stage\nfill: div.editor <- body\n## Hand over\nPress Post.\n## Verify\nread: a.link -> url'
+  }
+
+  it('keeps the mode and the requires-human line across a write and a read', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+
+    writeConfig(
+      db,
+      configWith(db, (config) => {
+        asBrowserOutlet(config)
+        config.outlets[0]!.publish = 'detached'
+        config.outlets[0]!.requires_human = true
+      }),
+      'ui',
+    )
+
+    const outlet = readConfig(db).outlets[0]!
+    expect(outlet.publish).toBe('detached')
+    expect(outlet.requires_human).toBe(true)
+    expect(configToYaml(readConfig(db))).toContain('publish: detached')
+  })
+
+  it('leaves an outlet that never declared a mode without one', () => {
+    // Absent has to stay absent rather than becoming an explicit `tethered`:
+    // the default lives in one function, and a document that grew the field on
+    // its own would make every save look like a change.
+    const { db } = openTestDb()
+    seedDesk(db)
+
+    writeConfig(db, configWith(db, asBrowserOutlet), 'ui')
+
+    const outlet = readConfig(db).outlets[0]!
+    expect(outlet.publish).toBeUndefined()
+    expect(outlet.requires_human).toBeUndefined()
+    expect(configToYaml(readConfig(db))).not.toContain('publish:')
+  })
+})

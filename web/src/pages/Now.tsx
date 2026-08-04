@@ -6,9 +6,9 @@ import { when } from '../components/StoryCard'
 /**
  * What to press, right now.
  *
- * This is where a notification lands, and it exists because the Queue is the
- * wrong screen for that moment: the Queue is a backlog you read when there is
- * time — two tabs, a preview of every draft, the reason each story was placed.
+ * This is where a notification lands, and it exists because a backlog is the
+ * wrong screen for that moment: Stories is what you read when there is time —
+ * every story the desk opened, the reason each was placed, the drafts under it.
  * Arriving there from a phone at 09:04 you have to *find* the thing that just
  * chimed at you.
  *
@@ -95,12 +95,12 @@ export function Now() {
       <header className="space-y-1 pt-4">
         <h1 className="text-xl font-semibold tracking-tight">Needs you</h1>
         <p className="text-sm text-desk-500">
-          Everything the desk cannot do without you, most urgent first. The{' '}
+          Everything the desk cannot do without you, most urgent first.{' '}
           <button
-            onClick={() => navigate('/queue')}
+            onClick={() => navigate('/stories')}
             className="underline underline-offset-2 hover:text-desk-700"
           >
-            Queue
+            Stories
           </button>{' '}
           has the same work with all its context, for when there is time.
         </p>

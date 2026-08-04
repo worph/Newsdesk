@@ -7,6 +7,7 @@ import {
   type Config,
   type ConfigIssue,
   type ArgsSpec,
+  type PublishMode,
   type Reporting,
 } from '@newsdesk/shared'
 import { desc, eq, inArray, notInArray, sql } from 'drizzle-orm'
@@ -99,6 +100,8 @@ export function readConfig(db: Queryable): Config {
         ...(t.cadence ? { cadence: JSON.parse(t.cadence) as Cadence } : {}),
         ...(t.engineId ? { engine: t.engineId } : {}),
         ...(t.recipe ? { recipe: t.recipe } : {}),
+        ...(t.publish ? { publish: t.publish as PublishMode } : {}),
+        ...(t.requiresHuman ? { requires_human: true } : {}),
       })),
   }
 }
@@ -268,6 +271,8 @@ export function writeConfig(db: Db, input: unknown, author: string, reason?: str
         cadence: t.cadence ? JSON.stringify(t.cadence) : null,
         engineId: t.engine ?? null,
         recipe: t.recipe ?? null,
+        publish: t.publish ?? null,
+        requiresHuman: t.requires_human ?? null,
       }
       tx.insert(schema.outlets).values(row).onConflictDoUpdate({ target: schema.outlets.id, set: row }).run()
     }
