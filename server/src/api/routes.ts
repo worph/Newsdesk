@@ -12,7 +12,9 @@ import {
 } from '../auth.js'
 import {
   ConfigRejected,
+  configIssuesFrom,
   configToYaml,
+  describeConfig,
   listConfigVersions,
   readConfig,
   writeConfig,
@@ -30,6 +32,7 @@ import {
 } from '../push.js'
 import { DEFAULT_TIMEZONE, getSetting, getOrCreateSecret, getTimezone, SETTING, setSetting } from '../settings.js'
 import { registerActionRoutes } from './actions.js'
+import { registerAdminMcpRoutes } from './admin-mcp.js'
 import { registerBrowserRoutes } from './browser.js'
 import { registerCalendarRoutes } from './calendar.js'
 import { registerComposeRoutes } from './compose.js'
@@ -58,31 +61,8 @@ function issuesReply(issues: ConfigIssue[]) {
   return { error: 'configuration rejected', issues }
 }
 
-/**
- * A shape failure carries a path per problem; flattening it to one string
- * would put the forms back to hunting through a document for the field that
- * upset zod.
- */
-function issuesFrom(err: unknown): ConfigIssue[] {
-  if (err instanceof z.ZodError) {
-    return err.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message }))
-  }
-  return [{ path: '', message: err instanceof Error ? err.message : String(err) }]
-}
-
 function candidateFrom(body: z.infer<typeof configBody>): unknown {
   return 'yaml' in body ? yamlToConfig(body.yaml) : body.config
-}
-
-/** What changed, in the shape a human scanning the log wants: counts, not a diff. */
-function configSummary(config: ReturnType<typeof readConfig>): string {
-  const parts = [
-    `${config.outlets.length} outlet${config.outlets.length === 1 ? '' : 's'}`,
-    `${config.stringers.length} stringer${config.stringers.length === 1 ? '' : 's'}`,
-    `${config.voices.length} voice${config.voices.length === 1 ? '' : 's'}`,
-    `${config.mcp_endpoints.length} endpoint${config.mcp_endpoints.length === 1 ? '' : 's'}`,
-  ]
-  return parts.join(', ')
 }
 
 export interface PlacementOptions extends ReceiveOptions {
@@ -133,6 +113,7 @@ export function registerRoutes(
       : {}),
   })
   registerConfigVersionRoutes(app, db)
+  registerAdminMcpRoutes(app, db, version)
 
   // ── push ──────────────────────────────────────────────────────────────────
   // The public key is needed by the service worker before it can subscribe.
@@ -281,7 +262,7 @@ export function registerRoutes(
       const { config, issues } = parseConfig(candidateFrom(parsed.data))
       return { ok: issues.length === 0, issues, config, yaml: configToYaml(config) }
     } catch (err) {
-      return reply.code(400).send({ error: 'could not parse', issues: issuesFrom(err) })
+      return reply.code(400).send({ error: 'could not parse', issues: configIssuesFrom(err) })
     }
   })
 
@@ -300,14 +281,14 @@ export function registerRoutes(
         message: 'you saved the configuration',
         detail: {
           author: 'ui',
-          summary: configSummary(config),
+          summary: describeConfig(config),
           ...(restorePoint ? { versionId: restorePoint.id } : {}),
         },
       })
       return { ok: true, yaml: configToYaml(config), config }
     } catch (err) {
       if (err instanceof ConfigRejected) return reply.code(422).send(issuesReply(err.issues))
-      return reply.code(400).send({ error: 'could not parse', issues: issuesFrom(err) })
+      return reply.code(400).send({ error: 'could not parse', issues: configIssuesFrom(err) })
     }
   })
 
@@ -363,6 +344,34 @@ export function registerRoutes(
       detail: {},
     })
     return reply.send({ ingestToken: token })
+  })
+
+  /**
+   * The bearer for the administration MCP server at `POST /mcp`.
+   *
+   * Generated on demand rather than required up front, so the endpoint is
+   * never accidentally open: there is always a token, and it is always one
+   * nobody knows until they read it here.
+   */
+  app.get('/api/v1/settings/mcp-token', { preHandler: requireSession }, async () => ({
+    token: getOrCreateSecret(db, SETTING.adminMcpToken),
+  }))
+
+  app.post('/api/v1/settings/mcp-token/rotate', { preHandler: requireSession }, async () => {
+    const { randomBytes } = await import('node:crypto')
+    const token = randomBytes(32).toString('base64url')
+    setSetting(db, SETTING.adminMcpToken, token)
+    // Warn for the same reason the ingest rotation warns: the beaconify
+    // sidecar holds the old value in its environment and starts getting 401s
+    // the moment this returns, somewhere nobody is looking.
+    logEvent(db, {
+      level: 'warn',
+      actor: 'human',
+      code: 'MCP_TOKEN_ROTATED',
+      message: 'the administration MCP token was rotated — the beaconify sidecar must be given the new one',
+      detail: {},
+    })
+    return { token }
   })
 }
 

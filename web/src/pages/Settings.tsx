@@ -229,6 +229,85 @@ function TimezoneSection() {
 }
 
 /**
+ * The key an agent administers the desk with.
+ *
+ * Hidden until asked for, unlike the filing key on the Configuration screen.
+ * That one is meant to be handed out — every stringer needs it — while this one
+ * grants the whole configuration surface, and a screenshot of this page should
+ * not give it away.
+ */
+function AdminMcpSection() {
+  const queryClient = useQueryClient()
+  const [shown, setShown] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const { data } = useQuery({ queryKey: ['mcp-token'], queryFn: api.getMcpToken, enabled: shown })
+
+  const rotate = useMutation({
+    mutationFn: () => api.rotateMcpToken(),
+    onSuccess: () => {
+      setShown(true)
+      void queryClient.invalidateQueries({ queryKey: ['mcp-token'] })
+    },
+  })
+
+  const copy = async () => {
+    if (!data?.token) return
+    await navigator.clipboard.writeText(data.token)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <section className="space-y-2 rounded-lg border border-desk-200 px-4 py-3.5 dark:border-desk-800">
+      <h2 className="text-sm font-medium">Administration key</h2>
+      <p className="text-sm text-desk-500">
+        Lets an agent read and edit your configuration over MCP — the charter, outlets, voices and
+        sources, with the same checks and the same history this app has. It cannot approve or
+        publish anything. Anyone holding it can change how the desk decides what runs, so give it
+        only to the sidecar that needs it.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        {shown && data?.token ? (
+          <>
+            <code className="rounded bg-desk-100 px-2 py-1 font-mono text-xs break-all dark:bg-desk-900">
+              {data.token}
+            </code>
+            <button
+              type="button"
+              onClick={() => void copy()}
+              className="rounded-md border border-desk-300 px-2.5 py-1 text-xs dark:border-desk-700"
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShown(true)}
+            className="rounded-md border border-desk-300 px-2.5 py-1 text-xs dark:border-desk-700"
+          >
+            Show
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => rotate.mutate()}
+          disabled={rotate.isPending}
+          className="rounded-md border border-desk-300 px-2.5 py-1 text-xs text-desk-500 disabled:opacity-40 dark:border-desk-700"
+        >
+          {rotate.isPending ? 'Rotating…' : 'Rotate'}
+        </button>
+      </div>
+      <p className="text-xs text-desk-500">
+        Rotating takes effect at once — the sidecar holding the old one is refused until its
+        <code className="mx-1 font-mono">BEACONIFY_AUTH</code> is updated and it restarts.
+      </p>
+      {rotate.error && <p className="text-sm text-red-600">{(rotate.error as Error).message}</p>}
+    </section>
+  )
+}
+
+/**
  * Install, said in whatever terms this browser actually supports.
  *
  * The button only exists where `beforeinstallprompt` fired, so this section has
@@ -404,6 +483,7 @@ export function Settings() {
       </section>
 
       <TimezoneSection />
+      <AdminMcpSection />
 
       <InstallSection />
 

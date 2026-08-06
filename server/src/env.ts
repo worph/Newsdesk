@@ -13,6 +13,13 @@ export interface Env {
   /** Initial ingest token, consumed on first boot only. Lets a stringer be
    *  configured from the same compose file that starts the desk. */
   ingestToken: string | undefined
+  /**
+   * Initial administration MCP bearer, consumed on first boot only. The
+   * beaconify sidecar carries this same value in `BEACONIFY_AUTH`, and one
+   * compose file setting both is the only way the two agree without a human
+   * copying a generated secret between them.
+   */
+  mcpToken: string | undefined
   logLevel: string
   /**
    * Public origin the desk is reached on. The OAuth redirect URI is built
@@ -53,6 +60,7 @@ export function loadEnv(): Env {
     host: process.env.NEWSDESK_HOST ?? '0.0.0.0',
     adminPassword: process.env.NEWSDESK_ADMIN_PASSWORD,
     ingestToken: process.env.NEWSDESK_INGEST_TOKEN,
+    mcpToken: process.env.NEWSDESK_MCP_TOKEN,
     logLevel: process.env.NEWSDESK_LOG_LEVEL ?? 'info',
     publicUrl: process.env.NEWSDESK_PUBLIC_URL,
     trustedGate: process.env.NEWSDESK_TRUSTED_GATE,

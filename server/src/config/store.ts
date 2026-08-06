@@ -12,6 +12,7 @@ import {
 } from '@newsdesk/shared'
 import { desc, eq, inArray, notInArray, sql } from 'drizzle-orm'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import { z } from 'zod'
 import type { Db, Queryable, Tx } from '../db/index.js'
 import { schema } from '../db/index.js'
 import { getSetting, SETTING, setSetting } from '../settings.js'
@@ -104,6 +105,23 @@ export function readConfig(db: Queryable): Config {
         ...(t.requiresHuman ? { requires_human: true } : {}),
       })),
   }
+}
+
+/**
+ * A parse failure as a list of issues, in the same shape a semantic failure
+ * arrives in.
+ *
+ * `parseConfig` throws on a shape failure and returns issues on a semantic
+ * one, which is the right split for the caller that has to distinguish them —
+ * but every surface that reports to a human or a model wants one list with a
+ * path per problem. Flattening a ZodError to a single string is what puts
+ * someone back to hunting through a document for the field that upset zod.
+ */
+export function configIssuesFrom(err: unknown): ConfigIssue[] {
+  if (err instanceof z.ZodError) {
+    return err.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message }))
+  }
+  return [{ path: '', message: err instanceof Error ? err.message : String(err) }]
 }
 
 export class ConfigRejected extends Error {
@@ -301,6 +319,20 @@ export function configToYaml(config: Config): string {
   return stringifyYaml(config, { lineWidth: 100 })
 }
 
+/**
+ * What the configuration is, in the shape a human scanning the log wants:
+ * counts, not a diff. Shared by every writer of a `CONFIG_CHANGED` row so the
+ * log reads the same whether the change came from the screen or over MCP.
+ */
+export function describeConfig(config: Config): string {
+  return [
+    `${config.outlets.length} outlet${config.outlets.length === 1 ? '' : 's'}`,
+    `${config.stringers.length} stringer${config.stringers.length === 1 ? '' : 's'}`,
+    `${config.voices.length} voice${config.voices.length === 1 ? '' : 's'}`,
+    `${config.mcp_endpoints.length} endpoint${config.mcp_endpoints.length === 1 ? '' : 's'}`,
+  ].join(', ')
+}
+
 // ── history ─────────────────────────────────────────────────────────────────
 
 export interface ConfigVersionSummary {
@@ -316,13 +348,7 @@ export interface ConfigVersionSummary {
 
 function summarise(yaml: string): string {
   try {
-    const config = parseConfig(parseYaml(yaml)).config
-    return [
-      `${config.outlets.length} outlet${config.outlets.length === 1 ? '' : 's'}`,
-      `${config.stringers.length} stringer${config.stringers.length === 1 ? '' : 's'}`,
-      `${config.voices.length} voice${config.voices.length === 1 ? '' : 's'}`,
-      `${config.mcp_endpoints.length} endpoint${config.mcp_endpoints.length === 1 ? '' : 's'}`,
-    ].join(', ')
+    return describeConfig(parseConfig(parseYaml(yaml)).config)
   } catch {
     // A snapshot we can no longer parse is still a snapshot worth offering:
     // the YAML is intact and a human can read it even if this build's schema

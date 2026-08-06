@@ -39,6 +39,15 @@ async function main(): Promise<void> {
   }
   const ingestToken = getOrCreateSecret(db, SETTING.ingestToken)
 
+  // Same first-boot-only rule, for the same reason: the beaconify sidecar is
+  // given this value from the compose file, so both sides can be set once
+  // without anyone copying a generated secret by hand. Rotating from the
+  // Settings screen afterwards wins, and the sidecar has to be told.
+  if (env.mcpToken && !getSetting(db, SETTING.adminMcpToken)) {
+    setSetting(db, SETTING.adminMcpToken, env.mcpToken)
+  }
+  getOrCreateSecret(db, SETTING.adminMcpToken)
+
   // The desk owns its clock: queue state lives in rows, so a restart resumes
   // whatever was in flight rather than stranding it.
   const queue = new JobQueue(db)

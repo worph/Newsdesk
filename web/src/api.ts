@@ -750,6 +750,9 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ timezone }),
     }),
+  getMcpToken: () => request<{ token: string }>('/api/v1/settings/mcp-token'),
+  rotateMcpToken: () =>
+    request<{ token: string }>('/api/v1/settings/mcp-token/rotate', { method: 'POST' }),
   getCalendar: (from: string, to: string) =>
     request<{ entries: CalendarEntry[]; timezone: string }>(
       `/api/v1/calendar?${new URLSearchParams({ from, to })}`,

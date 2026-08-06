@@ -107,6 +107,7 @@ export const EVENT_CODES = {
   CONFIG_CHANGED: { category: 'config', label: 'configuration changed' },
   CONFIG_RESTORED: { category: 'config', label: 'configuration restored' },
   CONFIG_TOKEN_ROTATED: { category: 'config', label: 'ingest token rotated' },
+  MCP_TOKEN_ROTATED: { category: 'config', label: 'admin MCP token rotated' },
   TIMEZONE_CHANGED: { category: 'config', label: 'timezone changed' },
 
   // ── ports ─────────────────────────────────────────────────────────────────
@@ -194,6 +195,7 @@ interface EventDetails {
   CONFIG_CHANGED: { author: string; versionId?: number; summary: string }
   CONFIG_RESTORED: { author: string; restoredFromId: number; versionId?: number }
   CONFIG_TOKEN_ROTATED: Record<string, never>
+  MCP_TOKEN_ROTATED: Record<string, never>
   TIMEZONE_CHANGED: { from: string; to: string }
   DESK_STARTED: { version: string; adoptedBaseline: string | null; reconciled: number; extra: number }
   SCHEMA_RECONCILED: { statements: number; extra: string[] }

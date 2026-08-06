@@ -106,6 +106,15 @@ services:
       NEWSDESK_PORT: "8080"
       # First boot only; change it from the app afterwards.
       NEWSDESK_ADMIN_PASSWORD: "${NEWSDESK_ADMIN_PASSWORD:-}"
+      # Bearer for the administration MCP server at POST /mcp. The beaconify
+      # sidecar below is given the SAME value, which is the whole reason it is
+      # named here rather than left to the generated default — two containers
+      # cannot agree on a secret one of them minted at first boot.
+      #
+      # Leave it unset and the desk still generates one: the endpoint is never
+      # open, the sidecar simply gets 401s until someone pastes the value from
+      # Settings into this file.
+      NEWSDESK_MCP_TOKEN: "${NEWSDESK_MCP_TOKEN:-}"
       # Public origin, for the OAuth redirect URI of endpoints that use it.
       # The app is served from the `newsdesk-` subdomain (see the Caddy labels
       # on the sidecar), not from APP_DOMAIN itself — an OAuth redirect built
@@ -134,6 +143,49 @@ services:
           memory: 512M
         reservations:
           memory: 128M
+
+  # ── the desk, administered over MCP ─────────────────────────────────────
+  # A beaconify sidecar makes `POST /mcp` discoverable by a Beacon aggregator:
+  # it answers Beacon's UDP discovery, fetches the tool catalog itself, and
+  # proxies calls through — adding the Authorization header on the way. The
+  # token therefore never travels in the announce manifest, only between these
+  # two containers.
+  #
+  # What this surface can do is configuration: the charter, outlets, voices,
+  # stringers, endpoints, the reporting block, timezone, and the restore points
+  # for all of it. What it cannot do is approve, publish or spike — a human
+  # between every draft and every channel is the product, not a setting.
+  #
+  # Delete this service if you do not want the desk administrable by an agent.
+  # Nothing else depends on it, and the endpoint stays shut without the token.
+  newsdesk-mcp:
+    image: ghcr.io/worph/beaconify:latest
+    container_name: newsdesk-mcp
+    restart: unless-stopped
+    expose:
+      - "9099"
+    environment:
+      BEACONIFY_NAME: newsdesk
+      BEACONIFY_DESCRIPTION: "Newsdesk administration — charter, outlets, voices, stringers, config history and health."
+      BEACONIFY_UPSTREAM_URL: "http://newsdesk-backend:8080/mcp"
+      # The header, verbatim. Same value as NEWSDESK_MCP_TOKEN above.
+      BEACONIFY_AUTH: "Bearer ${NEWSDESK_MCP_TOKEN:-}"
+      TZ: $TZ
+    depends_on:
+      - newsdesk-backend
+    networks:
+      # `pcs` because that is where this box's Beacon is, and where the backend
+      # is reachable. If your Beacon runs its discovery on a dedicated
+      # `mcp-net` instead — which is the aggregator's own convention — add that
+      # network here too and declare it external at the bottom of this file.
+      # Discovery is multicast: the sidecar has to be on a network Beacon
+      # actually probes, or it is simply never found.
+      - pcs
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    cpu_shares: 50
 
   # ── the browser, for outlets with no API ────────────────────────────────
   # Newsdesk's own instance, not the shared yunderalabs one: that browser is
@@ -285,6 +337,18 @@ x-casaos:
         - Delivery outlets call MCP tools through your Beacon aggregator on the
           internal `pcs` network — Newsdesk never stores Discord or Telegram
           credentials.
+
+        **Administering it from an agent** (optional)
+        - Set `NEWSDESK_MCP_TOKEN` to any long random string before installing.
+          The desk and the `newsdesk-mcp` sidecar both read it, which is the
+          only way the two agree on a secret neither of them invented.
+        - Your Beacon then discovers `newsdesk` and its configuration tools —
+          charter, outlets, voices, stringers, history, health. Nothing there
+          can approve or publish; that stays a person at the desk.
+        - Leave the variable unset and the desk generates a token anyway: the
+          endpoint is never open, the sidecar just gets refused until you paste
+          the value from Settings. Delete the `newsdesk-mcp` service if you do
+          not want the desk administrable this way at all.
 
         **Data** lives in `/DATA/AppData/newsdesk/data` as a single SQLite file.
         Backup is copying one file.

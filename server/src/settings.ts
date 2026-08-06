@@ -6,6 +6,14 @@ import { schema } from './db/index.js'
 export const SETTING = {
   sessionSecret: 'session_secret',
   ingestToken: 'ingest_token',
+  /**
+   * Bearer for the administration MCP server at `POST /mcp`.
+   *
+   * Separate from the ingest token on purpose. That one is pasted into every
+   * stringer workflow in n8n; sharing it here would promote every stringer to
+   * an administrator of the desk that reads it.
+   */
+  adminMcpToken: 'admin_mcp_token',
   adminPasswordHash: 'admin_password_hash',
   configImportedAt: 'config_imported_at',
   /**

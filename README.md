@@ -42,6 +42,11 @@ Three ports, all external, all pluggable:
 token, no LLM API key. Every credential stays where it already lives — in n8n and in the MCP
 servers behind Beacon.
 
+The desk is also **administrable over MCP** — an agent can read and edit the charter, the outlets
+and the rest of the configuration, with the same validation, restore points and refusals the
+Configuration screen gets. It cannot approve, publish or spike anything; that stays a human at the
+desk. See [`docs/admin-mcp.md`](./docs/admin-mcp.md).
+
 ## The concept
 
 It is a newsroom, and the roles are the design:

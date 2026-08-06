@@ -15,9 +15,42 @@ services:
       # from it and must match what the authorization server has registered,
       # so it cannot be inferred from the request when a proxy sits in front.
       NEWSDESK_PUBLIC_URL: "${NEWSDESK_PUBLIC_URL:-}"
+      # Bearer for the administration MCP server at POST /mcp. Only needed if
+      # you start the `mcp` profile below, which has to be given the same
+      # value. Unset, the desk still generates one — read it from Settings.
+      NEWSDESK_MCP_TOKEN: "${NEWSDESK_MCP_TOKEN:-}"
     volumes:
       # Holds newsdesk.db and, on first boot only, a seed config.yaml.
       - ./data:/data
+
+  # ── administration over MCP ─────────────────────────────────────────────
+  # Optional. `docker compose --profile mcp up -d` starts it, and it needs a
+  # Beacon aggregator on `mcp-net` to be worth starting: this sidecar answers
+  # Beacon's UDP discovery, reads the desk's tool catalog and proxies calls to
+  # it, adding the Authorization header on the way. The token stays between
+  # these two containers — it is never part of the announce manifest.
+  #
+  # The tools cover configuration and diagnostics only. Nothing here can
+  # approve, publish or spike.
+  mcp:
+    profiles: ["mcp"]
+    image: ghcr.io/worph/beaconify:latest
+    container_name: newsdesk-mcp
+    restart: unless-stopped
+    environment:
+      BEACONIFY_NAME: newsdesk
+      BEACONIFY_DESCRIPTION: "Newsdesk administration — charter, outlets, voices, stringers, config history and health."
+      BEACONIFY_UPSTREAM_URL: "http://newsdesk:8080/mcp"
+      BEACONIFY_AUTH: "Bearer ${NEWSDESK_MCP_TOKEN:-}"
+    depends_on:
+      - newsdesk
+    networks:
+      # `default` to reach the desk, `mcp-net` because that is where the
+      # aggregator probes. Discovery is multicast, so being merely routable to
+      # Beacon is not enough — the sidecar has to sit on the network Beacon
+      # actually sends its probes on. `docker network create mcp-net` first.
+      - default
+      - mcp-net
 
   # ── the browser, for outlets with no API ────────────────────────────────
   # Optional. `docker compose --profile browser up -d` starts it; without it
@@ -47,3 +80,9 @@ services:
 
 volumes:
   browser-profile:
+
+networks:
+  # Only the `mcp` profile joins it, so a stack started without that profile
+  # does not need it to exist.
+  mcp-net:
+    external: true
