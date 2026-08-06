@@ -113,7 +113,9 @@ export function registerRoutes(
       : {}),
   })
   registerConfigVersionRoutes(app, db)
-  registerAdminMcpRoutes(app, db, version)
+  // The same wiring the tip line gets, so a tip filed over MCP is picked up by
+  // the reporter or the managing editor exactly as one filed over HTTP is.
+  registerAdminMcpRoutes(app, db, version, receiveOptions)
 
   // ── push ──────────────────────────────────────────────────────────────────
   // The public key is needed by the service worker before it can subscribe.

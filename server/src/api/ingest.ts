@@ -39,7 +39,15 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(500).optional(),
 })
 
-function resolveTipStringer(db: Db, requested?: string): { id: string } | { error: string } {
+/**
+ * Which stringer a tip is filed as.
+ *
+ * Exported because the administration MCP files tips too, and the rule that
+ * one unambiguous tip stringer needs no naming — while several do — should be
+ * the same wherever a tip comes in. Two copies would drift into two behaviours
+ * for the same desk.
+ */
+export function resolveTipStringer(db: Db, requested?: string): { id: string } | { error: string } {
   if (requested) {
     const found = db.select().from(schema.stringers).where(eq(schema.stringers.id, requested)).get()
     return found ? { id: found.id } : { error: `unknown stringer "${requested}"` }

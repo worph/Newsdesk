@@ -27,6 +27,8 @@ import {
 import type { Db } from '../db/index.js'
 import { listEvents, logEvent } from '../events.js'
 import { checkHealth } from '../health.js'
+import { resolveTipStringer } from '../api/ingest.js'
+import { receiveFilings, type ReceiveOptions } from '../ports/ingest/receive.js'
 import { subscriptionCount } from '../push.js'
 import { getSetting, getTimezone, SETTING, setSetting } from '../settings.js'
 
@@ -152,9 +154,66 @@ const reason = z
 export interface AdminToolOptions {
   /** Reported by `get_status`, and the only thing here that is not a row. */
   version: string
+  /**
+   * What a filed tip is handed on to. Absent means a tip is stored and goes no
+   * further — which is what a desk with no inference does anyway, and is
+   * better than refusing the tip.
+   */
+  receiveOptions?: ReceiveOptions
 }
 
 export function registerAdminTools(server: McpServer, db: Db, options: AdminToolOptions): void {
+  // ── filing ────────────────────────────────────────────────────────────────
+
+  /**
+   * The one tool here that is not administration, and it earns its place.
+   *
+   * A tip is *ingest*: it puts something on the wire for the managing editor
+   * to judge and a human to approve, and it publishes nothing. So it does not
+   * cross the line the rest of this file holds — nothing here can still send.
+   *
+   * It also grants nothing new. `get_settings` already returns the ingest
+   * token, so a caller holding the administration token can already file by
+   * POSTing to /api/v1/filings; this only saves the round trip.
+   */
+  server.registerTool(
+    'file_tip',
+    {
+      title: 'File an article idea to the tip line',
+      description:
+        'Put an idea on the wire as a tip. It is stored, judged against the charter like any filing, and — if it is worth running — drafted for you to edit and approve. Nothing publishes from this. Names a stringer only when several tip stringers exist.',
+      inputSchema: {
+        text: z.string().min(1).describe('The idea, in free text. Depth is your business; the desk reads prose.'),
+        url: z.string().url().optional().describe('A source link, if the idea came from somewhere.'),
+        stringer_id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Which tip stringer to file as. Only needed when the desk has more than one.'),
+      },
+    },
+    async ({ text, url, stringer_id: stringerId }) => {
+      const stringer = resolveTipStringer(db, stringerId)
+      if ('error' in stringer) return refused(stringer.error)
+
+      // The link goes in the text as well as in refs: the managing editor
+      // reads prose, and a url it never sees is one it cannot weigh.
+      const [result] = receiveFilings(
+        db,
+        [
+          {
+            stringer_id: stringer.id,
+            kind: 'tip',
+            text: url ? `${text}\n\n${url}` : text,
+            ...(url ? { refs: { url } } : {}),
+          },
+        ],
+        options.receiveOptions ?? {},
+      )
+      return json(result)
+    },
+  )
+
   // ── reading ───────────────────────────────────────────────────────────────
 
   server.registerTool(

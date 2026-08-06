@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { registerAdminTools } from '../admin/tools.js'
 import { secretEquals } from '../auth.js'
 import type { Db } from '../db/index.js'
+import type { ReceiveOptions } from '../ports/ingest/receive.js'
 import { getSetting, SETTING } from '../settings.js'
 
 /**
@@ -60,7 +61,12 @@ export function requireAdminMcpToken(db: Db) {
   }
 }
 
-export function registerAdminMcpRoutes(app: FastifyInstance, db: Db, version: string): void {
+export function registerAdminMcpRoutes(
+  app: FastifyInstance,
+  db: Db,
+  version: string,
+  receiveOptions: ReceiveOptions = {},
+): void {
   const preHandler = requireAdminMcpToken(db)
 
   app.post('/mcp', { preHandler }, async (request, reply) => {
@@ -71,7 +77,7 @@ export function registerAdminMcpRoutes(app: FastifyInstance, db: Db, version: st
           'Administration for a Newsdesk editorial desk: the configuration document, its restore points, the operations log and health. Read get_config first. Prefer the upsert_* tools over write_config, which replaces the whole document and deletes whatever is missing from it. This surface cannot approve, publish or spike anything — a human does that at the desk.',
       },
     )
-    registerAdminTools(server, db, { version })
+    registerAdminTools(server, db, { version, receiveOptions })
 
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
 

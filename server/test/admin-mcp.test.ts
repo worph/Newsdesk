@@ -20,19 +20,31 @@ let dir: string
 let handle: DbHandle
 let app: FastifyInstance
 let url: URL
+/** Filing ids handed to the managing editor, so a tip can be proved to move. */
+let enqueued: string[]
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'newsdesk-admin-mcp-'))
   handle = openDb(join(dir, 'test.db'))
   runMigrations(handle.db, migrationsFolder)
   seedDesk(handle.db)
+  handle.db
+    .insert(schema.stringers)
+    .values({ id: 'tip-line', name: 'Tip line', kind: 'tip', enabled: true })
+    .run()
   setSetting(handle.db, SETTING.adminMcpToken, TOKEN)
+  enqueued = []
 
   app = await buildApp({
     db: handle.db,
     sessionSecret: 'test-secret',
     publicDir: join(dir, 'no-public'),
     logLevel: 'silent',
+    receiveOptions: {
+      enqueueManagingEditor: (filingId: string) => {
+        enqueued.push(filingId)
+      },
+    },
   })
   // A real socket rather than `inject`: the transport writes to the raw
   // response after `reply.hijack()`, which is exactly the wiring worth proving.
@@ -201,7 +213,7 @@ describe('writing one entry at a time', () => {
 
     expect(isError).toBe(true)
     expect(text).toContain('enabled: false')
-    expect(readConfig(handle.db).stringers).toHaveLength(1)
+    expect(readConfig(handle.db).stringers.map((s) => s.id)).toContain('korben')
     await client.close()
   })
 
@@ -255,6 +267,50 @@ describe('writing the whole document', () => {
     const { events } = listEvents(handle.db, { category: 'config' })
     const row = events.find((event) => event.code === 'CONFIG_CHANGED')
     expect(row?.message).toContain('an MCP client')
+    await client.close()
+  })
+})
+
+describe('filing a tip', () => {
+  it('files an idea and hands it to the managing editor', async () => {
+    const client = await connect()
+    const { isError, text } = await call(client, 'file_tip', {
+      text: 'Immich 2.0 ships a new mobile sync engine — worth a look for anyone off Google Photos.',
+      url: 'https://github.com/immich-app/immich/releases/tag/v2.0.0',
+    })
+
+    expect(isError, text).toBe(false)
+    const result = JSON.parse(text) as { id: string; stringerId: string; status: string }
+    expect(result.stringerId).toBe('tip-line')
+    expect(result.id).toBeTruthy()
+
+    // Stored as a real filing, with the link kept where the managing editor
+    // will actually read it.
+    const filing = handle.db.select().from(schema.filings).all()[0]!
+    expect(filing.kind).toBe('tip')
+    expect(filing.text).toContain('immich-app/immich')
+    expect(enqueued).toContain(result.id)
+    await client.close()
+  })
+
+  it('refuses when the named stringer does not exist', async () => {
+    const client = await connect()
+    const { isError, text } = await call(client, 'file_tip', { text: 'an idea', stringer_id: 'nope' })
+    expect(isError).toBe(true)
+    expect(text).toContain('nope')
+    await client.close()
+  })
+
+  it('asks which one when the desk has several tip stringers', async () => {
+    handle.db
+      .insert(schema.stringers)
+      .values({ id: 'second-tips', name: 'Another tip line', kind: 'tip', enabled: true })
+      .run()
+
+    const client = await connect()
+    const { isError, text } = await call(client, 'file_tip', { text: 'an idea' })
+    expect(isError).toBe(true)
+    expect(text).toContain('stringer_id')
     await client.close()
   })
 })

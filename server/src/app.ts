@@ -18,7 +18,7 @@ import type { PlacementOptions } from './api/routes.js'
  * stale one costs an afternoon working out which build a box is actually
  * running. Bump it in the same commit as the four package.json files.
  */
-export const VERSION = '1.2.0'
+export const VERSION = '1.3.0'
 
 export interface AppOptions {
   db: Db

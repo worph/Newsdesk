@@ -20,6 +20,19 @@ stringer that has filed or an outlet that has published. An agent driving the de
 that, including the undo. A tool that reached past it to the tables would be a second definition of
 what a valid desk is, and the first one to drift.
 
+## Filing a tip
+
+One tool is not administration: `file_tip` puts an article idea on the wire, as the tip line does.
+
+It earns its place because a tip is **ingest**. It creates work for a human — the idea is stored,
+judged against the charter like any filing, and drafted only if it is worth running — and it
+publishes nothing. It also grants nothing new: `get_settings` already returns the ingest token, so a
+caller holding the administration token could already file by POSTing to `/api/v1/filings`. The tool
+just saves the round trip.
+
+It names a stringer only when it has to. One tip stringer and the desk picks it; several and it asks
+which — the same rule `POST /api/v1/tips` follows, from the same function.
+
 ## What it cannot do
 
 **It cannot approve, publish or spike.** A human between every draft and every channel is the
