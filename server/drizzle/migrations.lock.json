@@ -35,6 +35,11 @@
       "tag": "0006_colorful_madame_web",
       "when": 1785863964448,
       "sha256": "4bf69de07688e5c8091c3fa3cba9119cc8a4f9f30d83bed5b112987507a73c41"
+    },
+    {
+      "tag": "0007_free_robin_chapel",
+      "when": 1786112639937,
+      "sha256": "bd572f677b7a2c130e760adf70d8f9dc9e4e0fab6f6dd432cd12472d0645a657"
     }
   ]
 }

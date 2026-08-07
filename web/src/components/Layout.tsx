@@ -284,7 +284,14 @@ export function Layout({ children }: { children: ReactNode }) {
         do on every frame, and text over a blur is the first thing to go soft.
       */}
       <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-desk-200 bg-desk-50 px-4 pt-[calc(0.75rem+var(--nd-safe-top))] pb-3 md:hidden dark:border-desk-800 dark:bg-desk-950">
-        <span className="font-semibold tracking-tight">Newsdesk</span>
+        {/*
+          The desk name is the way to the chat at `/`. A nav entry would light
+          "More" on every screen — SECONDARY matches by prefix and `/` prefixes
+          everything — and the tab bar is full at four.
+        */}
+        <NavLink to="/" className="font-semibold tracking-tight">
+          Newsdesk
+        </NavLink>
         <div className="ml-auto flex min-w-0 items-center gap-2">
           <HealthPill compact />
         </div>
@@ -292,7 +299,9 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <nav className="hidden shrink-0 border-desk-200 md:block md:w-60 md:border-r dark:border-desk-800">
         <div className="flex items-center gap-2 px-5 py-5">
-          <span className="text-lg font-semibold tracking-tight">Newsdesk</span>
+          <NavLink to="/" className="text-lg font-semibold tracking-tight">
+            Newsdesk
+          </NavLink>
         </div>
 
         <div className="space-y-5 px-3">

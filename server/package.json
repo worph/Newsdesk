@@ -25,7 +25,8 @@
     "markdown-it": "^14.3.0",
     "web-push": "^3.6.7",
     "yaml": "^2.7.0",
-    "zod": "^3.25.0"
+    "zod": "^3.25.0",
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",

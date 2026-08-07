@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { api } from './api'
 import { Layout } from './components/Layout'
+import { AdminChat } from './pages/AdminChat'
 import { Calendar } from './pages/Calendar'
 import { Compose } from './pages/Compose'
 import { Config } from './pages/Config'
@@ -36,6 +37,12 @@ export function App() {
   return (
     <Layout>
       <Routes>
+        {/*
+          The front page on a desk. The installed app still opens on /now — its
+          start_url is unchanged — because that is the phone arriving from a
+          notification, which is a list and not a conversation.
+        */}
+        <Route path="/" element={<AdminChat />} />
         <Route path="/now" element={<Now />} />
         {/* The Queue was two lists of rows every other screen already owns —
             what needs a decision is /now, the archive behind it is /stories. */}

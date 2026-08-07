@@ -109,6 +109,10 @@ export const EVENT_CODES = {
   CONFIG_TOKEN_ROTATED: { category: 'config', label: 'ingest token rotated' },
   MCP_TOKEN_ROTATED: { category: 'config', label: 'admin MCP token rotated' },
   TIMEZONE_CHANGED: { category: 'config', label: 'timezone changed' },
+  // Neither is assistable: what fixes a refused tool call or an exhausted turn
+  // is the next thing said in the conversation, not a remedy proposed here.
+  CHAT_TOOL_FAILED: { category: 'config', label: 'chat tool refused' },
+  CHAT_TURN_FAILED: { category: 'config', label: 'chat turn failed' },
 
   // ── ports ─────────────────────────────────────────────────────────────────
   'mcp.oauth.started': { category: 'ports', label: 'authorization started' },
@@ -197,6 +201,13 @@ interface EventDetails {
   CONFIG_TOKEN_ROTATED: Record<string, never>
   MCP_TOKEN_ROTATED: Record<string, never>
   TIMEZONE_CHANGED: { from: string; to: string }
+  CHAT_TOOL_FAILED: { threadId: string; tool: string; error: string }
+  CHAT_TURN_FAILED: {
+    threadId: string
+    calls: number
+    reason: 'bound' | 'timeout' | 'inference'
+    error: string
+  }
   DESK_STARTED: { version: string; adoptedBaseline: string | null; reconciled: number; extra: number }
   SCHEMA_RECONCILED: { statements: number; extra: string[] }
   AUTH_LOGIN_FAILED: { ip: string }

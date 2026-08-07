@@ -19,6 +19,8 @@ export type PromptName =
   | 'tip-desk'
   /** Diagnosing one logged failure and proposing remedies for it. */
   | 'assist'
+  /** One turn of the administrator chat: what to say, and which tool to call. */
+  | 'admin-chat'
 
 export function loadPrompt(name: PromptName): string {
   const cached = cache.get(name)

@@ -76,6 +76,63 @@ function Row({ action, onOpen }: { action: DeskAction; onOpen: () => void }) {
   )
 }
 
+/**
+ * What the desk is, in one line, above what it wants.
+ *
+ * Deliberately not gated on the action list loading: this is the part that
+ * still answers when the Beacon is down and the endpoint is signed out, and a
+ * strip of red dots is the most useful thing the screen can show at that
+ * moment. Every word in it was decided on the server.
+ */
+function DeskState() {
+  const { data } = useQuery({ queryKey: ['desk-status'], queryFn: api.deskStatus, refetchInterval: 60_000 })
+  if (!data) return null
+
+  const endpoints = data.health.endpoints
+  const unhealthy = endpoints.filter((endpoint) => endpoint.status !== 'ok')
+
+  return (
+    <section className="space-y-2 rounded-lg border border-desk-200 px-4 py-3 dark:border-desk-800">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <p className="text-sm">
+          {data.configured ? data.summary : 'This desk has no charter yet — nothing can be placed.'}
+        </p>
+        {!data.inference.available && (
+          <span className="text-xs text-amber-700 dark:text-amber-400">no inference wired</span>
+        )}
+      </div>
+
+      {endpoints.length > 0 && (
+        <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-desk-500">
+          {endpoints.map((endpoint) => (
+            <li key={endpoint.id} className="flex items-center gap-1.5">
+              {/* A shape as well as a colour: the row still reads in sunlight. */}
+              <span
+                aria-hidden
+                className={
+                  endpoint.status === 'ok'
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-red-600 dark:text-red-400'
+                }
+              >
+                {endpoint.status === 'ok' ? '●' : '▲'}
+              </span>
+              <span>{endpoint.name}</span>
+              {endpoint.status !== 'ok' && <span className="text-red-600">{endpoint.status}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {unhealthy.length > 0 && (
+        <p className="text-xs text-desk-500">
+          The log is authoritative and keeps working with every port down.
+        </p>
+      )}
+    </section>
+  )
+}
+
 export function Now() {
   const navigate = useNavigate()
   const { data, isPending } = useQuery({
@@ -105,6 +162,8 @@ export function Now() {
           has the same work with all its context, for when there is time.
         </p>
       </header>
+
+      <DeskState />
 
       {actions.length === 0 ? (
         <div className="rounded-lg border border-dashed border-desk-300 px-4 py-10 text-center text-sm text-desk-500 dark:border-desk-700">

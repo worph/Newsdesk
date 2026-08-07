@@ -59,6 +59,36 @@ describe('snapshotting a write', () => {
     expect(listConfigVersions(db)).toHaveLength(1)
   })
 
+  /**
+   * The id has to come back from the write itself.
+   *
+   * Reading it afterwards as "the newest row" is wrong in exactly the case the
+   * check above creates: a write that changed nothing mints no row, so the
+   * newest row belongs to some earlier, unrelated change — and anything that
+   * linked to it would be offering an undo of the wrong thing.
+   */
+  it('returns the id of the version it took, and null when it took none', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+
+    const renamed = writeConfig(db, configWith(db, (config) => { config.outlets[0]!.name = 'Renamed' }), 'ui')
+    expect(renamed.versionId).toBe(listConfigVersions(db)[0]!.id)
+
+    // What is deduplicated is the snapshot, not the write: this one records
+    // the renamed state, which no row holds yet, so it is a version of its own
+    // even though it changes nothing.
+    const recorded = writeConfig(db, readConfig(db), 'ui')
+    expect(recorded.versionId).toBe(listConfigVersions(db)[0]!.id)
+    expect(recorded.versionId).not.toBe(renamed.versionId)
+
+    // Now the newest row already says this, so there is nothing to take — and
+    // the null is what stops a caller linking an undo to the row above, which
+    // belongs to a different change.
+    const noop = writeConfig(db, readConfig(db), 'ui')
+    expect(noop.versionId).toBeNull()
+    expect(listConfigVersions(db)).toHaveLength(2)
+  })
+
   it('records the author and the reason it was given', () => {
     const { db } = openTestDb()
     seedDesk(db)
@@ -122,6 +152,33 @@ describe('restoring a version', () => {
     // The newest snapshot says what it was taken ahead of.
     expect(versions[0]?.restoredFromId).toBe(first.id)
     expect(getConfigVersion(db, versions[0]!.id)?.yaml).toContain('Second')
+  })
+
+  /**
+   * Restoring the version that is already current changes nothing, so no
+   * snapshot is taken — and a stamp written to "the newest row" would land on
+   * a row some earlier change created, permanently labelling it as the way
+   * back from a restore it has nothing to do with. The operator can then click
+   * it.
+   */
+  it('stamps nothing when there was no snapshot to stamp', () => {
+    const { db } = openTestDb()
+    seedDesk(db)
+
+    // A save that changed nothing: the row it minted holds the state the desk
+    // is still in, so restoring it is a no-op and takes no snapshot of its own.
+    writeConfig(db, readConfig(db), 'ui')
+    const taken = listConfigVersions(db)[0]!
+    expect(taken.restoredFromId).toBeNull()
+
+    restoreConfigVersion(db, taken.id)
+
+    const versions = listConfigVersions(db)
+    expect(versions).toHaveLength(1)
+    // Nothing was taken, so nothing is stamped — and above all the row does not
+    // end up naming itself as the thing it was taken ahead of.
+    expect(versions[0]!.id).toBe(taken.id)
+    expect(versions[0]!.restoredFromId).toBeNull()
   })
 
   it('is refused, and writes nothing, when it would orphan a publication', () => {

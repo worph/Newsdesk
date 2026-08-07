@@ -32,6 +32,7 @@ import {
 } from '../push.js'
 import { DEFAULT_TIMEZONE, getSetting, getOrCreateSecret, getTimezone, SETTING, setSetting } from '../settings.js'
 import { registerActionRoutes } from './actions.js'
+import { registerAdminChatRoutes } from './admin-chat.js'
 import { registerAdminMcpRoutes } from './admin-mcp.js'
 import { registerBrowserRoutes } from './browser.js'
 import { registerCalendarRoutes } from './calendar.js'
@@ -113,6 +114,12 @@ export function registerRoutes(
       : {}),
   })
   registerConfigVersionRoutes(app, db)
+  registerAdminChatRoutes(app, db, version, {
+    ...(receiveOptions.driver ? { driver: receiveOptions.driver } : {}),
+    ...(receiveOptions.probeTimeoutMs !== undefined
+      ? { probeTimeoutMs: receiveOptions.probeTimeoutMs }
+      : {}),
+  })
   // The same wiring the tip line gets, so a tip filed over MCP is picked up by
   // the reporter or the managing editor exactly as one filed over HTTP is.
   registerAdminMcpRoutes(app, db, version, receiveOptions)
@@ -272,10 +279,10 @@ export function registerRoutes(
     const parsed = configBody.safeParse(request.body)
     if (!parsed.success) return reply.code(400).send({ error: 'yaml or config required' })
     try {
-      const config = writeConfig(db, candidateFrom(parsed.data), 'ui')
       // The restore point taken immediately before this write, so the log row
-      // and the way back from it are the same click apart.
-      const restorePoint = listConfigVersions(db, 1)[0]
+      // and the way back from it are the same click apart. Null when the save
+      // changed nothing — the screen posts the whole document every press.
+      const { config, versionId } = writeConfig(db, candidateFrom(parsed.data), 'ui')
       logEvent(db, {
         level: 'info',
         actor: 'human',
@@ -284,7 +291,7 @@ export function registerRoutes(
         detail: {
           author: 'ui',
           summary: describeConfig(config),
-          ...(restorePoint ? { versionId: restorePoint.id } : {}),
+          ...(versionId !== null ? { versionId } : {}),
         },
       })
       return { ok: true, yaml: configToYaml(config), config }

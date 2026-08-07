@@ -315,6 +315,141 @@ describe('filing a tip', () => {
   })
 })
 
+/**
+ * The surface an MCP client sees, pinned byte for byte.
+ *
+ * `admin/tools.ts` is about to become a thin adapter over a registry the
+ * administrator chat reads too, and the refactor must not move anything a
+ * caller can observe. The ways it silently could are all invisible to a test
+ * that checks only the happy path: the order tools are listed in, a prose tool
+ * that starts answering JSON, an `annotations` key appearing where the current
+ * registration passes none, the default reason recorded on a restore point.
+ *
+ * So these assert the surface rather than the behaviour. They are written to
+ * fail loudly on a refactor, which is the whole reason they exist.
+ */
+describe('the surface an MCP client sees', () => {
+  /**
+   * Registration order is `tools/list` order, and a model reads that list top
+   * down. Asserted as an ordered list rather than a set for exactly that
+   * reason — a reshuffle is a change to what the model reads first.
+   */
+  const TOOLS = [
+    'file_tip',
+    'get_config',
+    'validate_config',
+    'get_charter',
+    'list_config_versions',
+    'get_config_version',
+    'preview_restore',
+    'get_settings',
+    'get_status',
+    // Added with the administrator chat, which needed it — and reachable over
+    // MCP the same day, because both surfaces read one list.
+    'list_actions',
+    'read_log',
+    'set_charter',
+    'upsert_voice',
+    'upsert_stringer',
+    'upsert_outlet',
+    'upsert_mcp_endpoint',
+    'upsert_browser_engine',
+    'remove_config_entry',
+    'set_reporting',
+    'write_config',
+    'restore_config_version',
+    'set_timezone',
+  ]
+
+  it('lists every tool, in registration order', async () => {
+    const client = await connect()
+    const { tools } = await client.listTools()
+    expect(tools.map((tool) => tool.name)).toEqual(TOOLS)
+    await client.close()
+  })
+
+  it('gives every tool a description a model can choose from', async () => {
+    const client = await connect()
+    const { tools } = await client.listTools()
+
+    for (const tool of tools) {
+      expect(tool.description, tool.name).toBeTruthy()
+      expect(tool.inputSchema, tool.name).toBeTruthy()
+    }
+    await client.close()
+  })
+
+  it('answers get_charter with prose rather than JSON', async () => {
+    const client = await connect()
+    const { text } = await call(client, 'get_charter')
+
+    // Two tools answer in prose. A caller that assumed every result parses
+    // would break on them, so the shape is pinned rather than assumed.
+    expect(text).toBe(readConfig(handle.db).charter)
+    expect(() => JSON.parse(text)).toThrow()
+    await client.close()
+  })
+
+  it('returns the ingest token in full', async () => {
+    setSetting(handle.db, SETTING.ingestToken, 'the-stringer-token')
+
+    const client = await connect()
+    const payload = JSON.parse((await call(client, 'get_settings')).text) as { ingestToken: string }
+
+    // Deliberate, and admin-mcp.md says why: a caller holding the
+    // administration token could already file with it, so this grants nothing
+    // new. The administrator chat is the surface that redacts, because there
+    // the value would land in a message row and a scrollback.
+    expect(payload.ingestToken).toBe('the-stringer-token')
+    await client.close()
+  })
+
+  it('refuses an invalid entry with a path per problem, and writes nothing', async () => {
+    const client = await connect()
+    const before = readConfig(handle.db)
+
+    const { isError, text } = await call(client, 'upsert_outlet', {
+      outlet: {
+        id: 'no-destination',
+        name: 'Discord, unpinned',
+        description: 'An outlet whose destination nobody wrote.',
+        role: 'publish',
+        driver: 'mcp',
+        enabled: true,
+        voice: 'alicia',
+        endpoint: 'beacon',
+        tool: 'discord-mcp__send_message',
+        // No channelId. Invariant 3 with teeth: the danger is not only a model
+        // writing an address, it is *nobody* writing one.
+        args: { content: { slot: 'markdown', label: 'Body', max: 2000, primary: true } },
+      },
+    })
+
+    expect(isError).toBe(true)
+    // A path, not a flattened sentence — a model fixes the field the path
+    // names and calls again.
+    expect(text).toContain('outlets')
+    expect(readConfig(handle.db)).toEqual(before)
+    await client.close()
+  })
+
+  it('records the default reason on the restore point an upsert creates', async () => {
+    const client = await connect()
+    const original = readConfig(handle.db).voices[0]!
+
+    await call(client, 'upsert_voice', { voice: { ...original, tone: 'drier' } })
+
+    const { versions } = JSON.parse((await call(client, 'list_config_versions')).text) as {
+      versions: { author: string; reason: string | null }[]
+    }
+    // This string is what the Configuration history screen shows. It is built
+    // from the caller, so it is the first thing a shared registry would break.
+    expect(versions[0]!.author).toBe('mcp')
+    expect(versions[0]!.reason).toBe(`voice "${original.id}", over MCP`)
+    await client.close()
+  })
+})
+
 describe('settings', () => {
   it('refuses a timezone the desk does not know', async () => {
     const client = await connect()

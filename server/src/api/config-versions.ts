@@ -55,13 +55,17 @@ export function registerConfigVersionRoutes(app: FastifyInstance, db: Db): void 
     if (!version) return reply.code(404).send({ error: 'no such configuration version' })
 
     try {
-      const config = restoreConfigVersion(db, parsed.data.id)
+      const { config, versionId } = restoreConfigVersion(db, parsed.data.id)
       logEvent(db, {
         level: 'info',
         actor: 'human',
         code: 'CONFIG_RESTORED',
         message: `you rolled the configuration back to how it stood at ${version.at}`,
-        detail: { author: 'restore', restoredFromId: parsed.data.id },
+        detail: {
+          author: 'restore',
+          restoredFromId: parsed.data.id,
+          ...(versionId !== null ? { versionId } : {}),
+        },
       })
       return { ok: true, yaml: configToYaml(config), config }
     } catch (err) {

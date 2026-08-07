@@ -85,10 +85,17 @@ export interface Health {
   endpoints: EndpointHealth[]
 }
 
-export async function checkHealth(db: Db, version: string): Promise<Health> {
+export async function checkHealth(db: Db, version: string, probeTimeoutMs?: number): Promise<Health> {
   const endpoints = db.select().from(schema.mcpEndpoints).all()
   const results = await Promise.all(
-    endpoints.map((e) => probeEndpoint({ id: e.id, name: e.name, url: e.url, auth: e.auth })),
+    endpoints.map((e) =>
+      // The timeout is injectable for the same reason it is on the assistant's
+      // bundle: a screen with a human in front of it cannot spend four seconds
+      // per dead endpoint, and a test suite cannot spend it at all.
+      probeTimeoutMs === undefined
+        ? probeEndpoint({ id: e.id, name: e.name, url: e.url, auth: e.auth })
+        : probeEndpoint({ id: e.id, name: e.name, url: e.url, auth: e.auth }, probeTimeoutMs),
+    ),
   )
   const configured = db.select().from(schema.charter).limit(1).get() !== undefined
   // Liveness is about this process. A dead port is reported, not fatal — the

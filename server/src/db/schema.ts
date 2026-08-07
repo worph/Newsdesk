@@ -531,3 +531,61 @@ export const remedies = sqliteTable(
   },
   (t) => [index('remedies_session_idx').on(t.sessionId), index('remedies_status_idx').on(t.status)],
 )
+
+// ── the administrator chat ──────────────────────────────────────────────────
+
+/**
+ * One conversation with the administrator.
+ *
+ * There is no thread list and no title: the operator sees one chat, and the
+ * newest thread is it. A new one starts when the newest has been idle long
+ * enough (see chat/thread.ts), which is what keeps the prompt's history window
+ * honest — in a single unbounded thread the model silently stops seeing
+ * exchanges that are still on screen.
+ */
+export const adminThreads = sqliteTable('admin_threads', {
+  id: text('id').primaryKey(),
+  createdAt: text('created_at').notNull().default(now),
+  /** Last message. The idle roll reads this and nothing else. */
+  updatedAt: text('updated_at').notNull().default(now),
+})
+
+/**
+ * Every turn, including the tool calls.
+ *
+ * Tool turns are rows rather than hidden state because the thread *is* the
+ * audit trail a human reads, and because the step the operator sees and the
+ * step the model is shown next round have to be the same row or they will
+ * disagree.
+ */
+export const adminMessages = sqliteTable(
+  'admin_messages',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => adminThreads.id),
+    role: text('role').notNull(), // user | assistant | tool
+    content: text('content').notNull(),
+    /** For role=tool: which catalogue entry ran, and what it was given. */
+    toolName: text('tool_name'),
+    toolInput: text('tool_input', { mode: 'json' }),
+    /** For role=tool: whether it succeeded. Null on the other roles. */
+    ok: integer('ok', { mode: 'boolean' }),
+    /**
+     * What the operator must type before a proposed destructive call will run.
+     * Set only on the rows that are offers rather than results.
+     */
+    confirmWith: text('confirm_with'),
+    /**
+     * The restore point this call created, so the row can offer an undo.
+     *
+     * Deliberately no foreign key: a purged or missing version must not stop a
+     * message being written, and the row is a pointer for a link, not a claim
+     * that the version still exists.
+     */
+    versionId: integer('version_id'),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [index('admin_messages_thread_idx').on(t.threadId, t.createdAt)],
+)

@@ -179,8 +179,12 @@ function hash(yaml: string): string {
  * saves the whole document on every press, so without it a pass over the
  * forms that changed nothing would mint a version indistinguishable from one
  * that changed everything.
+ *
+ * Returns the id of the row it wrote, or null when it wrote none — the caller
+ * cannot recover that afterwards by reading the newest row, because on the
+ * null path the newest row belongs to some earlier, unrelated change.
  */
-function snapshot(tx: Tx, author: string, reason?: string, restoredFromId?: number): void {
+function snapshot(tx: Tx, author: string, reason?: string, restoredFromId?: number): number | null {
   const yaml = configToYaml(readConfig(tx))
   const sha256 = hash(yaml)
 
@@ -190,9 +194,10 @@ function snapshot(tx: Tx, author: string, reason?: string, restoredFromId?: numb
     .orderBy(desc(schema.configVersions.id))
     .limit(1)
     .get()
-  if (latest?.sha256 === sha256) return
+  if (latest?.sha256 === sha256) return null
 
-  tx.insert(schema.configVersions)
+  const inserted = tx
+    .insert(schema.configVersions)
     .values({
       author,
       reason: reason ?? null,
@@ -200,16 +205,31 @@ function snapshot(tx: Tx, author: string, reason?: string, restoredFromId?: numb
       sha256,
       restoredFromId: restoredFromId ?? null,
     })
-    .run()
+    .returning({ id: schema.configVersions.id })
+    .get()
+  return inserted?.id ?? null
+}
+
+/**
+ * The result of a write: the configuration as it now stands, and the restore
+ * point taken ahead of it.
+ *
+ * `versionId` is null when nothing changed, because nothing was snapshotted.
+ * Anything hanging an undo off a write — the log row, a chat message — wants
+ * exactly that distinction, and cannot get it by reading the table afterwards.
+ */
+export interface ConfigWrite {
+  config: Config
+  versionId: number | null
 }
 
 /** Validate, then replace the configuration tables in one transaction. */
-export function writeConfig(db: Db, input: unknown, author: string, reason?: string): Config {
+export function writeConfig(db: Db, input: unknown, author: string, reason?: string): ConfigWrite {
   const { config, issues } = parseConfig(input)
   const all = [...issues, ...inUse(db, config)]
   if (all.length > 0) throw new ConfigRejected(all)
 
-  db.transaction((tx) => {
+  const versionId = db.transaction((tx) => {
     /**
      * The way back, taken before the first delete and inside this same
      * transaction.
@@ -220,7 +240,7 @@ export function writeConfig(db: Db, input: unknown, author: string, reason?: str
      * anything downstream throws, this row rolls back with the rest, which is
      * correct — nothing was lost, so there is nothing to restore.
      */
-    snapshot(tx, author, reason)
+    const taken = snapshot(tx, author, reason)
 
     const endpointIds = config.mcp_endpoints.map((e) => e.id)
     const engineIds = config.browser_engines.map((e) => e.id)
@@ -310,9 +330,11 @@ export function writeConfig(db: Db, input: unknown, author: string, reason?: str
         set: { value: JSON.stringify(config.reporting ?? null) },
       })
       .run()
+
+    return taken
   })
 
-  return readConfig(db)
+  return { config: readConfig(db), versionId }
 }
 
 export function configToYaml(config: Config): string {
@@ -470,28 +492,29 @@ export function previewRestore(db: Db, id: number): RestorePreview | undefined {
  * `ConfigRejected` and writes nothing — and so the state being replaced is
  * itself snapshotted first. Restoring a restore therefore works.
  */
-export function restoreConfigVersion(db: Db, id: number, author = 'restore'): Config {
+export function restoreConfigVersion(db: Db, id: number, author = 'restore'): ConfigWrite {
   const row = db.select().from(schema.configVersions).where(eq(schema.configVersions.id, id)).get()
   if (!row) throw new ConfigRejected([{ path: '', message: `no configuration version ${id}` }])
 
-  const config = writeConfig(db, parseYaml(row.yaml), author, `restored version ${id}`)
+  const written = writeConfig(db, parseYaml(row.yaml), author, `restored version ${id}`)
 
-  // Stamp the snapshot writeConfig just took, so the history says what it was
-  // taken ahead of rather than leaving a bare row before a restore.
-  const latest = db
-    .select({ id: schema.configVersions.id })
-    .from(schema.configVersions)
-    .orderBy(desc(schema.configVersions.id))
-    .limit(1)
-    .get()
-  if (latest) {
+  /**
+   * Stamp the snapshot the write just took, so the history says what it was
+   * taken ahead of rather than leaving a bare row before a restore.
+   *
+   * Only when there is one. Restoring the version the desk already matches
+   * changes nothing and snapshots nothing, and stamping "the newest row" there
+   * would label an unrelated earlier change as the way back from this restore
+   * — in the commonest case, the restored version stamping itself.
+   */
+  if (written.versionId !== null) {
     db.update(schema.configVersions)
       .set({ restoredFromId: id })
-      .where(eq(schema.configVersions.id, latest.id))
+      .where(eq(schema.configVersions.id, written.versionId))
       .run()
   }
 
-  return config
+  return written
 }
 
 export function yamlToConfig(text: string): unknown {

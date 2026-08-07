@@ -91,25 +91,18 @@ export class AssistUnavailable extends Error {
 /**
  * Whether the assistant can run at all, right now.
  *
- * A health probe is not the check that matters. There is one claude-code agent
- * behind the Beacon, shared by the managing editor, the writers, the copy desk
- * and the reporter — and this button gets pressed exactly when the pipeline is
- * failing and retrying, which is when a job is most likely to be holding it.
+ * Only one question left: is anything wired? This used to also refuse while
+ * any job was RUNNING, because the Beacon served one query at a time and this
+ * button gets pressed exactly when the pipeline is failing and retrying. That
+ * constraint is gone — see the note on `QueueOptions.concurrency` in
+ * pipeline/queue.ts — so the check was refusing a diagnosis for a reason that
+ * had stopped being true, at the moment it was most wanted.
  *
- * So: refuse rather than queue. A diagnosis that arrives four minutes later
- * arrives when nobody is looking at the screen that asked for it.
+ * The double-submit guard below is a different thing and stays.
  */
-export function assistPreflight(db: Db, driver?: () => InferenceDriver): void {
+export function assistPreflight(_db: Db, driver?: () => InferenceDriver): void {
   if (!driver) {
     throw new AssistUnavailable('no inference is wired on this instance', 503)
-  }
-
-  const running = db.select().from(schema.jobs).where(eq(schema.jobs.status, 'RUNNING')).limit(1).get()
-  if (running) {
-    throw new AssistUnavailable(
-      'the desk is in the middle of a job and there is only one agent — try again in a moment',
-      409,
-    )
   }
 }
 

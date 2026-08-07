@@ -19,6 +19,49 @@ export interface Health {
   endpoints: EndpointHealth[]
 }
 
+/**
+ * The Start routine's answer.
+ *
+ * Every field is decided on the server — the summary sentence, the action list,
+ * the reason inference is unavailable. There are no frontend tests, so anything
+ * that could be got wrong lives where a test can reach it.
+ */
+export interface DeskStatus {
+  actions: DeskAction[]
+  total: number
+  overdue: number
+  health: Health
+  /** False on a desk that has never been configured at all. */
+  configured: boolean
+  /** Counts, in the same words the log uses: "2 outlets, 1 stringer, …". */
+  summary: string
+  inference: { available: true } | { available: false; reason: string }
+}
+
+/** One turn in the administrator chat. Tool calls are turns too. */
+export interface AdminMessage {
+  id: string
+  threadId: string
+  role: 'user' | 'assistant' | 'tool'
+  content: string
+  toolName: string | null
+  toolInput: unknown
+  ok: boolean | null
+  /** Set on a proposed destructive call: what must be typed to run it. */
+  confirmWith: string | null
+  /** The restore point this call created, if it made one. */
+  versionId: number | null
+  createdAt: string
+}
+
+export interface AdminConversation {
+  threadId: string | null
+  messages: AdminMessage[]
+  /** A turn is in flight. The stream may have been dropped; the rows are here. */
+  running: boolean
+  inference: { available: true } | { available: false; reason: string }
+}
+
 export interface OAuthSummary {
   status: 'connected' | 'expired' | 'pending' | 'disconnected'
   connectedAt?: string
@@ -744,6 +787,41 @@ export const api = {
   /** Everything waiting on a person, ordered by what is most overdue. */
   listActions: () =>
     request<{ actions: DeskAction[]; total: number; overdue: number }>('/api/v1/actions'),
+  /**
+   * What the desk would tell someone who just sat down.
+   *
+   * Runs no inference, so it answers with every port broken — which is the
+   * only reason it is safe to hang a landing screen off it.
+   */
+  deskStatus: () => request<DeskStatus>('/api/v1/admin-chat/status', { method: 'POST' }),
+  /** The conversation as it stands — also the way back after a dropped stream. */
+  adminChat: () => request<AdminConversation>('/api/v1/admin-chat'),
+  /**
+   * A command the desk answers itself — `/status` and, one day, its siblings.
+   *
+   * No inference, so it still works when the administrator cannot. The answer
+   * is written server-side and comes back as ordinary turns.
+   */
+  adminCommand: (command: string) =>
+    request<{ messages: AdminMessage[] }>('/api/v1/admin-chat/command', {
+      method: 'POST',
+      body: JSON.stringify({ command }),
+    }),
+  /** Put the visible conversation away. The rows are kept, not deleted. */
+  clearAdminChat: () =>
+    request<{ threadId: string; messages: AdminMessage[] }>('/api/v1/admin-chat', { method: 'DELETE' }),
+  /**
+   * Agree to a call the chat proposed but would not make.
+   *
+   * Sends the message id, never the payload: the server reads the tool and the
+   * arguments off the row and re-validates them, so what happens is what the
+   * desk agreed to rather than what this page says.
+   */
+  confirmAdminChat: (messageId: string, confirm: string) =>
+    request<{ ok: boolean; message: AdminMessage }>('/api/v1/admin-chat/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ messageId, confirm }),
+    }),
   getTimezone: () => request<{ timezone: string; detected: string }>('/api/v1/settings/timezone'),
   setTimezone: (timezone: string) =>
     request<{ timezone: string }>('/api/v1/settings/timezone', {
@@ -851,4 +929,68 @@ export const api = {
       `/api/v1/events${qs ? `?${qs}` : ''}`,
     )
   },
+}
+
+/**
+ * Say something to the administrator, and watch the turn happen.
+ *
+ * Not part of `api` above, because it cannot be: `request()` buffers the whole
+ * body before returning, and the point of this endpoint is that the steps
+ * arrive as they land. `EventSource` is no use either — it only does GET.
+ *
+ * The stream is a view, never the record. Every event here corresponds to a row
+ * the server already wrote, so a dropped connection loses nothing: call
+ * `api.adminChat()` and the conversation is all there.
+ */
+export async function streamAdminTurn(
+  message: string,
+  handlers: {
+    onMessage: (message: AdminMessage) => void
+    onDone?: () => void
+    onError?: (error: string) => void
+  },
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch('/api/v1/admin-chat/messages', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message }),
+    ...(signal ? { signal } : {}),
+  })
+
+  // A refusal answers JSON rather than opening a stream — no inference wired,
+  // or this conversation is already thinking.
+  if (!response.ok) {
+    const text = await response.text()
+    const body = text ? (JSON.parse(text) as { error?: string }) : {}
+    throw new ApiError(response.status, body.error ?? response.statusText)
+  }
+  if (!response.body) throw new ApiError(500, 'the desk sent no stream')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    // Events are separated by a blank line; anything after the last one is a
+    // partial frame and stays in the buffer until the rest of it arrives.
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+
+    for (const frame of frames) {
+      const event = /^event: (.+)$/m.exec(frame)?.[1]
+      const data = frame.slice(frame.indexOf('data: ') + 6)
+      // Heartbeats are comment frames and carry no event line.
+      if (!event) continue
+
+      if (event === 'message') handlers.onMessage(JSON.parse(data) as AdminMessage)
+      else if (event === 'done') handlers.onDone?.()
+      else if (event === 'error') handlers.onError?.((JSON.parse(data) as { error: string }).error)
+    }
+  }
 }

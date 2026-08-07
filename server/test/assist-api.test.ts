@@ -150,11 +150,12 @@ describe('before the assistant runs', () => {
   })
 
   /**
-   * One agent behind the Beacon, shared with the pipeline — and this button is
-   * pressed exactly when the pipeline is failing and retrying. Refuse rather
-   * than queue: a diagnosis four minutes later arrives at an empty screen.
+   * The Beacon used to serve one query at a time, and this refused with a 409
+   * while any job held it. It runs queries in parallel now, so the button has
+   * to work at the moment it is most wanted — which is precisely when the
+   * pipeline is busy failing and retrying.
    */
-  it('answers 409 while a job is running rather than queueing behind it', async () => {
+  it('diagnoses while a job is running rather than refusing', async () => {
     const id = seedFailure()
     db.insert(schema.jobs)
       .values({ id: 'j1', kind: 'publish', refId: 'p1', status: 'RUNNING', attempts: 1 })
@@ -167,8 +168,7 @@ describe('before the assistant runs', () => {
       headers: { cookie },
     })
 
-    expect(response.statusCode).toBe(409)
-    expect((response.json() as { error: string }).error).toContain('one agent')
+    expect(response.statusCode).toBe(200)
   })
 
   it('refuses an entry with nothing to act on', async () => {
