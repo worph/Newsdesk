@@ -1,18 +1,20 @@
-import MarkdownIt from 'markdown-it'
 import { useState, type ReactNode } from 'react'
+import { renderMarkdown } from '../markdown'
 
 /**
- * The one place a document is edited, and the one place markdown is rendered.
+ * The one place a document is edited.
  *
  * Both surfaces that write prose use it — the review screen's primary slot and
  * the tip line — so the rule that matters lives here once rather than being
  * restated per page: a draft is markdown and is **never** injected as raw HTML.
  *
+ * The rendering itself moved to ../markdown once the administrator chat needed
+ * it too, and the `html: false` that makes it safe lives there now — one
+ * renderer, so the two surfaces cannot disagree about what is escaped.
+ *
  * See ARCHITECTURE.md invariant 4.
  */
 
-// html: false — raw HTML in a document is escaped rather than injected.
-const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
 export function DocumentEditor({
   value,
@@ -86,7 +88,7 @@ export function DocumentEditor({
           className="prose-desk min-h-56 rounded-md border border-desk-200 px-3 py-2.5 text-sm dark:border-desk-800"
           // Rendered by markdown-it with html:false, so any raw HTML in the
           // document is escaped rather than injected.
-          dangerouslySetInnerHTML={{ __html: md.render(value) }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(value) }}
         />
       ) : (
         <textarea

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError, streamAdminTurn, type AdminMessage } from '../api'
+import { renderMarkdown } from '../markdown'
 
 /**
  * The desk's front page: a conversation with an administrator that holds the
@@ -135,9 +136,12 @@ function Turn({ message }: { message: AdminMessage }) {
   }
 
   return (
-    <div className="text-[15px] leading-relaxed whitespace-pre-wrap text-desk-900 dark:text-desk-100">
-      {message.content}
-    </div>
+    <div
+      className="prose-desk text-[15px] leading-relaxed text-desk-900 dark:text-desk-100"
+      // Rendered by markdown-it with html:false, so anything HTML-shaped in a
+      // model's answer is escaped and shown rather than injected.
+      dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+    />
   )
 }
 

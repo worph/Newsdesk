@@ -45,3 +45,136 @@ body {
     @apply bg-desk-950 text-desk-100;
   }
 }
+
+/*
+  Rendered markdown.
+ 
+  Tailwind's preflight strips list markers and heading sizes, so prose that
+  arrives as HTML needs them putting back. This class was referenced by the
+  draft preview long before it existed, which is why that preview showed
+  bullet-less lists and same-size headings; it is defined once here and shared
+  with the administrator chat.
+ 
+  Deliberately small: this styles what markdown-it actually emits from the text
+  people write, not a full typographic system.
+*/
+.prose-desk > :first-child {
+  margin-top: 0;
+}
+
+.prose-desk > :last-child {
+  margin-bottom: 0;
+}
+
+.prose-desk p,
+.prose-desk ul,
+.prose-desk ol,
+.prose-desk blockquote,
+.prose-desk pre,
+.prose-desk table {
+  margin-block: 0.65em;
+}
+
+.prose-desk h1,
+.prose-desk h2,
+.prose-desk h3,
+.prose-desk h4 {
+  margin-block: 1.1em 0.5em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.prose-desk h1 {
+  font-size: 1.3em;
+}
+
+.prose-desk h2 {
+  font-size: 1.15em;
+}
+
+.prose-desk h3,
+.prose-desk h4 {
+  font-size: 1em;
+}
+
+.prose-desk strong {
+  font-weight: 600;
+}
+
+.prose-desk em {
+  font-style: italic;
+}
+
+.prose-desk ul,
+.prose-desk ol {
+  padding-inline-start: 1.4em;
+}
+
+.prose-desk ul {
+  list-style: disc;
+}
+
+.prose-desk ol {
+  list-style: decimal;
+}
+
+.prose-desk li {
+  margin-block: 0.2em;
+}
+
+.prose-desk li > ul,
+.prose-desk li > ol {
+  margin-block: 0.2em;
+}
+
+.prose-desk a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.prose-desk code {
+  @apply rounded bg-desk-200/70 px-1 py-0.5 font-mono text-[0.9em];
+}
+
+.prose-desk pre {
+  @apply overflow-x-auto rounded-lg bg-desk-200/60 p-3;
+}
+
+/* The block already carries the background; the code inside must not repeat it. */
+.prose-desk pre code {
+  @apply bg-transparent p-0;
+}
+
+.prose-desk blockquote {
+  @apply border-l-2 border-desk-300 pl-3 text-desk-600;
+}
+
+.prose-desk hr {
+  @apply my-4 border-desk-200;
+}
+
+.prose-desk table {
+  @apply w-full border-collapse text-[0.95em];
+}
+
+.prose-desk th,
+.prose-desk td {
+  @apply border border-desk-200 px-2 py-1 text-left;
+}
+
+@media (prefers-color-scheme: dark) {
+  .prose-desk code,
+  .prose-desk pre {
+    @apply bg-desk-800/60;
+  }
+
+  .prose-desk blockquote {
+    @apply border-desk-700 text-desk-400;
+  }
+
+  .prose-desk hr,
+  .prose-desk th,
+  .prose-desk td {
+    @apply border-desk-800;
+  }
+}
