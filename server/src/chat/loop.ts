@@ -6,7 +6,7 @@ import { logEvent } from '../events.js'
 import { listActions } from '../api/actions.js'
 import { runStructured } from '../ports/inference/structured.js'
 import type { InferenceDriver } from '../ports/inference/types.js'
-import type { EnqueuePublish } from '../pipeline/approval.js'
+import { SWEEP_MAX, type EnqueuePublish } from '../pipeline/approval.js'
 import { fillPrompt, loadPrompt } from '../prompts/load.js'
 import { renderCatalogue } from './catalogue.js'
 import { appendMessage, HISTORY_MESSAGES, listMessages, type AdminMessage } from './thread.js'
@@ -214,13 +214,37 @@ function renderHistory(messages: AdminMessage[]): string {
     .join('\n\n')
 }
 
+/** How many of the waiting items the prompt lists. The count is separate. */
+const STATUS_SAMPLE = 20
+
+/**
+ * What is waiting, for the prompt.
+ *
+ * The count and the sample are deliberately different sizes, and that split is
+ * newer than it looks. This used to fetch twenty rows and report their length,
+ * which was harmless while the chat could only configure the desk — a slightly
+ * short status is cosmetic. It stopped being cosmetic when the chat gained
+ * `spike_publications`: the model states the count when it proposes a sweep,
+ * the operator agrees to that number, and the sweep then takes the whole
+ * backlog. A live desk with 68 waiting was told "20 thing(s) waiting", and the
+ * model repeated it back to the operator in an offer to spike all of them.
+ *
+ * So the count is the whole backlog, bounded by what one sweep can actually
+ * take, and the list under it is only a sample.
+ */
 function renderStatus(db: Db): string {
-  const actions = listActions(db, 20)
+  const actions = listActions(db, SWEEP_MAX)
   if (actions.length === 0) return 'Nothing is waiting on the operator right now.'
 
+  const shown = actions.slice(0, STATUS_SAMPLE)
   return [
-    `${actions.length} thing(s) waiting on the operator:`,
-    ...actions.map((action) => `- ${action.verb}: ${action.title} — ${action.because}`),
+    // At the ceiling the count is itself a floor, and saying so is cheaper than
+    // a model confidently quoting the one number this cannot know.
+    actions.length === SWEEP_MAX
+      ? `At least ${SWEEP_MAX} things waiting on the operator — call list_actions before quoting a number.`
+      : `${actions.length} thing(s) waiting on the operator.`,
+    ...(actions.length > shown.length ? [`The first ${shown.length}, as a sample:`] : []),
+    ...shown.map((action) => `- ${action.verb}: ${action.title} — ${action.because}`),
   ].join('\n')
 }
 

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { CHAT_CALLER, type AdminToolContext } from '../src/admin/registry.js'
 import { dispatch, MAX_CALLS, runConfirmed, runTurn } from '../src/chat/loop.js'
@@ -92,6 +93,51 @@ describe('the allowlist', () => {
    * says "I have spiked them" and one that says "shall I?", and the catalogue
    * is where the model learns which kind of tool it is holding.
    */
+  /**
+   * Caught on a live desk, not here: the prompt said "20 thing(s) waiting" to a
+   * desk with 68, because it reported the length of a truncated list. The model
+   * then quoted 20 to the operator while offering to spike all of them — a
+   * confirmation of the wrong number, which is the one failure the whole
+   * confirm-by-count design is supposed to prevent.
+   */
+  it('tells the model the whole backlog, not the length of the sample it shows', async () => {
+    const { db, threadId } = boot()
+    const driver = scripted(done('nothing to do'))
+
+    // Comfortably more than the sample, comfortably under the sweep ceiling.
+    for (let n = 0; n < 25; n++) {
+      const storyId = randomUUID()
+      db.insert(schema.stories)
+        .values({
+          id: storyId,
+          title: `Story ${n}`,
+          summary: 'A summary.',
+          status: 'PLACED',
+          dedupVerdict: 'NEW',
+          origin: 'managing-editor',
+        })
+        .run()
+      db.insert(schema.publications)
+        .values({
+          id: randomUUID(),
+          storyId,
+          outletId: 'discord-test',
+          status: 'AWAITING_APPROVAL',
+          origin: 'managing-editor',
+          slots: JSON.stringify({ description: 'Written.' }),
+        })
+        .run()
+    }
+
+    await runTurn(db, driver, threadId, 'what is waiting?')
+
+    const prompt = driver.prompts[0]!
+    expect(prompt).toContain('25 thing(s) waiting')
+    expect(prompt).not.toContain('20 thing(s) waiting')
+    // The list under it stays short — it is a sample, and says so.
+    expect(prompt).toContain('The first 20, as a sample:')
+  })
+
   it('offers the editorial tools already marked as the operator to confirm', async () => {
     const { db, threadId } = boot()
     const driver = scripted(done('nothing to do'))
