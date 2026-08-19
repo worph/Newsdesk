@@ -35,7 +35,14 @@ which — the same rule `POST /api/v1/tips` follows, from the same function.
 
 ## What it cannot do
 
-**It cannot approve, publish or spike.** A human between every draft and every channel is the
+**It cannot approve, publish or spike — and this is now something the code enforces rather than
+something the list happens not to contain.** The administrator chat gained those three tools
+(`admin-chat.md` §4.3); they are marked `chatOnly` and `admin/tools.ts` filters them out of this
+server. The reason is the gate: what makes them safe there is an operator typing a confirmation, and
+there is nobody on the other end of an MCP call to type it. A copy of them here would be the same
+decisions with the safety removed, reachable by every agent that can see this desk's Beacon.
+
+**So: this surface cannot approve, publish or spike.** A human between every draft and every channel is the
 product, not a setting — an administration surface that could send would delete the one guarantee
 the whole design exists to make. Editorial content is not readable through it either. This is
 configuration and diagnostics.

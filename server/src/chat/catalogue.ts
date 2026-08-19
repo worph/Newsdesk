@@ -30,8 +30,8 @@ function renderTool(entry: AdminTool): string {
     ...(needsConfirmation(entry)
       ? [
           '',
-          '**Changes or deletes configuration.** Calling this does not run it: it is offered to the',
-          'operator, who confirms it themselves. Say what you propose and why, then stop.',
+          '**The operator confirms this one.** Calling it does not run it: it is offered to them,',
+          'and they type the word themselves. Say what you propose and why, then stop.',
         ]
       : []),
     '',

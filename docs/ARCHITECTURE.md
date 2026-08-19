@@ -437,8 +437,17 @@ operates only before approval.**
 
 Breaking one of these breaks the product, not just a feature.
 
-1. **Nothing is published without an explicit human approval of that exact payload, for that exact
-   outlet.**
+1. **Nothing is published without an explicit human approval.** This one was weakened on purpose,
+   and the weakening is recorded here rather than left to be discovered.
+   *It used to read "…of that exact payload, for that exact outlet", and every surface enforced it:
+   approval was one person, one payload, one destination, always after reading it. The desk's owner
+   asked for bulk editorial decisions in the administrator chat, so `approve_publications` now lets
+   one confirmation release many payloads that the person confirming has not read. What survives is
+   the human: the chat cannot run that tool, only offer it, and the offer names the count being
+   agreed to. What is gone is the guarantee that someone read the copy.*
+   *If that trade is ever regretted, the way back is small — drop `approve_publications` from
+   `admin/registry.ts` and this invariant returns to its old wording, because nothing else in the
+   system ever depended on the weaker form.*
 2. **No inference runs between approval and send.** Publishing is a merge of stored configuration
    and approved slot values. If a model could alter the payload after approval, the approval would
    mean nothing. Scheduling stretches that gap from seconds to hours, which makes the invariant

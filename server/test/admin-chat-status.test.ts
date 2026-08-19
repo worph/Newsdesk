@@ -182,7 +182,77 @@ describe('the desk status', () => {
     })
 
     expect(response.statusCode).toBe(400)
-    expect((response.json() as { error: string }).error).toContain('/status')
+    const { error } = response.json() as { error: string }
+    expect(error).toContain('/status')
+    expect(error).toContain('/new')
+  })
+
+  /**
+   * The roll of §8.1, asked for by hand.
+   *
+   * Two things are worth asserting and neither is that a thread was created.
+   * The first is what it does NOT do: the conversation being put away is still
+   * in the database, because the old thread is why a change was made and the
+   * configuration version it produced cannot say that. The second is the
+   * `threadId` — it is the only thing telling a client that this command
+   * replaced the conversation rather than answering in it, so a `/status` that
+   * started carrying one would make the page throw its own rows away
+   * mid-answer.
+   */
+  it('starts a fresh conversation on /new, keeping the one it replaces', async () => {
+    const { app, cookie, db } = await boot({ withDriver: false })
+
+    const answered = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin-chat/command',
+      headers: { cookie },
+      payload: { command: '/status' },
+    })
+    expect(answered.json()).not.toHaveProperty('threadId')
+
+    const before = currentThread(db)!
+    expect(listMessages(db, before)).toHaveLength(2)
+
+    // Typed with the spaces and the shouting a person actually types.
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin-chat/command',
+      headers: { cookie },
+      payload: { command: '  /NEW  ' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const rolled = response.json() as { threadId: string; messages: unknown[] }
+    expect(rolled.messages).toEqual([])
+    expect(rolled.threadId).not.toBe(before)
+
+    // The visible conversation is the new one, and empty.
+    expect(currentThread(db)).toBe(rolled.threadId)
+    expect(listMessages(db, rolled.threadId)).toHaveLength(0)
+
+    // The old one is put away, not deleted.
+    expect(listMessages(db, before)).toHaveLength(2)
+  })
+
+  /** The same door the button uses, so it had better still be the same room. */
+  it('rolls identically whether asked by /new or by DELETE', async () => {
+    const { app, cookie, db } = await boot({ withDriver: false })
+
+    const deleted = await app.inject({ method: 'DELETE', url: '/api/v1/admin-chat', headers: { cookie } })
+    expect(deleted.statusCode).toBe(200)
+    const first = (deleted.json() as { threadId: string }).threadId
+    expect(deleted.json()).toEqual({ threadId: first, messages: [] })
+    expect(currentThread(db)).toBe(first)
+
+    const commanded = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin-chat/command',
+      headers: { cookie },
+      payload: { command: '/new' },
+    })
+    expect(commanded.statusCode).toBe(200)
+    expect(commanded.json()).toEqual({ threadId: currentThread(db), messages: [] })
+    expect(currentThread(db)).not.toBe(first)
   })
 
   it('summarises what the desk has, in the words the log uses', async () => {

@@ -116,6 +116,7 @@ export function registerRoutes(
   registerConfigVersionRoutes(app, db)
   registerAdminChatRoutes(app, db, version, {
     ...(receiveOptions.driver ? { driver: receiveOptions.driver } : {}),
+    ...(receiveOptions.enqueuePublish ? { enqueuePublish: receiveOptions.enqueuePublish } : {}),
     ...(receiveOptions.probeTimeoutMs !== undefined
       ? { probeTimeoutMs: receiveOptions.probeTimeoutMs }
       : {}),

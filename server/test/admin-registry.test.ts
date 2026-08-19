@@ -59,6 +59,9 @@ describe('the administration tool registry', () => {
       'remove_config_entry',
       'write_config',
       'restore_config_version',
+      'spike_publications',
+      'drop_stories',
+      'approve_publications',
     ])
 
     for (const entry of ADMIN_TOOLS) {
@@ -75,12 +78,49 @@ describe('the administration tool registry', () => {
     expect(adminTool('write_config')!.confirmWith!({ yaml: 'x', reason: 'y' })).toBe('replace')
   })
 
-  it('offers nothing that could publish', () => {
-    // The human between every draft and every channel is the product. This is
-    // the same assertion the MCP suite makes, kept here too because the list is
-    // what it is really about — the transport is incidental.
-    for (const forbidden of ['approve', 'publish', 'spike', 'send']) {
-      expect(ADMIN_TOOLS.some((entry) => entry.name.includes(forbidden))).toBe(false)
+  /**
+   * A sweep is confirmed by a count, so the count has to be in the word.
+   *
+   * "spike" typed for a sweep the operator thought was three rows and is
+   * actually sixty-three is a confirmation of the wrong thing — and the number
+   * is the only part of a bulk proposal that carries the consequence.
+   */
+  it('puts the size of a sweep into the word that confirms it', () => {
+    const spike = adminTool('spike_publications')!.confirmWith!
+    expect(spike({ ids: ['a', 'b', 'c'] })).toBe('spike 3')
+    expect(spike({})).toBe('spike all')
+
+    // `publish`, not `approve`: what the operator types should be what happens.
+    const approve = adminTool('approve_publications')!.confirmWith!
+    expect(approve({ ids: ['a'] })).toBe('publish 1')
+    expect(approve({})).toBe('publish all')
+
+    expect(adminTool('drop_stories')!.confirmWith!({})).toBe('drop all')
+  })
+
+  /**
+   * This assertion used to read "offers nothing that could publish", and the
+   * desk's owner deliberately changed that: the chat can now spike, drop and
+   * approve. What did NOT change is the surface those reach — an MCP caller has
+   * no operator to type the confirmation, so a gate-less copy of these tools
+   * must never appear there. `chatOnly` is what holds that, and this is the
+   * assertion that notices if one is added without it.
+   */
+  it('keeps everything that decides work off the MCP surface', () => {
+    const editorial = ADMIN_TOOLS.filter((entry) =>
+      ['approve', 'publish', 'spike', 'send', 'drop'].some((verb) => entry.name.includes(verb)),
+    )
+
+    expect(editorial.map((entry) => entry.name)).toEqual([
+      'spike_publications',
+      'drop_stories',
+      'approve_publications',
+    ])
+    for (const entry of editorial) {
+      expect(entry.chatOnly, entry.name).toBe(true)
+      // chatOnly without confirmWith would be a tool the model runs unattended
+      // in the one place it is registered — the worst of both.
+      expect(typeof entry.confirmWith, entry.name).toBe('function')
     }
   })
 

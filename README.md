@@ -44,8 +44,10 @@ servers behind Beacon.
 
 The desk is also **administrable over MCP** — an agent can read and edit the charter, the outlets
 and the rest of the configuration, with the same validation, restore points and refusals the
-Configuration screen gets. It cannot approve, publish or spike anything; that stays a human at the
-desk. See [`docs/admin-mcp.md`](./docs/admin-mcp.md).
+Configuration screen gets. That surface cannot approve, publish or spike anything; those decisions
+belong to a person at the desk, or — with a typed confirmation each time — to the administrator chat
+on the front page. See [`docs/admin-mcp.md`](./docs/admin-mcp.md) and
+[`docs/admin-chat.md`](./docs/admin-chat.md).
 
 ## The concept
 

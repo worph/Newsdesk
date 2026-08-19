@@ -391,6 +391,39 @@ describe('POST /stories/:id/rerun', () => {
   })
 })
 
+describe('POST /stories/:id/drop', () => {
+  /**
+   * The other answer to a held story: `rerun` above says "go and look again",
+   * this says the question is not worth answering. It exists so the action list
+   * can actually be emptied — a backlog that only grows stops being a list of
+   * what needs you.
+   */
+  it('closes a held story and keeps the question it was held on', async () => {
+    const storyId = await seedStory({ status: 'HELD', holdReason: 'no version number' })
+
+    const response = await post(`/api/v1/stories/${storyId}/drop`, { reason: 'not worth chasing' })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ status: 'DROPPED' })
+
+    const after = db.select().from(schema.stories).get()!
+    expect(after.status).toBe('DROPPED')
+    expect(after.dropReason).toBe('not worth chasing')
+    expect(after.holdReason).toBe('no version number')
+  })
+
+  it('refuses a placed story, whose drafts are the real decision', async () => {
+    const storyId = await seedStory()
+    const response = await post(`/api/v1/stories/${storyId}/drop`)
+
+    expect(response.statusCode).toBe(409)
+    expect((response.json() as { error: string }).error).toContain('only a held story')
+  })
+
+  it('404s on a story that does not exist', async () => {
+    expect((await post('/api/v1/stories/nope/drop')).statusCode).toBe(404)
+  })
+})
+
 describe('GET /jobs', () => {
   it('reports queue state', async () => {
     const body = (await get('/api/v1/jobs')).json()

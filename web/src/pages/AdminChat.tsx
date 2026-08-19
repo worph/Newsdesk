@@ -187,10 +187,15 @@ export function AdminChat() {
      *
      * Which is the point of them: `/status` runs no inference, so it still
      * works when the thing you would otherwise ask is the thing that is broken.
+     * `/new` is the other kind — it answers by putting the conversation away.
      */
     if (message.startsWith('/')) {
       try {
-        await api.adminCommand(message)
+        const answered = await api.adminCommand(message)
+        // Only a command that started a fresh thread comes back with its id.
+        // The rows this page streamed belong to the thread being put away, so
+        // they go with it — otherwise they outlive it on screen.
+        if (answered.threadId) setStreamed([])
       } catch (err) {
         setError(err instanceof ApiError ? err.message : String(err))
       } finally {
@@ -317,6 +322,7 @@ export function AdminChat() {
         <button
           onClick={() => clear.mutate()}
           disabled={thinking || clear.isPending}
+          title="Or type /new"
           className="text-xs text-desk-500 hover:text-desk-700 disabled:opacity-40"
         >
           New conversation

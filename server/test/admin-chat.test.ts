@@ -82,16 +82,32 @@ describe('the allowlist', () => {
     expect(driver.prompts[1]).toContain('There is no tool called')
   })
 
-  it('offers no way to publish in the catalogue it is given', async () => {
+  /**
+   * This test used to assert the catalogue offered no way to publish. It now
+   * asserts the opposite half: the editorial tools ARE offered — the desk's
+   * owner asked for them — and every one of them arrives at the model already
+   * labelled as something it can only propose.
+   *
+   * That label is not decoration. It is the difference between a model that
+   * says "I have spiked them" and one that says "shall I?", and the catalogue
+   * is where the model learns which kind of tool it is holding.
+   */
+  it('offers the editorial tools already marked as the operator to confirm', async () => {
     const { db, threadId } = boot()
     const driver = scripted(done('nothing to do'))
 
     await runTurn(db, driver, threadId, 'hello')
 
-    for (const forbidden of ['approve', 'publish', 'spike']) {
-      expect(driver.prompts[0]).not.toContain(`### ${forbidden}`)
+    const catalogue = driver.prompts[0]!
+    expect(catalogue).toContain('### upsert_outlet')
+
+    for (const editorial of ['spike_publications', 'drop_stories', 'approve_publications']) {
+      expect(catalogue).toContain(`### ${editorial}`)
+      // The confirmation note sits between this heading and the next one.
+      const section = catalogue.slice(catalogue.indexOf(`### ${editorial}`))
+      const body = section.slice(0, section.indexOf('### ', 4) === -1 ? undefined : section.indexOf('### ', 4))
+      expect(body, editorial).toContain('The operator confirms this one')
     }
-    expect(driver.prompts[0]).toContain('### upsert_outlet')
   })
 })
 
@@ -284,6 +300,38 @@ describe('the destructive gate', () => {
     expect(row.confirmWith).toBe('alicia')
     // Still there. Nothing was deleted.
     expect(readConfig(db).voices.map((voice) => voice.id)).toContain('alicia')
+  })
+
+  /**
+   * The assertion this whole surface rests on.
+   *
+   * The chat can now approve and send, which is a deliberate change to what the
+   * product guarantees — but only through a person typing a word. A model that
+   * could reach `approve_publications` inside its own loop would be a desk that
+   * publishes to a live Discord channel because a turn went sideways, and no
+   * amount of prompt wording would be worth anything against it.
+   */
+  it('will not let the model publish inside its own turn', async () => {
+    const { db, threadId } = boot()
+    const sent: string[] = []
+    const driver = scripted(
+      calls('approve_publications', {}),
+      done('Offered — it is yours to confirm.'),
+    )
+
+    await runTurn(db, driver, threadId, 'approve everything waiting', {
+      // Wired, so the only thing standing between the model and the wire is
+      // the gate itself rather than a missing dependency.
+      enqueuePublish: (id: string) => void sent.push(id),
+    })
+
+    const row = toolRows(db, threadId)[0]!
+    expect(row.ok).toBe(false)
+    expect(row.confirmWith).toBe('publish all')
+    // Nothing was queued, and the sentence offered to the operator says what
+    // they would be agreeing to rather than naming a config change.
+    expect(sent).toEqual([])
+    expect(row.content).toContain('approve drafts and send them')
   })
 
   it('still refuses on confirmation when the desk itself would not allow it', async () => {

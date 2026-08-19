@@ -9,6 +9,7 @@ import { logEvent } from '../events.js'
 import {
   approvePublication,
   closedReason,
+  dropStory,
   load,
   mergeContext,
   proposalFor,
@@ -24,6 +25,8 @@ import { getTimezone } from '../settings.js'
  * they are the same rows asked different questions, and a story moves between
  * them by changing status rather than moving table.
  */
+
+const dropBody = z.object({ reason: z.string().max(500).optional() })
 
 const listQuery = z.object({
   status: z.string().optional(),
@@ -478,6 +481,25 @@ export function registerStoryRoutes(
   })
 
   /** Re-run the managing editor over the filings that produced this story. */
+  /**
+   * The other answer to a held story.
+   *
+   * `rerun` below says "go and look again"; this says the question is not worth
+   * answering. Both close a row that would otherwise sit in the actions list
+   * forever, which is the point — a desk whose backlog only grows stops being
+   * a list of what needs you.
+   */
+  app.post('/api/v1/stories/:id/drop', { preHandler: requireSession }, async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const parsed = dropBody.safeParse(request.body ?? {})
+    const result = dropStory(db, id, parsed.success ? parsed.data.reason : undefined)
+    if (!result.ok) {
+      const { status, ok: _ok, ...body } = result
+      return reply.code(status).send(body)
+    }
+    return { status: result.status }
+  })
+
   app.post('/api/v1/stories/:id/rerun', { preHandler: requireSession }, async (request, reply) => {
     if (!enqueueManagingEditor) {
       return reply.code(503).send({ error: 'no managing editor is wired on this instance' })

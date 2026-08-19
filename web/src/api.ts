@@ -743,6 +743,12 @@ export const api = {
     }>('/api/v1/compose', { method: 'POST', body: JSON.stringify(body) }),
   rerunStory: (id: string) =>
     request<{ queued: number }>(`/api/v1/stories/${id}/rerun`, { method: 'POST' }),
+  /** The other answer to a held story: the question is not worth answering. */
+  dropStory: (id: string, reason?: string) =>
+    request<{ status: 'DROPPED' }>(`/api/v1/stories/${id}/drop`, {
+      method: 'POST',
+      body: JSON.stringify(reason ? { reason } : {}),
+    }),
   listJobs: () => request<{ stats: Record<string, number>; jobs: JobRow[] }>('/api/v1/jobs'),
   listPublications: (params: { status?: string; limit?: number } = {}) => {
     const search = new URLSearchParams()
@@ -797,13 +803,15 @@ export const api = {
   /** The conversation as it stands — also the way back after a dropped stream. */
   adminChat: () => request<AdminConversation>('/api/v1/admin-chat'),
   /**
-   * A command the desk answers itself — `/status` and, one day, its siblings.
+   * A command the desk answers itself — `/status`, `/new`, and one day more.
    *
-   * No inference, so it still works when the administrator cannot. The answer
-   * is written server-side and comes back as ordinary turns.
+   * No inference, so it still works when the administrator cannot. `/status`
+   * is written server-side and comes back as ordinary turns; `/new` replaces
+   * the conversation instead, and says so by carrying the `threadId` of the
+   * one it started.
    */
   adminCommand: (command: string) =>
-    request<{ messages: AdminMessage[] }>('/api/v1/admin-chat/command', {
+    request<{ messages: AdminMessage[]; threadId?: string }>('/api/v1/admin-chat/command', {
       method: 'POST',
       body: JSON.stringify({ command }),
     }),

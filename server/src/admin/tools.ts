@@ -18,6 +18,12 @@ import { ADMIN_TOOLS, MCP_CALLER, type AdminToolContext } from './registry.js'
  *   `exactOptionalPropertyTypes` off, `annotations: undefined` type-checks and
  *   still adds the key at runtime — a change to what `tools/list` answers.
  *
+ *   `chatOnly` entries are skipped. Their safety is `confirmWith`, which the
+ *   chat enforces and this adapter cannot: there is no operator on the other
+ *   end of an MCP call to type the word. Registering them here would publish
+ *   the desk's editorial decisions to every agent on the Beacon with the gate
+ *   removed, which is not the same tool.
+ *
  *   `versionId` is stripped. It is the chat's field for hanging an Undo on a
  *   message; a `CallToolResult` has nowhere to put it, and handing it to the
  *   SDK on the hope it is dropped is not the same as dropping it.
@@ -45,7 +51,7 @@ export function registerAdminTools(server: McpServer, db: Db, options: AdminTool
     caller: MCP_CALLER,
   }
 
-  for (const entry of ADMIN_TOOLS) {
+  for (const entry of ADMIN_TOOLS.filter((entry) => !entry.chatOnly)) {
     server.registerTool(
       entry.name,
       {

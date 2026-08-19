@@ -6,6 +6,7 @@ import { logEvent } from '../events.js'
 import { listActions } from '../api/actions.js'
 import { runStructured } from '../ports/inference/structured.js'
 import type { InferenceDriver } from '../ports/inference/types.js'
+import type { EnqueuePublish } from '../pipeline/approval.js'
 import { fillPrompt, loadPrompt } from '../prompts/load.js'
 import { renderCatalogue } from './catalogue.js'
 import { appendMessage, HISTORY_MESSAGES, listMessages, type AdminMessage } from './thread.js'
@@ -132,7 +133,10 @@ export async function dispatch(
       ok: false,
       versionId: null,
       confirmWith,
-      text: `${entry.name} changes or deletes configuration, so it is the operator's to confirm. It has been offered to them and will not run until they do.`,
+      // Named by its title rather than by a fixed clause: this list now holds
+      // both "rewrites the charter" and "sends sixty-three posts", and one
+      // sentence describing both would have to describe neither.
+      text: `${entry.name} — ${entry.title.toLowerCase()} — is the operator's to confirm. It has been offered to them and will not run until they do.`,
     }
   }
 
@@ -226,6 +230,18 @@ export interface TurnOptions {
   turnMs?: number
   /** Called after each row is written, so a stream can emit what just landed. */
   onMessage?: (message: AdminMessage) => void
+  /**
+   * The publish queue, carried so the context here matches the one
+   * `runConfirmed` builds.
+   *
+   * Nothing in a turn can reach it today — `approve_publications` is
+   * confirm-gated, so `dispatch` returns an offer before any handler runs. That
+   * is exactly why it belongs here: the gate should be the reason the model
+   * cannot publish, not a dependency that happens to be missing. A context that
+   * differs between the two paths is one where removing a `confirmWith` changes
+   * more than it appears to.
+   */
+  enqueuePublish?: EnqueuePublish
 }
 
 /**
@@ -278,6 +294,7 @@ export async function runTurn(
   const ctx: AdminToolContext = {
     db,
     version: options.version ?? 'dev',
+    ...(options.enqueuePublish ? { enqueuePublish: options.enqueuePublish } : {}),
     caller: CHAT_CALLER,
   }
 

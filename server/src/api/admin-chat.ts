@@ -14,6 +14,7 @@ import {
   type AdminMessage,
 } from '../chat/thread.js'
 import type { Db } from '../db/index.js'
+import type { EnqueuePublish } from '../pipeline/approval.js'
 import type { InferenceDriver } from '../ports/inference/types.js'
 
 /**
@@ -28,6 +29,11 @@ export interface AdminChatOptions {
   driver?: () => InferenceDriver
   /** Overridden in tests so the suite does not wait on real network timeouts. */
   probeTimeoutMs?: number
+  /**
+   * The queue `approve_publications` hands frozen payloads to. Absent means no
+   * publisher is wired and that tool refuses — see `admin/registry.ts`.
+   */
+  enqueuePublish?: EnqueuePublish
 }
 
 /**
@@ -50,13 +56,21 @@ const messageBody = z.object({ message: z.string().min(1).max(8_000) })
 const confirmBody = z.object({ messageId: z.string().min(1), confirm: z.string() })
 const commandBody = z.object({ command: z.string().min(1).max(64) })
 
+/** What a roll answers when the conversation it would put away is mid-turn. */
+const STILL_THINKING = 'this conversation is still thinking — wait for it to finish'
+
 export function registerAdminChatRoutes(
   app: FastifyInstance,
   db: Db,
   version: string,
   options: AdminChatOptions = {},
 ): void {
-  const contextFor = (): AdminToolContext => ({ db, version, caller: CHAT_CALLER })
+  const contextFor = (): AdminToolContext => ({
+    db,
+    version,
+    ...(options.enqueuePublish ? { enqueuePublish: options.enqueuePublish } : {}),
+    caller: CHAT_CALLER,
+  })
   const statusOptions = () => ({
     ...(options.probeTimeoutMs !== undefined ? { probeTimeoutMs: options.probeTimeoutMs } : {}),
     ...(options.driver ? { driver: options.driver } : {}),
@@ -90,6 +104,24 @@ export function registerAdminChatRoutes(
   })
 
   /**
+   * Put the visible conversation away and start a fresh one.
+   *
+   * The old thread is kept, not deleted: it records *why* a change was made,
+   * which the configuration version it points at cannot.
+   *
+   * Shared by `/new` and the DELETE below, because "start a fresh one" has to
+   * mean the same thing however it was asked for — including the refusal while
+   * a turn is still writing rows into the thread being put away. `undefined` is
+   * that refusal; the caller owns the status code, and `STILL_THINKING` is the
+   * wording both doors give for it.
+   */
+  function roll(): { threadId: string; messages: AdminMessage[] } | undefined {
+    const threadId = currentThread(db)
+    if (threadId && inFlight.has(threadId)) return undefined
+    return { threadId: startThread(db), messages: [] }
+  }
+
+  /**
    * A command the desk answers itself, without asking anyone.
    *
    * `/status` is the one that matters: it runs no inference, so it still works
@@ -102,8 +134,26 @@ export function registerAdminChatRoutes(
     if (!parsed.success) return reply.code(400).send({ error: 'a command is required' })
 
     const command = parsed.data.command.trim().toLowerCase()
+
+    /**
+     * `/new` is the one command that answers by replacing the conversation
+     * rather than by adding to it — the roll of §8.1, asked for by hand
+     * instead of waiting eight hours for it.
+     *
+     * It comes back shaped like the DELETE it shares, so a client can tell
+     * "the desk said something" from "the desk started over" by the `threadId`
+     * that only the second one carries.
+     */
+    if (command === '/new') {
+      const rolled = roll()
+      if (!rolled) {
+        return reply.code(409).send({ error: STILL_THINKING })
+      }
+      return rolled
+    }
+
     if (command !== '/status') {
-      return reply.code(400).send({ error: `there is no ${command} command — try /status` })
+      return reply.code(400).send({ error: `there is no ${command} command — try /status or /new` })
     }
 
     const threadId = threadForTurn(db)
@@ -173,6 +223,7 @@ export function registerAdminChatRoutes(
     try {
       await runTurn(db, driver, threadId, parsed.data.message, {
         version,
+        ...(options.enqueuePublish ? { enqueuePublish: options.enqueuePublish } : {}),
         onMessage: (message) => {
           if (open) sse(reply.raw, 'message', message)
         },
@@ -224,17 +275,12 @@ export function registerAdminChatRoutes(
     return { ok: result.ok, message: written }
   })
 
-  /**
-   * Put the visible conversation away and start a fresh one.
-   *
-   * The old thread is kept, not deleted: it records *why* a change was made,
-   * which the configuration version it points at cannot.
-   */
+  /** The `/new` command by another door, for the button that predates it. */
   app.delete('/api/v1/admin-chat', { preHandler: requireSession }, async (_request, reply) => {
-    const threadId = currentThread(db)
-    if (threadId && inFlight.has(threadId)) {
-      return reply.code(409).send({ error: 'this conversation is still thinking — wait for it to finish' })
+    const rolled = roll()
+    if (!rolled) {
+      return reply.code(409).send({ error: STILL_THINKING })
     }
-    return { threadId: startThread(db), messages: [] }
+    return rolled
   })
 }

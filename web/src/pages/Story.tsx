@@ -214,6 +214,7 @@ export function Story() {
   }
 
   const rerun = useMutation({ mutationFn: () => api.rerunStory(id!), onSuccess: invalidate })
+  const drop = useMutation({ mutationFn: () => api.dropStory(id!), onSuccess: invalidate })
   const addPlacement = useMutation({
     mutationFn: () => api.addPlacement(id!, { outlet_id: outletId! }),
     onSuccess: () => {
@@ -280,8 +281,32 @@ export function Story() {
       )}
 
       {story.holdReason && (
-        <Section title="Why it is held" hint="What the filing did not carry. Answer it and re-run.">
+        <Section
+          title="Why it is held"
+          hint="What the filing did not carry. Answer it and re-run — or decide the question is not worth answering."
+        >
           <p className="rounded-md bg-desk-100 px-3 py-2.5 text-sm dark:bg-desk-900">{story.holdReason}</p>
+          {/*
+            Held is the one status that can sit in the action list forever: the
+            desk cannot answer its own question, and nothing else closes the row.
+            The chat can drop these in bulk, so the screen has to be able to drop
+            one — a capability the chat has and the UI does not is the pair that
+            drifts. It reads "Drop", not "Delete": the story stays, in the spiked
+            view, with this question still on it.
+          */}
+          <div className="mt-2 flex items-center gap-3">
+            <button
+              onClick={() => drop.mutate()}
+              disabled={drop.isPending}
+              className="rounded-md bg-desk-100 px-2.5 py-1 text-sm text-desk-700 disabled:opacity-40 dark:bg-desk-900 dark:text-desk-300"
+            >
+              {drop.isPending ? 'Dropping…' : 'Drop it'}
+            </button>
+            <span className="text-xs text-desk-500">
+              Closes it unanswered. It keeps this question and moves to the spiked view.
+            </span>
+          </div>
+          {drop.error && <p className="mt-2 text-xs text-red-600">{(drop.error as Error).message}</p>}
         </Section>
       )}
 

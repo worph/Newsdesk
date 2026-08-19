@@ -28,6 +28,21 @@ import {
 import type { Db } from '../db/index.js'
 import { listEvents, logEvent } from '../events.js'
 import { checkHealth } from '../health.js'
+import {
+  APPROVABLE,
+  approvePublication,
+  dropStory,
+  heldStories,
+  closedReason,
+  openPublications,
+  publicationStatus,
+  rejectPublication,
+  storyStatus,
+  SPIKEABLE,
+  SWEEP_MAX,
+  type EnqueuePublish,
+  type Outcome,
+} from '../pipeline/approval.js'
 import { receiveFilings, type ReceiveOptions } from '../ports/ingest/receive.js'
 import { subscriptionCount } from '../push.js'
 import { getSetting, getTimezone, SETTING, setSetting } from '../settings.js'
@@ -42,10 +57,20 @@ import { getSetting, getTimezone, SETTING, setSetting } from '../settings.js'
  * reached past it to the tables would be a second definition of what a valid
  * desk is, and the first one to drift.
  *
- * What is NOT here is as deliberate. There is no approve, no publish, no spike:
- * a human between every draft and every channel is the product, and anything
- * that could send would delete it. Editorial content is not readable either —
- * this surface is configuration and diagnostics.
+ * What is NOT here is as deliberate — and it used to be more. This list was
+ * configuration and diagnostics only, on the ground that a human between every
+ * draft and every channel is the product. The desk's owner has since asked for
+ * the editorial decisions too, so `spike_publications`, `drop_stories` and
+ * `approve_publications` now live at the bottom of this file.
+ *
+ * Read the comment above them before adding a fourth. In short: they are
+ * `chatOnly`, because the confirmation gate that makes them safe is the chat's
+ * and the MCP adapter has none; and `approve_publications` is the one that
+ * genuinely changed what this product guarantees, which ARCHITECTURE.md
+ * invariant 1 now records rather than hides.
+ *
+ * Editorial *content* is still not readable here: this surface can decide the
+ * fate of a draft by id, and cannot read a word of it.
  *
  * Three things genuinely cannot be done from here, because they need a browser
  * a server does not have: authorising an MCP endpoint over OAuth (see
@@ -127,6 +152,14 @@ export interface AdminToolContext {
    * than refusing the tip.
    */
   receiveOptions?: ReceiveOptions
+  /**
+   * The queue an approval hands its frozen payload to.
+   *
+   * Absent means no publisher is wired on this instance, and `approve_publications`
+   * refuses rather than freezing bytes that would never go — a row left APPROVED
+   * with nothing carrying it is worse than a refusal, because it reads as sent.
+   */
+  enqueuePublish?: EnqueuePublish
   caller: AdminCaller
 }
 
@@ -152,6 +185,16 @@ export interface AdminTool<S extends z.ZodRawShape = z.ZodRawShape> {
    * rule `confirmationFor` follows for the error assistant's remedies.
    */
   confirmWith?: (input: InputOf<S>) => string
+  /**
+   * Kept off the MCP server, and registered only for the chat.
+   *
+   * `confirmWith` above is enforced by `chat/loop.ts`; the MCP adapter has no
+   * operator to ask and simply calls the handler. So a tool whose safety IS the
+   * confirmation cannot go on that surface — over MCP it would be the same
+   * decision with the gate removed, reachable by any agent that can see the
+   * desk's Beacon. `admin/tools.ts` skips these.
+   */
+  chatOnly?: true
   handler: (input: InputOf<S>, ctx: AdminToolContext) => Promise<AdminToolResult>
 }
 
@@ -169,6 +212,60 @@ function tool<S extends z.ZodRawShape>(spec: AdminTool<S>): AdminTool {
 /** JSON, as text, because that is what a tool result carries. */
 function json(value: unknown): AdminToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] }
+}
+
+/**
+ * The ids a caller named that the sweep will not touch, each with the reason.
+ *
+ * Selection is by status, so an id that moved between `list_actions` and the
+ * operator typing the word is simply absent from the set — and absent is
+ * indistinguishable from done. Invariant 6 is the rule this serves: silence and
+ * "nothing happened" must never look alike.
+ */
+function missedFrom(
+  named: string[] | undefined,
+  taken: readonly { id: string }[],
+  reason: (id: string) => string,
+): { id: string; error: string }[] {
+  if (!named) return []
+  const got = new Set(taken.map((row) => row.id))
+  return named.filter((id) => !got.has(id)).map((id) => ({ id, error: reason(id) }))
+}
+
+/**
+ * Run one decision over a selected set, and report both halves.
+ *
+ * Per row rather than in one statement, deliberately: each decision re-checks
+ * the row it is about to move, so a publication that went out while the
+ * operator was reading the proposal is refused by name instead of being swept
+ * up by a `WHERE` clause that no longer describes it. The refusals are the
+ * interesting half of the answer and are returned, not swallowed.
+ */
+async function sweep<T extends { id: string }>(
+  rows: T[],
+  decide: (row: T) => Outcome<unknown>,
+  verb: string,
+  missed: { id: string; error: string }[] = [],
+): Promise<AdminToolResult> {
+  const done: string[] = []
+  const refusals: { id: string; error: string }[] = [...missed]
+
+  for (const row of rows) {
+    const result = decide(row)
+    if (result.ok) done.push(row.id)
+    else refusals.push({ id: row.id, error: result.error })
+  }
+
+  return json({
+    [verb]: done.length,
+    ids: done,
+    ...(refusals.length ? { refused: refusals } : {}),
+    // Named rather than implied: a sweep that stopped at the ceiling has left
+    // work behind, and "63 spiked" would read as "nothing left" without this.
+    ...(rows.length === SWEEP_MAX
+      ? { note: `stopped at the ${SWEEP_MAX}-row ceiling — call again for the rest` }
+      : {}),
+  })
 }
 
 /** Prose, for the two answers a caller reads rather than parses. */
@@ -686,6 +783,166 @@ export const ADMIN_TOOLS: AdminTool[] = [
       return said(`the desk timezone is now ${timezone}`)
     },
   }),
+  // ── the editorial decisions ─────────────────────────────────────────────
+
+  /**
+   * Three tools that decide the fate of work, rather than configuring the desk.
+   *
+   * They exist because a backlog that only grows stops being a list of what
+   * needs you, and clearing sixty-three drafts one screen at a time is not a
+   * thing anyone does. What makes them safe is not their arguments — it is
+   * `confirmWith` plus `chatOnly`, together:
+   *
+   *   **`confirmWith`** means the model cannot run any of these. It proposes,
+   *   the desk writes a row carrying the tool and its arguments, and nothing
+   *   happens until a person types the word. That is the human in the loop; it
+   *   is one human decision per sweep rather than one per payload, and the
+   *   count in the proposal is what they are agreeing to.
+   *
+   *   **`chatOnly`** keeps them off the MCP server, where that gate does not
+   *   exist (`admin/tools.ts` has no operator to ask). Do not remove it to
+   *   "make the surfaces consistent". The surfaces are consistent about what a
+   *   tool *is*; they differ in whether anyone is there to say yes.
+   *
+   * `approve_publications` is the one that changed the product. Invariant 1 used
+   * to read "nothing is published without an explicit human approval of that
+   * exact payload"; with this tool a person can approve sixty-three payloads
+   * they have not read. That was the desk owner's call, made explicitly, and
+   * ARCHITECTURE.md now says what is actually true. Invariant 2 is untouched
+   * and still worth its weight: no inference runs between approval and send, so
+   * what goes out is still exactly the bytes the desk froze.
+   *
+   * Selection is the desk's, never the model's (invariant 3). The model passes
+   * ids it read from `list_actions`, or no ids at all — it never writes a
+   * destination, and `openPublications` decides what "everything waiting" means.
+   */
+
+  tool({
+    name: 'spike_publications',
+    title: 'Spike drafts waiting for approval',
+    chatOnly: true,
+    description:
+      'Kill drafts that are waiting on a person, in bulk — nothing is sent and nothing leaves the desk. Pass `ids` from list_actions to spike specific ones, `outlet_id` to clear one destination, or neither to clear every draft waiting for approval. Spiked rows stay visible in the spiked view with the reason. Refuses anything already approved, scheduled or sent: that is a send this cannot call back.',
+    inputSchema: {
+      ids: z
+        .array(z.string().min(1))
+        .min(1)
+        .max(SWEEP_MAX)
+        .optional()
+        .describe('Publication ids, as list_actions reports them. Omit to take everything waiting.'),
+      outlet_id: z.string().min(1).optional().describe('Narrow the sweep to one outlet.'),
+      reason: z.string().max(500).optional().describe('Recorded on every row and in the log.'),
+    },
+    annotations: { destructiveHint: true },
+    confirmWith: ({ ids }) => (ids ? `spike ${ids.length}` : 'spike all'),
+    handler: async ({ ids, outlet_id: outletId, reason }, ctx) => {
+      const rows = openPublications(ctx.db, SPIKEABLE, {
+        ...(ids ? { ids } : {}),
+        ...(outletId ? { outletId } : {}),
+      })
+      return sweep(
+        rows,
+        (row) => rejectPublication(ctx.db, row.id, reason),
+        'spiked',
+        missedFrom(ids, rows, (id) => {
+          const status = publicationStatus(ctx.db, id)
+          if (!status) return 'no such publication'
+          return closedReason(status) ?? `this is ${status.toLowerCase()}`
+        }),
+      )
+    },
+  }),
+
+  tool({
+    name: 'drop_stories',
+    title: 'Drop held stories nobody answered',
+    chatOnly: true,
+    description:
+      'Close held stories — the ones the desk could not write from and asked a question about. Pass `ids` from list_actions, or none to drop every held story. They move to the spiked view with the reason; the question they were held on is kept. Only held stories can be dropped: a placed story is decided by spiking its drafts, one destination at a time.',
+    inputSchema: {
+      ids: z
+        .array(z.string().min(1))
+        .min(1)
+        .max(SWEEP_MAX)
+        .optional()
+        .describe('Story ids, as list_actions reports them. Omit to take every held story.'),
+      reason: z.string().max(500).optional().describe('Recorded on every story and in the log.'),
+    },
+    annotations: { destructiveHint: true },
+    confirmWith: ({ ids }) => (ids ? `drop ${ids.length}` : 'drop all'),
+    handler: async ({ ids, reason }, ctx) => {
+      const rows = heldStories(ctx.db, ids ? { ids } : {})
+      return sweep(
+        rows,
+        (row) => dropStory(ctx.db, row.id, reason),
+        'dropped',
+        missedFrom(ids, rows, (id) => {
+          const status = storyStatus(ctx.db, id)
+          if (!status) return 'no such story'
+          if (status === 'DROPPED') return 'this was already dropped'
+          return `only a held story can be dropped — this one is ${status.toLowerCase()}`
+        }),
+      )
+    },
+  }),
+
+  /**
+   * The one that sends.
+   *
+   * Everything else on this surface can be undone from a restore point or read
+   * back out of the spiked view. This cannot: approving queues the frozen
+   * payload, and a message that has gone to a Discord channel has gone.
+   *
+   * So it refuses harder than the rest. No publisher wired is a refusal rather
+   * than a silent APPROVED row; the confirmation word is `publish` rather than
+   * `approve`, because that is what happens; and it takes only rows that are
+   * genuinely waiting at the gate (`APPROVABLE`) — never a FAILED row, whose
+   * way back to the wire is `retry` and its already-frozen bytes.
+   */
+  tool({
+    name: 'approve_publications',
+    title: 'Approve drafts and send them',
+    chatOnly: true,
+    description:
+      'Approve drafts and queue them for delivery. THIS PUBLISHES: each row freezes its merged payload and goes to the wire at its slot. Pass `ids` from list_actions, `outlet_id` for one destination, or neither to approve every draft waiting. The desk cannot call any of it back. Nothing here reads the drafts — whoever confirms is approving copy nobody at this surface has seen.',
+    inputSchema: {
+      ids: z
+        .array(z.string().min(1))
+        .min(1)
+        .max(SWEEP_MAX)
+        .optional()
+        .describe('Publication ids, as list_actions reports them. Omit to take everything waiting.'),
+      outlet_id: z.string().min(1).optional().describe('Narrow the sweep to one outlet.'),
+    },
+    annotations: { destructiveHint: true },
+    confirmWith: ({ ids }) => (ids ? `publish ${ids.length}` : 'publish all'),
+    handler: async ({ ids, outlet_id: outletId }, ctx) => {
+      if (!ctx.enqueuePublish) {
+        return refused(
+          'no publisher is wired on this instance — approving would freeze payloads that never go out',
+        )
+      }
+      const enqueuePublish = ctx.enqueuePublish
+      const rows = openPublications(ctx.db, APPROVABLE, {
+        ...(ids ? { ids } : {}),
+        ...(outletId ? { outletId } : {}),
+      })
+      return sweep(
+        rows,
+        (row) => approvePublication(ctx.db, row.id, { enqueuePublish }),
+        'approved',
+        missedFrom(ids, rows, (id) => {
+          const status = publicationStatus(ctx.db, id)
+          if (!status) return 'no such publication'
+          if (status === 'FAILED') {
+            return 'this already had bytes approved — retry re-sends those, approving would re-merge them'
+          }
+          return closedReason(status) ?? `this is ${status.toLowerCase()}`
+        }),
+      )
+    },
+  }),
+
 ]
 
 export function adminTool(name: string): AdminTool | undefined {

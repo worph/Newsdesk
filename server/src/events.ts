@@ -100,6 +100,7 @@ export const EVENT_CODES = {
   RESCHEDULED: { category: 'editorial', label: 'rescheduled' },
   ROUTE_ADDED: { category: 'editorial', label: 'placement added' },
   ROUTE_REJECTED: { category: 'editorial', label: 'placement spiked' },
+  STORY_DROPPED: { category: 'editorial', label: 'story dropped' },
   STORY_RERUN: { category: 'editorial', label: 'story re-queued' },
   COMPOSED: { category: 'editorial', label: 'written at the desk' },
 

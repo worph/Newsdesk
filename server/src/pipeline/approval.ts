@@ -451,6 +451,197 @@ export function abandonDraft(db: Db, id: string, reason?: string): Outcome<{ sta
 }
 
 /**
+ * How many rows one bulk decision may touch.
+ *
+ * A ceiling rather than a page: a sweep is a thing a person confirmed by
+ * reading a count, and a count that quietly meant "the first two hundred of
+ * six thousand" would be the wrong number to have agreed to. The tools report
+ * what they left behind so the next call can take it.
+ */
+export const SWEEP_MAX = 200
+
+/**
+ * The publications a bulk decision may touch.
+ *
+ * Selection lives here, beside the decisions, so a caller cannot assemble a set
+ * the decision would then refuse one row at a time — and so "everything waiting"
+ * means the same statuses to the chat as `closedReason` means to the route.
+ *
+ * Ordered by the story's date, which is `listActions`' order too (`actions.ts:201`)
+ * — a publication row carries no date of its own. That matters: the operator
+ * confirms a sweep having read that list, so a sweep that took a different
+ * hundred than the hundred they were shown would be the wrong hundred.
+ */
+export function openPublications(
+  db: Db,
+  statuses: readonly string[],
+  options: { ids?: string[]; outletId?: string; limit?: number } = {},
+): { id: string; status: string; storyId: string; outletId: string }[] {
+  const { ids, outletId, limit } = options
+  return db
+    .select({
+      id: schema.publications.id,
+      status: schema.publications.status,
+      storyId: schema.publications.storyId,
+      outletId: schema.publications.outletId,
+    })
+    .from(schema.publications)
+    .leftJoin(schema.stories, eq(schema.publications.storyId, schema.stories.id))
+    .where(
+      and(
+        inArray(schema.publications.status, [...statuses]),
+        ...(ids ? [inArray(schema.publications.id, ids)] : []),
+        ...(outletId ? [eq(schema.publications.outletId, outletId)] : []),
+      ),
+    )
+    .orderBy(schema.stories.createdAt, schema.publications.id)
+    .limit(Math.min(limit ?? SWEEP_MAX, SWEEP_MAX))
+    .all()
+}
+
+/** What `rejectPublication` will accept — the two statuses `closedReason` lets through. */
+export const SPIKEABLE = ['AWAITING_APPROVAL', 'FAILED'] as const
+
+/**
+ * What `approvePublication` will accept.
+ *
+ * Narrower than `SPIKEABLE` on purpose: a FAILED row has already been approved
+ * once and its frozen payload is still on it, so the way to send it again is
+ * `retry`, which re-sends those bytes. Approving it here would re-merge from
+ * configuration that may have moved — the one thing invariant 2 exists to stop.
+ */
+export const APPROVABLE = ['AWAITING_APPROVAL'] as const
+
+/**
+ * The current status of rows a caller named, for the half of a sweep that will
+ * not happen.
+ *
+ * A sweep selects by status, so an id the operator named that has since moved
+ * is simply not in the set — and saying nothing about it would be the worst
+ * failure this design has. They confirmed three and got two; which one, and
+ * why, is the whole answer.
+ */
+export function publicationStatus(db: Db, id: string): string | undefined {
+  return db
+    .select({ status: schema.publications.status })
+    .from(schema.publications)
+    .where(eq(schema.publications.id, id))
+    .get()?.status
+}
+
+/** As above, for stories. */
+export function storyStatus(db: Db, id: string): string | undefined {
+  return db
+    .select({ status: schema.stories.status })
+    .from(schema.stories)
+    .where(eq(schema.stories.id, id))
+    .get()?.status
+}
+
+/** Held stories, for the drop sweep. Oldest question first. */
+export function heldStories(
+  db: Db,
+  options: { ids?: string[]; limit?: number } = {},
+): { id: string; title: string; holdReason: string | null }[] {
+  const { ids, limit } = options
+  return db
+    .select({
+      id: schema.stories.id,
+      title: schema.stories.title,
+      holdReason: schema.stories.holdReason,
+    })
+    .from(schema.stories)
+    .where(and(eq(schema.stories.status, 'HELD'), ...(ids ? [inArray(schema.stories.id, ids)] : [])))
+    .orderBy(schema.stories.createdAt, schema.stories.id)
+    .limit(Math.min(limit ?? SWEEP_MAX, SWEEP_MAX))
+    .all()
+}
+
+/**
+ * The gate's other answer: this one is not running.
+ *
+ * Lifted out of `api/publications.ts` when the administrator chat gained the
+ * power to spike in bulk, for the reason at the top of this file — a second
+ * implementation, added for a second surface, is how this design actually
+ * breaks. `closedReason` is the whole of the guard: a row that has committed to
+ * a time may already be halfway out the door, and an abort the desk cannot
+ * honour is worse than a refusal.
+ */
+export function rejectPublication(db: Db, id: string, reason?: string): Outcome<{ status: 'REJECTED' }> {
+  const loaded = load(db, id)
+  if (!loaded) return { ok: false, status: 404, error: 'no such publication' }
+
+  const closed = closedReason(loaded.publication.status)
+  if (closed) return { ok: false, status: 409, error: closed }
+
+  // A switched-off proposal leaves a REJECTED row rather than disappearing:
+  // that row is half of the override diff.
+  db.update(schema.publications)
+    .set({ status: 'REJECTED', error: reason ?? null })
+    .where(eq(schema.publications.id, id))
+    .run()
+
+  logEvent(db, {
+    level: 'info',
+    actor: 'human',
+    code: 'ROUTE_REJECTED',
+    storyId: loaded.publication.storyId,
+    publicationId: id,
+    message: `spiked for ${loaded.outlet.name}${reason ? `: ${reason}` : ''}`,
+  })
+
+  return { ok: true, status: 'REJECTED' }
+}
+
+/**
+ * Drop a story the desk asked a question about and nobody answered.
+ *
+ * `DROPPED` is not a new state — the managing editor already spikes into it for
+ * a duplicate and for a story that placed nowhere (`managing-editor.ts:200`),
+ * and the spiked view already reads it. What is new is a *person* putting a
+ * story there, which is why the event is editorial rather than pipeline: the
+ * desk did not run out of destinations, someone decided.
+ *
+ * Only a HELD story can be dropped this way. A PLACED one has publications
+ * under it that are the real decision — spiking those is `rejectPublication`,
+ * one destination at a time, and a story-level drop that silently closed them
+ * would be a send cancelled by a screen that never named it.
+ */
+export function dropStory(db: Db, id: string, reason?: string): Outcome<{ status: 'DROPPED' }> {
+  const story = db.select().from(schema.stories).where(eq(schema.stories.id, id)).get()
+  if (!story) return { ok: false, status: 404, error: 'no such story' }
+  if (story.status === 'DROPPED') return { ok: false, status: 409, error: 'this was already dropped' }
+  if (story.status !== 'HELD') {
+    return {
+      ok: false,
+      status: 409,
+      error: `only a held story can be dropped — this one is ${story.status.toLowerCase()}`,
+    }
+  }
+
+  db.update(schema.stories)
+    .set({
+      status: 'DROPPED',
+      // The question it was held on is why it was dropped, so it survives the
+      // drop: `holdReason` stays, and this records the answer nobody gave.
+      dropReason: reason ?? 'dropped unanswered at the desk',
+    })
+    .where(eq(schema.stories.id, id))
+    .run()
+
+  logEvent(db, {
+    level: 'info',
+    actor: 'human',
+    code: 'STORY_DROPPED',
+    storyId: id,
+    message: `dropped unanswered${reason ? `: ${reason}` : ''}`,
+    ...(story.holdReason ? { detail: { heldOn: story.holdReason } } : {}),
+  })
+
+  return { ok: true, status: 'DROPPED' }
+}
+
+/**
  * Move a scheduled send. The payload is deliberately untouched: this changes
  * when the approved bytes go out, never what they are, so it needs no
  * re-approval and cannot become a way to edit past the gate.

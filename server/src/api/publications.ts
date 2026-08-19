@@ -21,6 +21,7 @@ import {
   load,
   mergeContext,
   proposalFor,
+  rejectPublication,
   reschedulePublication,
   slotsOf,
   withdrawPublication,
@@ -359,32 +360,12 @@ export function registerPublicationRoutes(
   app.post('/api/v1/publications/:id/reject', { preHandler: requireSession }, async (request, reply) => {
     const { id } = request.params as { id: string }
     const parsed = rejectBody.safeParse(request.body ?? {})
-    const loaded = load(db, id)
-    if (!loaded) return reply.code(404).send({ error: 'no such publication' })
-    // Spiking an approved publication would be an abort the desk cannot honour
-    // — the send may already be in flight — so it closes here too.
-    const closed = closedReason(loaded.publication.status)
-    if (closed) return reply.code(409).send({ error: closed })
-
     const reason = parsed.success ? parsed.data.reason : undefined
 
-    // A switched-off proposal leaves a REJECTED row rather than disappearing:
-    // that row is half of the override diff.
-    db.update(schema.publications)
-      .set({ status: 'REJECTED', error: reason ?? null })
-      .where(eq(schema.publications.id, id))
-      .run()
-
-    logEvent(db, {
-      level: 'info',
-      actor: 'human',
-      code: 'ROUTE_REJECTED',
-      storyId: loaded.publication.storyId,
-      publicationId: id,
-      message: `spiked for ${loaded.outlet.name}${reason ? `: ${reason}` : ''}`,
-    })
-
-    return { status: 'REJECTED' }
+    // Spiking an approved publication would be an abort the desk cannot honour
+    // — the send may already be in flight — and `rejectPublication` owns that
+    // judgement, so the chat's bulk spike and this route refuse alike.
+    return settle(reply, rejectPublication(db, id, reason))
   })
 
   /** Re-send the frozen payload after a delivery failure. No re-merge. */

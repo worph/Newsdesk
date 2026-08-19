@@ -184,17 +184,42 @@ stay the real ones — `outletSchema`, `voiceSchema` and the rest straight from 
 
 Everything else is already written.
 
-### 4.3 What it cannot do
+### 4.3 What it can decide, and what it cannot do
 
-**It cannot approve, publish or spike.** Not because of anything about chat — because a human
-between every draft and every channel is the product (invariant 1), and an administrator that could
-send would delete it.
+This section used to say the chat could not approve, publish or spike. **That changed, deliberately,
+at the desk owner's request**: clearing sixty-three drafts one screen at a time is not a thing
+anyone does, and a backlog that only grows stops being a list of what needs you. Three tools now
+decide the fate of work rather than configure the desk:
 
-This costs nothing to enforce: those verbs are not in `admin/tools.ts`, so a catalogue built from
-that registry does not contain them. Same list, same absence, one definition. The three things that
-need a browser the server does not have — authorising an endpoint over OAuth, signing the publishing
-browser into a destination, changing the desk password — remain out of reach for the same reasons
-`admin-mcp.md` gives.
+| Tool | Does | Reversible |
+|---|---|---|
+| `spike_publications` | kills drafts waiting on a person, in bulk | yes — the spiked view keeps them |
+| `drop_stories` | closes held stories nobody answered | yes — the question is kept with them |
+| `approve_publications` | **freezes payloads and sends them** | no |
+
+Two things make that safe enough to ship, and they only work together:
+
+**The model proposes; a person runs it.** All three carry `confirmWith`, so `dispatch` refuses to
+run them and writes an offer instead (§6). The word carries the count — `spike 12`, `publish all` —
+because the count is the part of a bulk proposal that holds the consequence, and a confirmation that
+did not name it would be agreement to the wrong thing.
+
+**They are `chatOnly`.** The MCP adapter has no operator to ask and simply calls handlers, so
+registering these there would be the same decisions with the gate removed, reachable by any agent
+that can see the desk's Beacon. `admin/tools.ts` filters them out and `admin-mcp.md` still promises
+what it always did.
+
+What this costs is honest and worth writing down: **`approve_publications` means a person can
+approve payloads they have not read.** Invariant 1 used to guarantee that could not happen and now
+says what is actually true. Invariant 2 is untouched — no inference runs between approval and send,
+so what goes out is still exactly the bytes the desk froze — and that is what stops this being a
+model publishing prose it wrote a moment ago.
+
+**It still cannot read editorial content.** The desk can decide the fate of a draft by id and cannot
+read a word of it, which is the reason the prompt makes the chat say so every time it offers to
+approve. The three things that need a browser the server does not have — authorising an endpoint
+over OAuth, signing the publishing browser into a destination, changing the desk password — remain
+out of reach for the same reasons `admin-mcp.md` gives.
 
 ### 4.4 One redaction
 
@@ -320,12 +345,17 @@ Migrations are append-only — `npm run db:generate`, never a rewritten baseline
 ### 8.1 One visible conversation, rolled on idle
 
 There is a `thread_id`, and the operator never sees it. **The chat is the newest thread**: opening
-the page shows the conversation you were in, and there is no list, no New button, and no title to
-maintain.
+the page shows the conversation you were in, and there is no list, no history to browse and no title
+to maintain.
 
 The roll is the whole mechanism. On a turn, if the newest thread's `updatedAt` is more than **8
 hours** old, start a new one instead of appending. A working session is a day and overnight is a
 real boundary, so the seam lands where a person would have put it.
+
+The same roll can be asked for by hand — **`/new`**, or the *New conversation* button, which is the
+same code path. That is not a thread list creeping in: it starts one and names none, and the
+operator still holds no id. It exists because the reason to want a boundary usually arrives before
+the eight hours do — the subject changed, and the last twenty messages are about the previous one.
 
 This exists to keep §3.1 honest. The prompt carries the last 20 messages; in one unbounded rolling
 thread that window is silently untrue — the outlet you set up three weeks ago is still visibly on
@@ -374,8 +404,11 @@ one entry at a time and prefer the narrow tool over `write_config`; say what you
 before you do it; when the configuration cannot do what they asked, say that instead of approximating
 it.
 
-And one thing it must say plainly: **you cannot approve, publish or spike, and you should not offer
-to.** A model that offers and then fails is worse than one that never offered.
+And one section it must carry, because three of the tools decide the fate of work rather than
+configure the desk (§4.3): **propose these, never claim them.** Say the count before the sweep, never
+widen what was asked for, prefer the reversible decision, and — every time approval is offered — say
+plainly that neither of you has read the copy, because nothing on this surface can. A model that
+says "I have spiked them" when it has only offered to is the failure mode this section exists for.
 
 ## 10. API surface
 
@@ -385,7 +418,15 @@ to.** A model that offers and then fails is worse than one that never offered.
 | `POST /api/v1/admin-chat/messages` | run one turn; SSE, so tool calls appear as they happen |
 | `POST /api/v1/admin-chat/confirm` | run a proposed destructive call, by message id (§6) |
 | `POST /api/v1/admin-chat/status` | the Start routine — no inference, no thread required |
+| `POST /api/v1/admin-chat/command` | a command the desk answers itself — `/status`, `/new`; no inference |
 | `DELETE /api/v1/admin-chat` | clear the visible conversation (starts a fresh thread; keeps the old rows) |
+| `POST /api/v1/stories/:id/drop` | close a held story unanswered — the screen's half of `drop_stories` |
+
+A command either answers *in* the conversation or *replaces* it, and the reply says which: `/status`
+comes back as a pair of ordinary turns, `/new` comes back as the empty thread it just started,
+carrying the `threadId` that only a roll has. `/new` and the `DELETE` are one function with two
+doors, refusal included — neither will put away a conversation that is still writing rows into
+itself, and both answer that with a 409.
 
 No thread ids in the URLs, because §8.1 says the operator never holds one. The server picks the
 thread; the client asks for "the conversation".
@@ -438,8 +479,9 @@ already set) while every property of the loop is unit-tested without it.
 
 | Invariant | How it holds |
 |---|---|
-| 1 — nothing publishes without human approval | the catalogue has no approve, publish or spike; §4.3 |
-| 2 — no inference between approval and send | untouched; this surface never reaches a publication |
+| 1 — nothing publishes without human approval | **weakened here, on purpose.** `approve_publications` releases many payloads on one confirmation, so approval is no longer per-payload and no longer after reading. The human survives; the reading does not. §4.3, and ARCHITECTURE.md invariant 1 |
+| 2 — no inference between approval and send | untouched, and now load-bearing: a sweep freezes stored bytes, so what goes out is still never something a model wrote after approval |
+| 6 — a drop is recorded and visible | a sweep names what it did not take and why — an id that moved between the proposal and the confirmation must not read the same as one that was handled |
 | 3 — the model never authors a destination | it fills `outletSchema`, whose destination key is a validated literal; the same rule the writer gets |
 | 4 — ingested text is data | only `read_publications` carries such text, fenced through `splitBundle`; §6 |
 | 7 — the internal log is authoritative | the Start routine and the whole page render with every port down; §5 |
